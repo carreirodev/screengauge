@@ -1,0 +1,5 @@
+# Local task list, kept out of git by the owner's choice
+tasks.md
+
+# Temporary git worktrees created by subagents
+.claude/worktrees/
