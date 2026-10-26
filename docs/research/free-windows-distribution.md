@@ -1,5 +1,7 @@
 # Como distribuir de graça um app Windows de código aberto
 
+> Nota (2026-10-26): depois desta pesquisa, o app foi renomeado de Pixler para Pixmeter, porque "Pixler" soava igual a Pixlr. A seção 7 e o item 7 do resumo tratam do nome anterior.
+
 Pesquisa do ticket WPC-268. Consulta feita em 2026-10-26. Todas as informações vêm de fontes oficiais (Microsoft Learn, documentação do GitHub, páginas dos provedores). O que não consegui confirmar está marcado como "não confirmado".
 
 ## Resumo
@@ -7,7 +9,7 @@ Pesquisa do ticket WPC-268. Consulta feita em 2026-10-26. Todas as informações
 1. O caminho mais barato e simples para começar é o **GitHub Releases** (grátis) com um `.exe` portátil ou um instalador. O custo real é o aviso de segurança do Windows (SmartScreen), que aparece para programas novos ou sem assinatura.
 2. O **winget** (instalar por `winget install`) é grátis e aceita executáveis portáteis, ZIP, Inno Setup, MSI e MSIX. A condição é que o instalador fique num endereço estável (por exemplo, o GitHub Releases). Não exige assinatura, mas exige instalação silenciosa.
 3. A **Microsoft Store** hoje é grátis para pessoa física (sem taxa de cadastro, com verificação de identidade por documento e selfie). Se o app for empacotado como **MSIX**, a Microsoft assina de graça e o aviso do SmartScreen nunca aparece. Não encontrei caminho especial para código aberto; o caminho comum já é gratuito.
-4. **Assinatura de código** (para o Windows confiar no programa): a opção da Microsoft (Artifact Signing, antigo Trusted Signing) custa a partir de **US$ 9,99 por mês**, mas para pessoa física só vale para quem mora nos **Estados Unidos ou Canadá**. O Brasil não está na lista de países. Alternativa gratuita para código aberto: **SignPath Foundation**, com regras que o Pixler provavelmente cumpre.
+4. **Assinatura de código** (para o Windows confiar no programa): a opção da Microsoft (Artifact Signing, antigo Trusted Signing) custa a partir de **US$ 9,99 por mês**, mas para pessoa física só vale para quem mora nos **Estados Unidos ou Canadá**. O Brasil não está na lista de países. Alternativa gratuita para código aberto: **SignPath Foundation**, com regras que o Pixmeter provavelmente cumpre.
 5. Certificado EV não vale mais a pena: a Microsoft diz que ele **não evita mais** o aviso do SmartScreen. Mesmo assinado, o programa mostra aviso até acumular reputação (semanas e centenas de instalações).
 6. **Aviso de nova versão** sem quebrar "nada sai do computador": a opção mais honesta é **não checar sozinho** e deixar um botão/link "Ver novidades" que abre a página de releases no navegador. Se um dia houver checagem automática, deve ser **opcional (desligada por padrão)**, consultando só a página de releases do GitHub. Na Store com MSIX, a própria Store atualiza e o app não precisa falar com a internet.
 7. **Nome "Pixler"**: não achei produto Windows com esse nome, nem pacote no winget. Existem repositórios pequenos no GitHub com o nome (nenhum é régua de tela) e um nome parecido registrado, **Pixlr**. Marcas (INPI, USPTO, EUIPO) e a Store **não consegui confirmar** por ferramenta; recomendo checagem manual antes de divulgar.
@@ -29,7 +31,7 @@ Pesquisa do ticket WPC-268. Consulta feita em 2026-10-26. Todas as informações
   - o link do instalador deve ser a página oficial de lançamentos do autor (sites de download de terceiros não são aceitos) e deve ser estável e específico da versão;
   - deve instalar de forma silenciosa ("All tools must support a silent install");
   - o app não pode conter malware, nem baixar e executar código que mude o que ele promete; precisa ser testável;
-  - se coletar dados pessoais, precisa de política de privacidade (o Pixler não coleta);
+  - se coletar dados pessoais, precisa de política de privacidade (o Pixmeter não coleta);
   - o nome do pacote e do publicador devem bater com o que aparece em "Aplicativos instalados".
   Fonte: [Windows Package Manager repository policies](https://learn.microsoft.com/en-us/windows/package-manager/package/windows-package-manager-policies).
 - **Assinatura:** a documentação consultada não a exige para entrar no winget. (Outras páginas recomendam certificado para evitar o SmartScreen.)
@@ -77,7 +79,7 @@ Opções:
 | **Certificado EV** | mais caro (valor não consultado) | idem, com token físico (não confirmado) | sem vantagem para o SmartScreen hoje |
 | **Store com MSIX** | grátis | conta de desenvolvedor | Microsoft assina; sem aviso |
 
-Leitura para o Pixler: o caminho mais barato e sem aviso é **Store com MSIX**; fora da Store, o caminho gratuito mais provável é **SignPath Foundation**. Artifact Signing só vale se o dono morar nos EUA/Canadá (ou abrir uma empresa em país listado), o que não parece ser o caso.
+Leitura para o Pixmeter: o caminho mais barato e sem aviso é **Store com MSIX**; fora da Store, o caminho gratuito mais provável é **SignPath Foundation**. Artifact Signing só vale se o dono morar nos EUA/Canadá (ou abrir uma empresa em país listado), o que não parece ser o caso.
 
 ## 6. Como avisar sobre versão nova sem quebrar "nada sai do computador"
 
