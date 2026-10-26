@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>body{margin:0;font-family:system-ui,sans-serif;background:#d9d7d3}a{color:oklch(0.55 0.14 230)}a:hover{color:oklch(0.45 0.14 230)}</style>
+</helmet>
+<div style="min-height:100vh;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,640px),1fr))">
+
+<div data-screen-label="Tema escuro" style="position:relative;min-height:420px;display:flex;align-items:center;justify-content:center;padding:48px 24px;background:radial-gradient(80% 60% at 30% 20%,#353a4a 0%,transparent 60%),radial-gradient(70% 60% at 80% 90%,#273338 0%,transparent 60%),#1a1b1f">
+  <sc-if value="{{ d.open }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;align-items:center;gap:12px;perspective:800px">
+      <sc-if value="{{ d.expanded }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;gap:10px;padding:9px;border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.09),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),inset 0 -8px 16px rgba(0,0,0,.35),0 18px 40px -12px rgba(0,0,0,.8);backdrop-filter:blur(14px)">
+          <button title="Ajustar à tela" onClick="{{ d.fit.pick }}" style="position:relative;width:46px;height:46px;border:none;border-radius:13px;cursor:pointer;display:grid;place-items:center;color:{{ d.fit.c }};background:linear-gradient(180deg,#555a64 0%,#2a2d33 55%,#1a1b1f 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.25),inset 0 -3px 6px rgba(0,0,0,.5),0 4px 8px rgba(0,0,0,.55);transition:transform .12s" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px) scale(.95)">
+            <sc-if value="{{ d.fit.on }}"><span style="position:absolute;inset:0;border-radius:13px;background:linear-gradient(180deg,oklch(0.92 0.1 195) 0%,oklch(0.74 0.15 205) 50%,oklch(0.5 0.14 220) 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.6),inset 0 -3px 6px rgba(0,0,0,.3),0 0 22px oklch(0.75 0.15 205 / .6),0 4px 8px rgba(0,0,0,.5)"></span></sc-if>
+            <svg style="position:relative" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path><rect x="9" y="9" width="6" height="6" rx="1"></rect></svg>
+          </button>
+          <button title="Mover" onClick="{{ d.move.pick }}" style="position:relative;width:46px;height:46px;border:none;border-radius:13px;cursor:pointer;display:grid;place-items:center;color:{{ d.move.c }};background:linear-gradient(180deg,#555a64 0%,#2a2d33 55%,#1a1b1f 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.25),inset 0 -3px 6px rgba(0,0,0,.5),0 4px 8px rgba(0,0,0,.55);transition:transform .12s" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px) scale(.95)">
+            <sc-if value="{{ d.move.on }}"><span style="position:absolute;inset:0;border-radius:13px;background:linear-gradient(180deg,oklch(0.92 0.1 195) 0%,oklch(0.74 0.15 205) 50%,oklch(0.5 0.14 220) 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.6),inset 0 -3px 6px rgba(0,0,0,.3),0 0 22px oklch(0.75 0.15 205 / .6),0 4px 8px rgba(0,0,0,.5)"></span></sc-if>
+            <svg style="position:relative" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"></path></svg>
+          </button>
+          <button title="Largura" onClick="{{ d.width.pick }}" style="position:relative;width:46px;height:46px;border:none;border-radius:13px;cursor:pointer;display:grid;place-items:center;color:{{ d.width.c }};background:linear-gradient(180deg,#555a64 0%,#2a2d33 55%,#1a1b1f 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.25),inset 0 -3px 6px rgba(0,0,0,.5),0 4px 8px rgba(0,0,0,.55);transition:transform .12s" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px) scale(.95)">
+            <sc-if value="{{ d.width.on }}"><span style="position:absolute;inset:0;border-radius:13px;background:linear-gradient(180deg,oklch(0.92 0.1 195) 0%,oklch(0.74 0.15 205) 50%,oklch(0.5 0.14 220) 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.6),inset 0 -3px 6px rgba(0,0,0,.3),0 0 22px oklch(0.75 0.15 205 / .6),0 4px 8px rgba(0,0,0,.5)"></span></sc-if>
+            <svg style="position:relative" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M8 8l-4 4 4 4M16 8l4 4-4 4"></path></svg>
+          </button>
+          <button title="Altura" onClick="{{ d.height.pick }}" style="position:relative;width:46px;height:46px;border:none;border-radius:13px;cursor:pointer;display:grid;place-items:center;color:{{ d.height.c }};background:linear-gradient(180deg,#555a64 0%,#2a2d33 55%,#1a1b1f 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.25),inset 0 -3px 6px rgba(0,0,0,.5),0 4px 8px rgba(0,0,0,.55);transition:transform .12s" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px) scale(.95)">
+            <sc-if value="{{ d.height.on }}"><span style="position:absolute;inset:0;border-radius:13px;background:linear-gradient(180deg,oklch(0.92 0.1 195) 0%,oklch(0.74 0.15 205) 50%,oklch(0.5 0.14 220) 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.6),inset 0 -3px 6px rgba(0,0,0,.3),0 0 22px oklch(0.75 0.15 205 / .6),0 4px 8px rgba(0,0,0,.5)"></span></sc-if>
+            <svg style="position:relative" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M8 8l4-4 4 4M8 16l4 4 4-4"></path></svg>
+          </button>
+        </div>
+        <div style="display:flex;gap:10px;padding:9px;border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.09),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),inset 0 -8px 16px rgba(0,0,0,.35),0 18px 40px -12px rgba(0,0,0,.8);backdrop-filter:blur(14px)">
+          <button title="Capturar tela" onClick="{{ d.shot.pick }}" style="position:relative;width:46px;height:46px;border:none;border-radius:13px;cursor:pointer;display:grid;place-items:center;color:{{ d.shot.c }};background:linear-gradient(180deg,#555a64 0%,#2a2d33 55%,#1a1b1f 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.25),inset 0 -3px 6px rgba(0,0,0,.5),0 4px 8px rgba(0,0,0,.55);transition:transform .12s" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px) scale(.95)">
+            <sc-if value="{{ d.shot.on }}"><span style="position:absolute;inset:0;border-radius:13px;background:linear-gradient(180deg,oklch(0.92 0.1 195) 0%,oklch(0.74 0.15 205) 50%,oklch(0.5 0.14 220) 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.6),inset 0 -3px 6px rgba(0,0,0,.3),0 0 22px oklch(0.75 0.15 205 / .6),0 4px 8px rgba(0,0,0,.5)"></span></sc-if>
+            <svg style="position:relative" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
+          </button>
+          <button title="Zoom" onClick="{{ d.zoom.pick }}" style="position:relative;width:46px;height:46px;border:none;border-radius:13px;cursor:pointer;display:grid;place-items:center;color:{{ d.zoom.c }};background:linear-gradient(180deg,#555a64 0%,#2a2d33 55%,#1a1b1f 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.25),inset 0 -3px 6px rgba(0,0,0,.5),0 4px 8px rgba(0,0,0,.55);transition:transform .12s" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px) scale(.95)">
+            <sc-if value="{{ d.zoom.on }}"><span style="position:absolute;inset:0;border-radius:13px;background:linear-gradient(180deg,oklch(0.92 0.1 195) 0%,oklch(0.74 0.15 205) 50%,oklch(0.5 0.14 220) 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.6),inset 0 -3px 6px rgba(0,0,0,.3),0 0 22px oklch(0.75 0.15 205 / .6),0 4px 8px rgba(0,0,0,.5)"></span></sc-if>
+            <svg style="position:relative" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6"></circle><path d="M15.5 15.5L20 20"></path></svg>
+          </button>
+        </div>
+      </sc-if>
+      <div style="display:flex;gap:8px;padding:8px;border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.09),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),inset 0 -8px 16px rgba(0,0,0,.35),0 18px 40px -12px rgba(0,0,0,.8);backdrop-filter:blur(14px)">
+        <button title="Recolher" onClick="{{ d.toggle }}" style="width:34px;height:34px;border:none;border-radius:10px;cursor:pointer;display:grid;place-items:center;color:#aeb3bd;background:linear-gradient(180deg,#4a4e57,#1e2024 85%);box-shadow:inset 0 1px 1px rgba(255,255,255,.2),0 3px 6px rgba(0,0,0,.5);transition:transform .12s,color .15s" style-hover="color:#ffffff" style-active="transform:scale(.92)"><svg style="transform:{{ d.chev }};transition:transform .3s" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg></button>
+        <button title="Fechar" onClick="{{ d.close }}" style="width:34px;height:34px;border:none;border-radius:10px;cursor:pointer;display:grid;place-items:center;color:#aeb3bd;background:linear-gradient(180deg,#4a4e57,#1e2024 85%);box-shadow:inset 0 1px 1px rgba(255,255,255,.2),0 3px 6px rgba(0,0,0,.5);transition:transform .12s,color .15s" style-hover="color:#ffffff;background:linear-gradient(180deg,oklch(0.75 0.17 25),oklch(0.48 0.17 25) 85%)" style-active="transform:scale(.92)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ d.closed }}" hint-placeholder-val="{{ false }}">
+    <button title="Reabrir" onClick="{{ d.reopen }}" style="width:52px;height:52px;border:none;border-radius:15px;cursor:pointer;display:grid;place-items:center;background:linear-gradient(180deg,oklch(0.92 0.1 195),oklch(0.74 0.15 205) 50%,oklch(0.5 0.14 220));box-shadow:inset 0 1px 1px rgba(255,255,255,.6),0 0 24px oklch(0.75 0.15 205 / .5),0 6px 12px rgba(0,0,0,.6)" style-active="transform:scale(.94)"><span style="width:14px;height:14px;border-radius:50%;background:#0b1418;box-shadow:inset 0 1px 2px rgba(255,255,255,.3)"></span></button>
+  </sc-if>
+</div>
+
+<div data-screen-label="Tema claro" style="position:relative;min-height:420px;display:flex;align-items:center;justify-content:center;padding:48px 24px;background:radial-gradient(80% 60% at 30% 20%,#f4f3f0 0%,transparent 60%),radial-gradient(70% 60% at 80% 90%,#d4dbdf 0%,transparent 60%),#e0ded9">
+  <sc-if value="{{ l.open }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;align-items:center;gap:12px">
+      <sc-if value="{{ l.expanded }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;gap:10px;padding:9px;border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.85),rgba(255,255,255,.45));border:1px solid rgba(255,255,255,.9);box-shadow:inset 0 -6px 14px rgba(70,60,45,.08),0 18px 36px -14px rgba(70,60,45,.35),0 2px 4px rgba(70,60,45,.08);backdrop-filter:blur(14px)">
+          <button title="Ajustar à tela" onClick="{{ l.fit.pick }}" style="position:relative;width:46px;height:46px;border:none;border-radius:13px;cursor:pointer;display:grid;place-items:center;color:{{ l.fit.c }};background:linear-gradient(180deg,#ffffff 0%,#f1efeb 50%,#d6d2cb 100%);box-shadow:inset 0 1px 1px #ffffff,inset 0 -3px 5px rgba(70,60,45,.15),0 4px 8px rgba(70,60,45,.22);transition:transform .12s" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px) scale(.95)">
+            <sc-if value="{{ l.fit.on }}"><span style="position:absolute;inset:0;border-radius:13px;background:linear-gradient(180deg,oklch(0.85 0.1 220) 0%,oklch(0.62 0.16 235) 55%,oklch(0.45 0.15 245) 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.6),inset 0 -3px 6px rgba(0,0,0,.2),0 0 18px oklch(0.62 0.16 235 / .45),0 4px 8px rgba(40,50,80,.3)"></span></sc-if>
+            <svg style="position:relative" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path><rect x="9" y="9" width="6" height="6" rx="1"></rect></svg>
+          </button>
+          <button title="Mover" onClick="{{ l.move.pick }}" style="position:relative;width:46px;height:46px;border:none;border-radius:13px;cursor:pointer;display:grid;place-items:center;color:{{ l.move.c }};background:linear-gradient(180deg,#ffffff 0%,#f1efeb 50%,#d6d2cb 100%);box-shadow:inset 0 1px 1px #ffffff,inset 0 -3px 5px rgba(70,60,45,.15),0 4px 8px rgba(70,60,45,.22);transition:transform .12s" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px) scale(.95)">
+            <sc-if value="{{ l.move.on }}"><span style="position:absolute;inset:0;border-radius:13px;background:linear-gradient(180deg,oklch(0.85 0.1 220) 0%,oklch(0.62 0.16 235) 55%,oklch(0.45 0.15 245) 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.6),inset 0 -3px 6px rgba(0,0,0,.2),0 0 18px oklch(0.62 0.16 235 / .45),0 4px 8px rgba(40,50,80,.3)"></span></sc-if>
+            <svg style="position:relative" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"></path></svg>
+          </button>
+          <button title="Largura" onClick="{{ l.width.pick }}" style="position:relative;width:46px;height:46px;border:none;border-radius:13px;cursor:pointer;display:grid;place-items:center;color:{{ l.width.c }};background:linear-gradient(180deg,#ffffff 0%,#f1efeb 50%,#d6d2cb 100%);box-shadow:inset 0 1px 1px #ffffff,inset 0 -3px 5px rgba(70,60,45,.15),0 4px 8px rgba(70,60,45,.22);transition:transform .12s" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px) scale(.95)">
+            <sc-if value="{{ l.width.on }}"><span style="position:absolute;inset:0;border-radius:13px;background:linear-gradient(180deg,oklch(0.85 0.1 220) 0%,oklch(0.62 0.16 235) 55%,oklch(0.45 0.15 245) 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.6),inset 0 -3px 6px rgba(0,0,0,.2),0 0 18px oklch(0.62 0.16 235 / .45),0 4px 8px rgba(40,50,80,.3)"></span></sc-if>
+            <svg style="position:relative" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M8 8l-4 4 4 4M16 8l4 4-4 4"></path></svg>
+          </button>
+          <button title="Altura" onClick="{{ l.height.pick }}" style="position:relative;width:46px;height:46px;border:none;border-radius:13px;cursor:pointer;display:grid;place-items:center;color:{{ l.height.c }};background:linear-gradient(180deg,#ffffff 0%,#f1efeb 50%,#d6d2cb 100%);box-shadow:inset 0 1px 1px #ffffff,inset 0 -3px 5px rgba(70,60,45,.15),0 4px 8px rgba(70,60,45,.22);transition:transform .12s" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px) scale(.95)">
+            <sc-if value="{{ l.height.on }}"><span style="position:absolute;inset:0;border-radius:13px;background:linear-gradient(180deg,oklch(0.85 0.1 220) 0%,oklch(0.62 0.16 235) 55%,oklch(0.45 0.15 245) 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.6),inset 0 -3px 6px rgba(0,0,0,.2),0 0 18px oklch(0.62 0.16 235 / .45),0 4px 8px rgba(40,50,80,.3)"></span></sc-if>
+            <svg style="position:relative" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M8 8l4-4 4 4M8 16l4 4 4-4"></path></svg>
+          </button>
+        </div>
+        <div style="display:flex;gap:10px;padding:9px;border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.85),rgba(255,255,255,.45));border:1px solid rgba(255,255,255,.9);box-shadow:inset 0 -6px 14px rgba(70,60,45,.08),0 18px 36px -14px rgba(70,60,45,.35),0 2px 4px rgba(70,60,45,.08);backdrop-filter:blur(14px)">
+          <button title="Capturar tela" onClick="{{ l.shot.pick }}" style="position:relative;width:46px;height:46px;border:none;border-radius:13px;cursor:pointer;display:grid;place-items:center;color:{{ l.shot.c }};background:linear-gradient(180deg,#ffffff 0%,#f1efeb 50%,#d6d2cb 100%);box-shadow:inset 0 1px 1px #ffffff,inset 0 -3px 5px rgba(70,60,45,.15),0 4px 8px rgba(70,60,45,.22);transition:transform .12s" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px) scale(.95)">
+            <sc-if value="{{ l.shot.on }}"><span style="position:absolute;inset:0;border-radius:13px;background:linear-gradient(180deg,oklch(0.85 0.1 220) 0%,oklch(0.62 0.16 235) 55%,oklch(0.45 0.15 245) 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.6),inset 0 -3px 6px rgba(0,0,0,.2),0 0 18px oklch(0.62 0.16 235 / .45),0 4px 8px rgba(40,50,80,.3)"></span></sc-if>
+            <svg style="position:relative" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
+          </button>
+          <button title="Zoom" onClick="{{ l.zoom.pick }}" style="position:relative;width:46px;height:46px;border:none;border-radius:13px;cursor:pointer;display:grid;place-items:center;color:{{ l.zoom.c }};background:linear-gradient(180deg,#ffffff 0%,#f1efeb 50%,#d6d2cb 100%);box-shadow:inset 0 1px 1px #ffffff,inset 0 -3px 5px rgba(70,60,45,.15),0 4px 8px rgba(70,60,45,.22);transition:transform .12s" style-hover="transform:translateY(-2px)" style-active="transform:translateY(1px) scale(.95)">
+            <sc-if value="{{ l.zoom.on }}"><span style="position:absolute;inset:0;border-radius:13px;background:linear-gradient(180deg,oklch(0.85 0.1 220) 0%,oklch(0.62 0.16 235) 55%,oklch(0.45 0.15 245) 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.6),inset 0 -3px 6px rgba(0,0,0,.2),0 0 18px oklch(0.62 0.16 235 / .45),0 4px 8px rgba(40,50,80,.3)"></span></sc-if>
+            <svg style="position:relative" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6"></circle><path d="M15.5 15.5L20 20"></path></svg>
+          </button>
+        </div>
+      </sc-if>
+      <div style="display:flex;gap:8px;padding:8px;border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.85),rgba(255,255,255,.45));border:1px solid rgba(255,255,255,.9);box-shadow:inset 0 -6px 14px rgba(70,60,45,.08),0 18px 36px -14px rgba(70,60,45,.35),0 2px 4px rgba(70,60,45,.08);backdrop-filter:blur(14px)">
+        <button title="Recolher" onClick="{{ l.toggle }}" style="width:34px;height:34px;border:none;border-radius:10px;cursor:pointer;display:grid;place-items:center;color:#5b5852;background:linear-gradient(180deg,#ffffff,#dcd8d1 90%);box-shadow:inset 0 1px 1px #ffffff,0 3px 6px rgba(70,60,45,.22);transition:transform .12s,color .15s" style-hover="color:#111111" style-active="transform:scale(.92)"><svg style="transform:{{ l.chev }};transition:transform .3s" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg></button>
+        <button title="Fechar" onClick="{{ l.close }}" style="width:34px;height:34px;border:none;border-radius:10px;cursor:pointer;display:grid;place-items:center;color:#5b5852;background:linear-gradient(180deg,#ffffff,#dcd8d1 90%);box-shadow:inset 0 1px 1px #ffffff,0 3px 6px rgba(70,60,45,.22);transition:transform .12s,color .15s" style-hover="color:#ffffff;background:linear-gradient(180deg,oklch(0.75 0.17 25),oklch(0.52 0.18 25) 85%)" style-active="transform:scale(.92)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ l.closed }}" hint-placeholder-val="{{ false }}">
+    <button title="Reabrir" onClick="{{ l.reopen }}" style="width:52px;height:52px;border:none;border-radius:15px;cursor:pointer;display:grid;place-items:center;background:linear-gradient(180deg,oklch(0.85 0.1 220),oklch(0.62 0.16 235) 55%,oklch(0.45 0.15 245));box-shadow:inset 0 1px 1px rgba(255,255,255,.6),0 0 20px oklch(0.62 0.16 235 / .4),0 6px 12px rgba(40,50,80,.3)" style-active="transform:scale(.94)"><span style="width:14px;height:14px;border-radius:50%;background:#ffffff;box-shadow:inset 0 -1px 2px rgba(0,0,0,.2)"></span></button>
+  </sc-if>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const TOOLS = ['fit', 'move', 'width', 'height', 'shot', 'zoom'];
+const INK = { dark: ['#c3c7cf', '#06141a'], light: ['#4b4843', '#ffffff'] };
+class Component extends DCLogic {
+  state = { dark: { tool: 'move', collapsed: false, closed: false }, light: { tool: 'move', collapsed: false, closed: false } };
+  mk(key) {
+    const s = this.state[key];
+    const set = p => this.setState(st => ({ [key]: { ...st[key], ...p } }));
+    const o = {};
+    TOOLS.forEach(t => { const on = s.tool === t; o[t] = { on, c: INK[key][on ? 1 : 0], pick: () => set({ tool: t }) }; });
+    return Object.assign(o, {
+      expanded: !s.collapsed, open: !s.closed, closed: s.closed,
+      chev: s.collapsed ? 'rotate(180deg)' : 'rotate(-90deg)',
+      toggle: () => set({ collapsed: !s.collapsed }),
+      close: () => set({ closed: true }),
+      reopen: () => set({ closed: false })
+    });
+  }
+  renderVals() { return { d: this.mk('dark'), l: this.mk('light') }; }
+}
+</script>
+</body>
+</html>
