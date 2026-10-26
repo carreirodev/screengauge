@@ -7,32 +7,10 @@ Pesquisa do ticket WPC-266. Fontes consultadas em **26/10/2026**, todas primári
 1. Captura de tela, leitura de pixels, atalhos globais e ícone na bandeja são recursos do próprio Windows, ao alcance de qualquer tecnologia que fale direto com ele [[31]][31] [[35]][35] [[73]][73]. O que separa as opções é o peso da instalação, a nitidez em monitores de escalas diferentes e o trabalho das telas de configuração com tema claro/escuro.
 2. A Microsoft já fez esta ferramenta: a Régua de Tela do PowerToys desenha a camada em C++ puro (Win32, Direct2D, Windows.Graphics.Capture) e usa WinUI 3 só na barra de ferramentas; código aberto, MIT [[37]][37] [[39]][39] [[40]][40].
 3. Descartados: Electron (runtime de 158 MB, suporte de ~6 meses por versão), Flutter (janelas múltiplas experimentais), Qt, WinForms e Avalonia. O WPF ficou de fora por pouco: exige o .NET (60 MB) ou uma cópia inteira dele, e tem bugs abertos de posição de janela na escala por monitor [[3]][3] [[4]][4] [[25]][25].
-4. **Finalistas.** Os três desenham a camada do mesmo jeito (nativo); o que muda são as telas de configuração:
+4. **Finalistas.** A e B desenham a camada em código nativo, como o PowerToys; o que muda entre eles são as telas de configuração. C tem dois caminhos para a camada, ambos com riscos em aberto:
    - **(A) Nativo puro (Rust ou C++):** o mais leve e com controle total; telas e tema escuro feitos à mão.
    - **(B) Híbrido estilo PowerToys (núcleo nativo + WinUI 3):** visual do Windows 11 pronto; duas linguagens e app maior.
-   - **(C) Tauri 2 (Rust + telas web no WebView2 do Windows 11):** leve e fácil de fazer com IA; duas linguagens e bugs de janela entre monitores abertos.
-
-## O que o Pixmeter exige, em termos simples
-
-- **Escala (DPI) por monitor.** O Windows aumenta textos e imagens em telas de alta resolução, por exemplo 150–175% num monitor 4K e 100–125% num Full HD. Para ficar nítido nos dois ao mesmo tempo, o app precisa usar o modo "Per-Monitor V2" (disponível desde o Windows 10 versão 1703) e redesenhar cada janela na escala do monitor onde ela está [[21]][21].
-  - Em Win32 puro, essa adaptação é responsabilidade do próprio app. No WPF e no WinForms, o framework faz uma parte [[21]][21].
-- **Camada transparente, sempre no topo, uma por monitor.** A régua tem de enxergar os pixels físicos reais de cada tela. É a exigência mais difícil e a que mais separa as opções.
-- **Captura e leitura exata de pixels**, **atalhos globais**, **ícone na bandeja**, **telas de configuração** e **dois idiomas** (inglês e português do Brasil).
-
-## Peças que vêm do Windows e servem para todas as opções nativas
-
-- **Captura de tela**, por dois caminhos:
-  - **Windows.Graphics.Capture**: captura um monitor inteiro quadro a quadro [[31]][31]. Durante a captura, o Windows desenha uma borda amarela em volta do que está sendo capturado [[31]][31].
-    - Para tirar a borda, o app precisa pedir consentimento ao usuário e declarar uma permissão no manifesto do pacote [[32]][32] [[33]][33]. **Não confirmado:** se um app distribuído sem pacote (instalador comum) consegue remover a borda. O PowerToys tenta remover (`IsBorderRequired(false)`) [[37]][37].
-  - **Desktop Duplication (DXGI)**: entrega a imagem de cada monitor quadro a quadro, sempre no formato de cor BGRA de 8 bits [[34]][34]. A documentação não menciona borda amarela.
-- **Atalhos globais**: `RegisterHotKey`, disponível desde o Windows Vista [[35]][35].
-  - Falha se a combinação de teclas já estiver registrada por outro programa.
-  - A tecla F12 é reservada para depuração.
-  - Combinações com a tecla Windows são reservadas ao sistema [[35]][35].
-- **Ícone na bandeja**: `Shell_NotifyIcon`, disponível desde o Windows XP [[73]][73].
-- **Tema claro e escuro sem framework.** O Windows não pinta sozinho um app Win32 com o tema escuro.
-  - O app precisa detectar o tema e redesenhar a própria interface. O Windows só oferece a barra de título escura, via `DWMWA_USE_IMMERSIVE_DARK_MODE` [[36]][36].
-  - A Microsoft diz que o WinUI 3 detecta o tema do sistema automaticamente [[36]][36].
+   - **(C) Tauri 2 (Rust + telas web no WebView2 do Windows 11):** leve e fácil de fazer com IA; duas linguagens. A camada em janela Tauri esbarra num bug aberto de tamanho entre monitores; em janela nativa ao lado do Tauri, a viabilidade não foi confirmada.
 
 ## Tabela 1 — Fatos de versão, suporte e instalação
 
@@ -47,7 +25,7 @@ Tamanhos: só entram números oficiais ou medidos no servidor oficial de downloa
 | **Electron** | 45.0.0, publicado em 21/10/2026 [[52]][52] | Só as 3 versões principais mais recentes têm suporte, e sai uma nova a cada 8 semanas [[50]][50]. O fim previsto da 45 é 27/04/2027 [[51]][51] | Nada além do app: o Chromium vai dentro dele | Runtime Windows x64 (zip) da 45.0.0: **158,2 MB** [[52]][52] |
 | **Rust direto no Win32/Direct2D** (crates `windows`) | Crates focadas 0.100.0, de 03/09/2026. A crate "guarda-chuva" `windows` está na 0.62.2, de 06/10/2025 [[59]][59] | Nenhuma política de suporte encontrada (não confirmado). O projeto está na organização da Microsoft no GitHub [[57]][57]. Versões abaixo de 1.0 | Nenhum framework. A dependência do runtime do Visual C++ pode ser evitada com link estático: não confirmado | Não confirmado |
 | **C++ direto no Win32/Direct2D** | Faz parte do Windows SDK; não há versão própria | Nenhum cronograma próprio encontrado; Win32 e Direct2D fazem parte do Windows (não confirmado) | Nenhum framework. Visual C++ Redistributable ou link estático: não confirmado | Não confirmado |
-| **Avalonia** (.NET) | 12.1.4, de 09/10/2026, e 11.3.22, de 11/09/2026 [[60]][60] | "Avalonia 12.0 é uma versão LTS, com cinco anos de atualizações de segurança". Isso aparece entre os benefícios do plano pago (Enterprise); de graça, só as "correções de segurança na versão atual" [[63]][63] | .NET (mínimo .NET 8, recomendado .NET 10) [[62]][62], ou uma cópia dele dentro do app | Não confirmado |
+| **Avalonia** (.NET) | 12.1.4, de 09/10/2026, e 11.3.22, de 11/09/2026 [[60]][60] | A página de suporte diz "Avalonia 12.0 é uma versão LTS, com cinco anos de atualizações de segurança" e, em outro trecho, lista "versões LTS com cinco anos de atualizações de segurança" entre os benefícios do plano pago (Enterprise). Para quem não paga, cita "correções de segurança na versão atual" [[63]][63]. Se o LTS vale para quem não paga: não confirmado | .NET (mínimo .NET 8, recomendado .NET 10) [[62]][62], ou uma cópia dele dentro do app | Não confirmado |
 | **Flutter** | Documentação reflete a 3.47 [[67]][67] | Não confirmado | Não confirmado | Não confirmado |
 | **Qt 6** | 6.12.0, e 6.8.8 na linha LTS [[69]][69] | 6.8 LTS até 08/10/2029; 6.12 até 30/09/2031 [[69]][69]. O LTS de 5 anos é comercial. A edição gratuita recebe correções só até a próxima versão menor (cerca de 6 meses); depois, com 12 meses de atraso [[70]][70] | As bibliotecas do Qt vão dentro do app (não confirmado) | Não confirmado |
 
@@ -64,9 +42,9 @@ Notas: **Bom / Médio / Fraco** são uma avaliação minha sobre os fatos citado
 | **Electron** | **Médio/Fraco**: bug de posição e tamanho no modo por monitor aberto desde 2017 [[56]][56] | **Médio**: só JavaScript/TypeScript, mas uma versão nova a cada 8 semanas [[50]][50] | **Médio**: muito ativo, mas obriga a atualizar a cada poucos meses [[50]][50] [[51]][51] | **Fraco**: 158 MB [[52]][52] | Janela transparente sem redimensionar [[54]][54]; pode ignorar o mouse e ficar acima da barra de tarefas [[55]][55] |
 | **Rust direto** | Camada: **Bom** (controle total da escala) [[21]][21]. Telas: **Fraco** — tema escuro e controles feitos à mão [[36]][36] | **Médio**: compilador rígido e uma linguagem, mas muito código de ligação com o Windows e crates que ainda mudam (abaixo de 1.0) [[57]][57] [[59]][59] | **Médio/Bom**: as APIs são do Windows; as crates não têm política de suporte publicada | **Bom** (tamanho não medido) | Total controle (Win32 + Direct2D) |
 | **C++ direto** | Igual ao Rust; é o caminho usado pela Microsoft na Régua do PowerToys [[37]][37] [[38]][38] | **Médio/Fraco**: o compilador não pega erros de memória (avaliação) | **Bom**: as APIs são do próprio Windows (cronograma formal não confirmado) | **Bom** (tamanho não medido) | Total controle (Win32 + Direct2D) |
-| **Avalonia** | **Médio**: bugs abertos com monitores de escalas diferentes [[65]][65] | **Médio/Bom**: C# | **Médio**: suporte longo só no plano pago [[63]][63] | **Médio** (tamanho não confirmado) | Não confirmado |
+| **Avalonia** | **Médio**: bugs abertos com monitores de escalas diferentes [[65]][65] | **Médio/Bom**: C# | **Médio**: LTS de 5 anos anunciado, mas sem confirmação de que vale para quem não paga [[63]][63] | **Médio** (tamanho não confirmado) | Não confirmado |
 | **Flutter** | **Fraco** para o Pixmeter: as APIs de janelas "não são ainda para uso em produção" e só existem no canal de desenvolvimento [[66]][66] | Não avaliado | Não confirmado | Não confirmado | Precisa de várias janelas → **não atende hoje** |
-| **Qt 6** | **Bom** em escala: Per-Monitor V2 por padrão, com escalas fracionárias [[68]][68] | **Médio**: C++/QML | **Médio**: LTS comercial; a edição gratuita tem correções curtas [[70]][70] | **Médio** (não confirmado) | Não confirmado |
+| **Qt 6** | **Médio/Bom** em escala: Per-Monitor V2 por padrão, com escalas fracionárias [[68]][68]. Porém, a escala pode deixar "buracos" na geometria da área de trabalho entre monitores [[68]][68], o que pesa para posicionar uma camada por monitor. Bugs conhecidos não pesquisados | **Médio**: C++/QML | **Médio**: LTS comercial; a edição gratuita tem correções curtas [[70]][70] | **Médio** (não confirmado) | Não confirmado |
 
 ### Requisitos funcionais por tecnologia (resumo)
 
@@ -81,111 +59,13 @@ Notas: **Bom / Médio / Fraco** são uma avaliação minha sobre os fatos citado
 | Qt 6 | `QSystemTrayIcon` [[76]][76] | Não confirmado | Não confirmado | Qt Linguist (arquivos TS/QM) [[72]][72] |
 | Flutter | Não confirmado | Não confirmado | Não confirmado | Não confirmado |
 
-## Detalhes por candidato
-
-### WinUI 3 / Windows App SDK
-
-- É a tecnologia de interface mais nova da Microsoft para apps desktop. A linha 2.0 foi a primeira mudança de versão principal desde a 1.0, de novembro de 2021 [[7]][7].
-- **Distribuição sem a Microsoft Store**, em dois modos:
-  - O app depende do runtime instalado. Nesse caso, o usuário precisa do Windows App Runtime (instalador x64 de 120,2 MB) e do Visual C++ Redistributable [[10]][10] [[11]][11].
-  - O app leva o runtime junto ("autocontido"). A pasta fica "significativamente maior", e cada atualização carrega o runtime inteiro de novo [[9]][9].
-  - Duas páginas oficiais, ambas de 02/10/2026, se contradizem sobre gerar um único `.exe`. Uma diz que não é possível [[8]][8]. A outra diz que é possível desde a 1.5, com os arquivos extraídos para uma pasta temporária na primeira execução [[9]][9].
-- Compilação nativa antecipada (Native AOT) é suportada desde a 1.6. O desenvolvedor fica responsável por evitar que o "enxugamento" remova código necessário [[12]][12].
-- **Riscos para a camada do Pixmeter:**
-  - Janela transparente e sem borda é um pedido aberto desde 30/08/2019, com 141 comentários. O contorno usado pela comunidade é a biblioteca WinUIEx (`TransparentTintBackdrop`), que não é da Microsoft [[13]][13].
-  - Bug aberto: ao abrir uma janela WinUI 3 (Windows App SDK 1.6), as janelas "sempre no topo" de outros programas perdem essa condição [[14]][14]. **Não confirmado:** se o bug continua na 2.x e se afeta a camada do próprio app.
-  - Escala: há bugs abertos, como menus cortados após mudança de DPI [[15]][15] e uma dica de arrastar que não respeita a escala por monitor [[16]][16]. Um bug antigo de janela que não se redimensionava entre monitores foi fechado [[17]][17]. A 2.5.1 ainda corrigiu um defeito visual em escala de 175% [[7]][7].
-- **Bandeja:** não há API no Windows App SDK; o pedido está aberto desde 08/04/2021 [[18]][18]. Um pedido de maio de 2026 foi fechado como duplicado desse [[19]][19].
-
-### WPF no .NET 10
-
-- **Tema:** o tema Fluent, com modos claro e escuro e cor de destaque, chegou no .NET 9 [[22]][22].
-  - Ligar o tema pelo XAML funciona. Trocar o tema pelo código ainda é experimental (aviso WPF0001) [[22]][22].
-  - No .NET 10, o suporte ao Fluent "ainda está em andamento" [[23]][23].
-- **Transparência:** suportada com `AllowsTransparency`, que exige janela sem borda [[24]][24].
-- **Escala por monitor:** a tabela da Microsoft diz que apps WPF nativos escalam por monitor [[21]][21]. Há bugs abertos no modo Per-Monitor V2:
-  - `Window.Left/Top` quebrados, aberto desde 03/02/2021 e atualizado em 21/10/2026 [[25]][25].
-  - `SystemParameters.WorkArea` quebrado [[26]][26].
-  - Isso pesa para o Pixmeter, que precisa posicionar uma camada exatamente sobre cada monitor.
-- **Tamanho:** sem o .NET instalado, o app precisa levar o runtime. O trimming está desativado para WPF ("quase nenhum app WPF roda depois do trimming") [[4]][4] [[27]][27]. Como o Native AOT exige trimming, também não se aplica [[5]][5].
-
-### WinForms no .NET 10
-
-- O modo escuro deixou de ser experimental no .NET 10 [[28]][28].
-- **Escala por monitor:** a Microsoft a descreve como "limitada, para alguns controles" [[21]][21]. Há bugs abertos com controles mal escalados em monitor secundário [[29]][29].
-- Mesmas limitações de tamanho do WPF (sem trimming) [[4]][4].
-
-### Tauri 2
-
-- **Tecnologia:** núcleo em Rust; telas desenhadas pelo WebView2 (o motor do Edge embutido no Windows). Funciona do Windows 10 em diante. Licença MIT/Apache-2.0 [[41]][41].
-- **Recursos:**
-  - Bandeja é um recurso do núcleo [[46]][46].
-  - Atalhos globais vêm de um plugin oficial, que exige Rust 1.90 ou mais novo [[47]][47].
-- **WebView2:**
-  - Por padrão, o instalador baixa o WebView2 só se ele faltar (0 MB a mais). Embutir o instalador offline acrescenta cerca de 127 MB [[44]][44].
-  - A documentação da Microsoft dá mais de 250 MB para a versão "fixa" do runtime; a do Tauri dá cerca de 180 MB [[44]][44] [[49]][49]. Nenhuma das duas é necessária no Windows 11.
-  - O WebView2 se atualiza sozinho, mas um app que fica aberto o tempo todo (como um app de bandeja) continua usando a versão antiga até reiniciar [[49]][49].
-- **Riscos:**
-  - Bug aberto no Windows: uma janela criada num monitor secundário com escala diferente nasce com o tamanho errado. Foi relatado na versão 1.x; **não confirmado** se acontece na 2.x [[48]][48].
-  - Não há API de captura no Tauri; isso seria código Rust direto no Windows (não confirmado).
-  - A 3.0 em alfa indica uma migração no futuro [[42]][42].
-
-### Electron
-
-- **Runtime grande:** o runtime do Windows tem 158,2 MB [[52]][52].
-- **Atualização constante:** sai uma versão principal a cada 8 semanas e só as 3 últimas têm suporte [[50]][50]. Na prática, cada versão vive cerca de 6 meses; a 45 sai do suporte em 27/04/2027 [[51]][51].
-- **Recursos:**
-  - Captura com `desktopCapturer` [[53]][53]; atalhos globais [[74]][74] e bandeja [[75]][75].
-  - Janelas transparentes não podem ser redimensionadas [[54]][54]. Podem ignorar o mouse e ficar acima da barra de tarefas [[55]][55].
-- **Escala por monitor:** um bug de posição e tamanho está aberto desde 20/10/2017, com 71 comentários [[56]][56]. Contraria diretamente o critério 4 (leve).
-
-### Rust direto no Win32 / Direct2D
-
-- **Ferramentas:**
-  - As crates da Microsoft cobrem COM, WinRT, janelas e Direct2D (`windows-canvas`, `windows-window`, `windows-composition`) [[57]][57].
-  - O próprio repositório avisa que as crates "guarda-chuva" `windows` e `windows-sys` "acrescentam peso de dependências e mudanças frequentes de versão" [[57]][57].
-  - Todas as versões estão abaixo de 1.0 [[59]][59].
-  - Existe uma biblioteca para usar WinUI 3 a partir do Rust (`windows-reactor`), mas ela "está em preview" e **não entra na comparação** pela regra de usar só versões estáveis [[58]][58].
-- **Escala e tema:** a escala por monitor e o tema escuro são responsabilidade do app [[21]][21] [[36]][36].
-
-### C++ direto no Win32 / Direct2D
-
-- **É a referência da Microsoft:** a Régua de Tela do PowerToys usa esse caminho [[37]][37] [[38]][38]:
-  - um arquivo de captura por monitor com Windows.Graphics.Capture;
-  - arquivos separados de Direct2D e de desenho da camada.
-- **Barra de ferramentas:** é um projeto WinUI 3 separado, sem pacote e autocontido, que depende da biblioteca WinUIEx [[39]][39].
-- **Licença:** o código do PowerToys é MIT, então pode servir de referência [[40]][40].
-
-### Avalonia
-
-- **Versões:**
-  - A Avalonia 12 foi anunciada em 07/04/2026, mirando o .NET 10 [[61]][61].
-  - O mínimo é o .NET 8 [[62]][62]. O suporte do .NET 8 acaba em 10/11/2026 [[1]][1], então na prática o Pixmeter teria de usar o .NET 10.
-- **Desenho:** o desenho no Windows passou a ser só por Skia; o Direct2D foi removido [[62]][62].
-- **Recursos:** bandeja embutida [[64]][64]. O anúncio da 12 cita inicialização mais rápida com Native AOT [[61]][61].
-- **Riscos:** bugs abertos com escalas mistas [[65]][65]. Ser multiplataforma não traz ganho ao Pixmeter, que é só para Windows.
-
-### Flutter
-
-- A 3.44 (20/05/2026) traz as APIs de janelas como experimentais: "ainda não são para uso em produção", só no canal de desenvolvimento [[66]][66].
-- O Pixmeter precisa de uma janela por monitor mais as janelas de configuração. Por isso, **não atende hoje**.
-
-### Qt 6
-
-- **Escala:** Per-Monitor V2 por padrão e escalas fracionárias automáticas [[68]][68].
-- **Suporte:**
-  - O LTS de 5 anos vale da 6.8 em diante [[70]][70] e está disponível "com as licenças comerciais" [[71]][71].
-  - Para usuários de código aberto, só as primeiras correções de cada LTS saem de graça [[69]][69].
-- **Recursos:** bandeja com `QSystemTrayIcon` [[76]][76]; tradução com Qt Linguist [[72]][72].
-- **Não analisados:** as obrigações da licença de código aberto do Qt (não confirmado).
-
-### Não avaliados nesta pesquisa
-
-.NET MAUI, Uno Platform, Slint, egui e outros frameworks Rust de interface ficaram fora do levantamento. Não houve tempo de verificá-los em fonte primária, e a escolha não depende deles.
-
 ## Finalistas
 
-Os três finalistas compartilham a mesma base para a parte crítica, a camada sobre a tela: janelas Win32 com Direct2D, uma por monitor, no modo Per-Monitor V2, com captura por Windows.Graphics.Capture ou Desktop Duplication. É o mesmo desenho da Régua do PowerToys [[37]][37] [[38]][38]. A diferença está em **como se fazem as telas de configuração** e no **peso** que isso traz.
+A e B usam a mesma base para a parte crítica, a camada sobre a tela: janelas Win32 com Direct2D, uma por monitor, no modo Per-Monitor V2, com captura por Windows.Graphics.Capture ou Desktop Duplication. É o mesmo desenho da Régua do PowerToys [[37]][37] [[38]][38]. Entre A e B, a diferença está em **como se fazem as telas de configuração** e no **peso** que isso traz.
+
+C tem dois caminhos para a camada, e nenhum está confirmado:
+- **Desenhar a camada em janelas do próprio Tauri (WebView):** esbarra no bug aberto de tamanho de janela entre monitores [[48]][48], e a nitidez de linhas finas em escala fracionária não foi confirmada.
+- **Abrir janelas Win32 nativas em Rust ao lado do Tauri:** a viabilidade não foi confirmada. Se funcionar, C vira na prática "núcleo nativo + telas web".
 
 ### (A) Nativo puro: Rust ou C++ direto no Win32 / Direct2D
 
@@ -238,6 +118,132 @@ Os três finalistas compartilham a mesma base para a parte crítica, a camada so
 - Sem datas de suporte publicadas [[43]][43], com a 3.0 já em alfa [[42]][42].
 - Tema claro/escuro e visual do Windows 11 nas telas: feitos pelo projeto.
 
+## O que o Pixmeter exige, em termos simples
+
+- **Escala (DPI) por monitor.** O Windows aumenta textos e imagens em telas de alta resolução, por exemplo 150–175% num monitor 4K e 100–125% num Full HD. Para ficar nítido nos dois ao mesmo tempo, o app precisa usar o modo "Per-Monitor V2" (disponível desde o Windows 10 versão 1703) e redesenhar cada janela na escala do monitor onde ela está [[21]][21].
+  - Em Win32 puro, essa adaptação é responsabilidade do próprio app. No WPF e no WinForms, o framework faz uma parte [[21]][21].
+- **Camada transparente, sempre no topo, uma por monitor.** A régua tem de enxergar os pixels físicos reais de cada tela. É a exigência mais difícil e a que mais separa as opções.
+- **Captura e leitura exata de pixels**, **atalhos globais**, **ícone na bandeja**, **telas de configuração** e **dois idiomas** (inglês e português do Brasil).
+
+## Peças que vêm do Windows e servem para todas as opções nativas
+
+- **Captura de tela**, por dois caminhos:
+  - **Windows.Graphics.Capture**: captura um monitor inteiro quadro a quadro [[31]][31]. Durante a captura, o Windows desenha uma borda amarela em volta do que está sendo capturado [[31]][31].
+    - Para tirar a borda, o app precisa pedir consentimento ao usuário e declarar uma permissão no manifesto do pacote [[32]][32] [[33]][33]. **Não confirmado:** se um app distribuído sem pacote (instalador comum) consegue remover a borda. O PowerToys tenta remover (`IsBorderRequired(false)`) [[37]][37].
+  - **Desktop Duplication (DXGI)**: entrega a imagem de cada monitor quadro a quadro, sempre no formato de cor BGRA de 8 bits [[34]][34]. A documentação não menciona borda amarela.
+- **Atalhos globais**: `RegisterHotKey`, disponível desde o Windows Vista [[35]][35].
+  - Falha se a combinação de teclas já estiver registrada por outro programa.
+  - A tecla F12 é reservada para depuração.
+  - Combinações com a tecla Windows são reservadas ao sistema [[35]][35].
+- **Ícone na bandeja**: `Shell_NotifyIcon`, disponível desde o Windows XP [[73]][73].
+- **Tema claro e escuro sem framework.** O Windows não pinta sozinho um app Win32 com o tema escuro.
+  - O app precisa detectar o tema e redesenhar a própria interface. O Windows só oferece a barra de título escura, via `DWMWA_USE_IMMERSIVE_DARK_MODE` [[36]][36].
+  - A Microsoft diz que o WinUI 3 detecta o tema do sistema automaticamente [[36]][36].
+
+## Detalhes por candidato
+
+### WinUI 3 / Windows App SDK
+
+- É a tecnologia de interface mais nova da Microsoft para apps desktop. A linha 2.0 foi a primeira mudança de versão principal desde a 1.0, de novembro de 2021 [[7]][7].
+- **Distribuição sem a Microsoft Store**, em dois modos:
+  - O app depende do runtime instalado. Nesse caso, o usuário precisa do Windows App Runtime (instalador x64 de 120,2 MB) e do Visual C++ Redistributable [[10]][10] [[11]][11].
+  - O app leva o runtime junto ("autocontido"). A pasta fica "significativamente maior", e cada atualização carrega o runtime inteiro de novo [[9]][9].
+  - Duas páginas oficiais, ambas de 02/10/2026, se contradizem sobre gerar um único `.exe`. Uma diz que não é possível [[8]][8]. A outra diz que é possível desde a 1.5, com os arquivos extraídos para uma pasta temporária na primeira execução [[9]][9].
+- Compilação nativa antecipada (Native AOT) é suportada desde a 1.6. O desenvolvedor fica responsável por evitar que o "enxugamento" remova código necessário [[12]][12].
+- **Riscos para a camada do Pixmeter:**
+  - Janela transparente e sem borda é um pedido aberto desde 30/08/2019, com 141 comentários. O contorno usado pela comunidade é a biblioteca WinUIEx (`TransparentTintBackdrop`), que não é da Microsoft [[13]][13].
+  - Bug aberto: ao abrir uma janela WinUI 3 (Windows App SDK 1.6), as janelas "sempre no topo" de outros programas perdem essa condição [[14]][14]. **Não confirmado:** se o bug continua na 2.x e se afeta a camada do próprio app.
+  - Escala: há bugs abertos, como menus cortados após mudança de DPI [[15]][15] e uma dica de arrastar que não respeita a escala por monitor [[16]][16]. Um bug antigo de janela que não se redimensionava entre monitores foi fechado [[17]][17]. A 2.5.1 ainda corrigiu um defeito visual em escala de 175% [[7]][7].
+- **Bandeja:** não há API no Windows App SDK; o pedido está aberto desde 08/04/2021 [[18]][18]. Um pedido de maio de 2026 foi fechado como duplicado desse [[19]][19].
+
+### WPF no .NET 10
+
+- **Tema:** o tema Fluent, com modos claro e escuro e cor de destaque, chegou no .NET 9 [[22]][22].
+  - Ligar o tema pelo XAML funciona. Trocar o tema pelo código ainda é experimental (aviso WPF0001) [[22]][22].
+  - No .NET 10, o suporte ao Fluent "ainda está em andamento" [[23]][23].
+- **Transparência:** suportada com `AllowsTransparency`, que exige janela sem borda [[24]][24].
+- **Escala por monitor:** a tabela da Microsoft diz que apps WPF nativos escalam por monitor [[21]][21]. Há bugs abertos no modo Per-Monitor V2:
+  - `Window.Left/Top` quebrados, aberto desde 03/02/2021 e atualizado em 21/10/2026 [[25]][25].
+  - `SystemParameters.WorkArea` quebrado [[26]][26].
+  - Isso pesa para o Pixmeter, que precisa posicionar uma camada exatamente sobre cada monitor.
+- **Tamanho:** sem o .NET instalado, o app precisa levar o runtime. O trimming está desativado para WPF ("quase nenhum app WPF roda depois do trimming") [[4]][4] [[27]][27]. Como o Native AOT exige trimming, também não se aplica [[5]][5].
+
+### WinForms no .NET 10
+
+- O modo escuro deixou de ser experimental no .NET 10 [[28]][28].
+- **Escala por monitor:** a Microsoft a descreve como "limitada, para alguns controles" [[21]][21]. Há bugs abertos com controles mal escalados em monitor secundário [[29]][29].
+- Mesmas limitações de tamanho do WPF (sem trimming) [[4]][4].
+
+### Tauri 2
+
+- **Tecnologia:** núcleo em Rust; telas desenhadas pelo WebView2 (o motor do Edge embutido no Windows). Funciona do Windows 10 em diante. Licença MIT/Apache-2.0 [[41]][41].
+- **Recursos:**
+  - Bandeja é um recurso do núcleo [[46]][46].
+  - Atalhos globais vêm de um plugin oficial, que exige Rust 1.90 ou mais novo [[47]][47].
+- **WebView2:**
+  - Por padrão, o instalador baixa o WebView2 só se ele faltar (0 MB a mais). Embutir o instalador offline acrescenta cerca de 127 MB [[44]][44].
+  - A documentação da Microsoft dá mais de 250 MB para a versão "fixa" do runtime; a do Tauri dá cerca de 180 MB [[44]][44] [[49]][49]. Nenhuma das duas é necessária no Windows 11.
+  - O WebView2 se atualiza sozinho, mas um app que fica aberto o tempo todo (como um app de bandeja) continua usando a versão antiga até reiniciar [[49]][49].
+- **Riscos:**
+  - Bug aberto no Windows: uma janela criada num monitor secundário com escala diferente nasce com o tamanho errado. Foi relatado na versão 1.x; **não confirmado** se acontece na 2.x [[48]][48].
+  - Não há API de captura no Tauri; isso seria código Rust direto no Windows (não confirmado).
+  - A 3.0 em alfa indica uma migração no futuro [[42]][42].
+
+### Electron
+
+- **Runtime grande:** o runtime do Windows tem 158,2 MB [[52]][52]. Isso contraria diretamente o critério 4 (leve).
+- **Atualização constante:** sai uma versão principal a cada 8 semanas e só as 3 últimas têm suporte [[50]][50]. Na prática, cada versão vive cerca de 6 meses; a 45 sai do suporte em 27/04/2027 [[51]][51].
+- **Recursos:**
+  - Captura com `desktopCapturer` [[53]][53]; atalhos globais [[74]][74] e bandeja [[75]][75].
+  - Janelas transparentes não podem ser redimensionadas [[54]][54]. Podem ignorar o mouse e ficar acima da barra de tarefas [[55]][55].
+- **Escala por monitor:** um bug de posição e tamanho está aberto desde 20/10/2017, com 71 comentários [[56]][56].
+
+### Rust direto no Win32 / Direct2D
+
+- **Ferramentas:**
+  - As crates da Microsoft cobrem COM, WinRT, janelas e Direct2D (`windows-canvas`, `windows-window`, `windows-composition`) [[57]][57].
+  - O próprio repositório avisa que as crates "guarda-chuva" `windows` e `windows-sys` "acrescentam peso de dependências e mudanças frequentes de versão" [[57]][57].
+  - Todas as versões estão abaixo de 1.0 [[59]][59].
+  - Existe uma biblioteca para usar WinUI 3 a partir do Rust (`windows-reactor`), mas ela "está em preview" e **não entra na comparação** pela regra de usar só versões estáveis [[58]][58].
+- **Escala e tema:** a escala por monitor e o tema escuro são responsabilidade do app [[21]][21] [[36]][36].
+
+### C++ direto no Win32 / Direct2D
+
+- **É a referência da Microsoft:** a Régua de Tela do PowerToys usa esse caminho [[37]][37] [[38]][38]:
+  - um arquivo de captura por monitor com Windows.Graphics.Capture;
+  - arquivos separados de Direct2D e de desenho da camada.
+- **Barra de ferramentas:** é um projeto WinUI 3 separado, sem pacote e autocontido, que depende da biblioteca WinUIEx [[39]][39].
+- **Licença:** o código do PowerToys é MIT, então pode servir de referência [[40]][40].
+
+### Avalonia
+
+- **Versões:**
+  - A Avalonia 12 foi anunciada em 07/04/2026, mirando o .NET 10 [[61]][61].
+  - O mínimo é o .NET 8 [[62]][62]. O suporte do .NET 8 acaba em 10/11/2026 [[1]][1], então na prática o Pixmeter teria de usar o .NET 10.
+- **Desenho:** o desenho no Windows passou a ser só por Skia; o Direct2D foi removido [[62]][62].
+- **Recursos:** bandeja embutida [[64]][64]. O anúncio da 12 cita inicialização mais rápida com Native AOT [[61]][61].
+- **Riscos:** bugs abertos com escalas mistas [[65]][65]. Ser multiplataforma não traz ganho ao Pixmeter, que é só para Windows.
+
+### Flutter
+
+- A 3.44 (20/05/2026) traz as APIs de janelas como experimentais: "ainda não são para uso em produção", só no canal de desenvolvimento [[66]][66].
+- O Pixmeter precisa de uma janela por monitor mais as janelas de configuração. Por isso, **não atende hoje**.
+
+### Qt 6
+
+- **Escala:** Per-Monitor V2 por padrão e escalas fracionárias automáticas [[68]][68].
+  - Limitação documentada: no Windows, o Qt escala o tamanho de cada tela mas não a posição, o que pode deixar "buracos" na área de trabalho virtual. A documentação recomenda não supor que uma posição logo fora de uma tela caia na tela vizinha [[68]][68]. Isso afeta diretamente o posicionamento de uma camada por monitor.
+  - O rastreador de bugs do Qt não foi pesquisado: problemas conhecidos com escalas mistas ficam como não confirmados.
+- **Suporte:**
+  - O LTS de 5 anos vale da 6.8 em diante [[70]][70] e está disponível "com as licenças comerciais" [[71]][71].
+  - Para usuários de código aberto, só as primeiras correções de cada LTS saem de graça [[69]][69].
+- **Recursos:** bandeja com `QSystemTrayIcon` [[76]][76]; tradução com Qt Linguist [[72]][72].
+- **Não analisados:** as obrigações da licença de código aberto do Qt (não confirmado).
+
+### Não avaliados nesta pesquisa
+
+.NET MAUI, Uno Platform, Slint, egui e outros frameworks Rust de interface ficaram fora do levantamento. Não houve tempo de verificá-los em fonte primária, e a escolha não depende deles.
+
 ## O que ficou sem confirmação
 
 - **Tamanho final** do Pixmeter em todas as tecnologias: nenhum app de exemplo foi compilado.
@@ -245,13 +251,13 @@ Os três finalistas compartilham a mesma base para a parte crítica, a camada so
 - **Borda amarela da captura:** se um app sem pacote consegue removê-la [[32]][32] [[33]][33].
 - **Bug WinUI 3 de "sempre no topo"** [[14]][14]: se continua na linha 2.x e se afeta a camada do próprio app.
 - **Bug do Tauri** com monitores de escalas diferentes [[48]][48]: se acontece na 2.x.
-- **Tauri:** se existe captura de tela pronta; se há mecanismo de tradução próprio.
+- **Tauri:** se existe captura de tela pronta; se há mecanismo de tradução próprio; se dá para abrir janelas Win32 nativas em Rust ao lado das janelas do Tauri; nitidez de linhas finas no WebView em escala fracionária.
 - **Rust e C++:** se o runtime do Visual C++ pode ser embutido por link estático; se há política formal de suporte para as crates `windows` e para Win32/Direct2D.
 - **WPF e WinForms:** componente próprio de bandeja no WPF; transparência no WinForms.
-- **Qt:** atalhos globais, captura, obrigações da licença de código aberto, tamanho.
+- **Qt:** atalhos globais, captura, obrigações da licença de código aberto, tamanho e bugs conhecidos com escalas mistas (o rastreador de bugs do Qt não foi pesquisado).
   - Também a classificação da 6.12 como LTS: a página de LTS a chama assim [[71]][71], mas a tabela de versões não a marca como LTS [[69]][69].
 - **Flutter:** política de suporte, bandeja e atalhos.
-- **Avalonia:** integração dos arquivos `.resx` com o Avalonia.
+- **Avalonia:** integração dos arquivos `.resx` com o Avalonia; se o LTS de 5 anos da versão 12 vale para quem não tem o plano pago.
 - **Contradição oficial** sobre gerar um único `.exe` com WinUI 3 [[8]][8] [[9]][9].
 - **Critério 2 (manter com IA):** é uma avaliação, sem fonte primária.
 
