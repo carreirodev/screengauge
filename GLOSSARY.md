@@ -69,8 +69,16 @@ The tool that shrinks a drawn rectangle until it fits the content inside it, nev
 _Avoid_: fit, auto-size
 
 **Inspect**:
-The magnifier that shows the area around the cursor enlarged, with the cursor's position and the pixel's color.
+The tool that shows a magnified view of the area around the cursor, with the cursor's position and the color of the pixel under it.
 _Avoid_: zoom, magnifier, lupa
+
+**Magnified view**:
+The enlarged picture of the pixels around the cursor that Inspect shows, with the pixel under the cursor always at its center.
+_Avoid_: loupe, zoom window
+
+**Magnification**:
+How many times larger each physical pixel appears in the magnified view.
+_Avoid_: zoom, scale (the monitor's scale is a different thing)
 
 **Snip**:
 The tool that captures an area of the screen sized exactly to its content.
