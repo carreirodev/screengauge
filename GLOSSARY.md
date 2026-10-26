@@ -51,8 +51,26 @@ Every pixel inside a drawn rectangle whose color differs from the reference colo
 _Avoid_: object, element
 
 **Pinned measurement**:
-A measurement left fixed on screen, by a click in Dimensions or by releasing the drag in Bounds, while the tool keeps measuring; it lasts until the tool closes.
+A measurement left fixed on screen, by a click in Dimensions or by releasing the drag in Bounds, while the tool keeps measuring; it lasts until the tools close, even when the user switches to another tool.
 _Avoid_: frozen measurement (freezing is for the screen, a different thing), persistent measurement, annotation
+
+## Using Pixmeter
+
+**Toolbar**:
+The floating bar with one button per tool that appears whenever Pixmeter is called, with the active tool's button highlighted.
+_Avoid_: floating bar, palette, dock, menu
+
+**Active tool**:
+The one tool that has the mouse at a given moment; calling Pixmeter makes the last one used active again.
+_Avoid_: current tool (the current monitor is a different thing), selected tool
+
+**Global shortcut**:
+The one key combination that calls Pixmeter from any program.
+_Avoid_: hotkey, keyboard shortcut (the keys inside a tool are a different thing)
+
+**Tray icon**:
+Pixmeter's icon in the Windows notification area, next to the clock; clicking it calls Pixmeter like the global shortcut.
+_Avoid_: taskbar icon, system tray icon
 
 ## Tools
 
