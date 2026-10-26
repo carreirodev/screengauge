@@ -30,11 +30,27 @@ _Avoid_: DIP, device-independent pixel, effective pixel, scaled pixel
 The monitor under the cursor; the only monitor a tool measures or captures on at any moment.
 _Avoid_: active monitor, main monitor (Windows' primary monitor, a different thing)
 
+**Tolerance**:
+How much a pixel's color may differ from the color it is compared with and still count as the same area.
+_Avoid_: threshold, sensitivity, pixel difference
+
+**Edge**:
+The first pixel, moving away from the cursor along its row or column, whose color differs from the color under the cursor by more than the tolerance.
+_Avoid_: border, boundary
+
+**Pinned measurement**:
+A measurement a click leaves fixed on screen while the tool keeps measuring; it lasts until the tool closes.
+_Avoid_: frozen measurement (freezing is for the screen, a different thing), persistent measurement, annotation
+
 ## Tools
 
 **Dimensions**:
-The tool that measures the distance from the cursor to the nearest edges, horizontally, vertically, or both at once (cross).
+The tool that measures the span of pixels around the cursor, from the nearest edge on one side to the nearest edge on the other, horizontally, vertically, or both at once (cross).
 _Avoid_: ruler, distance tool
+
+**Cross**:
+The Dimensions mode that measures width and height at once.
+_Avoid_: spacing, crosshair
 
 **Bounds**:
 The tool that shrinks a roughly drawn rectangle until it fits the content inside it.
