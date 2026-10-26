@@ -8,7 +8,7 @@ Fontes: somente documentação primária (learn.microsoft.com, support.microsoft
 
 1. O Windows trabalha com dois tipos de pixel: o **físico** (o ponto real do monitor) e o **lógico** (uma unidade de "1/96 de polegada lógica"). Na escala 100% os dois coincidem; em 150%, cada pixel lógico vale 1,5 pixel físico [F10].
 2. A "polegada lógica" do Windows não é uma polegada de verdade: o tamanho real depende do tamanho do monitor [F10][F11].
-3. Cada monitor tem a sua escala. Um app só enxerga a escala e o tamanho real de cada monitor se declarar o modo **Per-Monitor V2** no manifesto (Windows 10 versão 1703 em diante) [F1][F3].
+3. Cada monitor tem a sua escala. Um app só enxerga a escala e o tamanho real de cada monitor se declarar consciência de DPI **por monitor**. A Microsoft recomenda o modo **Per-Monitor V2**, declarado no manifesto do app (Windows 10 versão 1703 em diante) [F1][F3].
 4. Um app que não declara isso recebe números "maquiados" (virtualizados): o Windows reescala coordenadas e tamanhos para o mundo de 96 DPI do app, e a própria Microsoft admite que não documenta direito quais funções fazem isso [F1][F5].
 5. O tamanho físico do monitor vem do EDID, um bloco de dados gravado pelo fabricante. A norma grava a largura e a altura **arredondadas ao centímetro** e diz que isso serve para "ter uma ideia aproximada"; existe também um campo em milímetros. Os valores podem faltar (zero) ou estar errados [F38][F31][F32].
 6. Uma medida que atravessa a borda entre dois monitores com escalas diferentes dá três respostas diferentes, conforme a unidade: no exemplo deste documento, 400 pixels físicos, 333 pixels lógicos ou 86,5 mm para a mesma linha (seção 6).
@@ -82,7 +82,7 @@ Quando o app não é Per-Monitor, o Windows converte informações que dependem 
 - Um app Unaware que pergunta o tamanho da tela num monitor de alta resolução recebe a resposta "como se a tela estivesse em unidades de 96 DPI" [F1].
 - Exemplo oficial com três monitores a 100%, 200% e 300%: uma janela Unaware de 500 × 500 no monitor de 300% ocupa 1500 × 1500 pixels reais. Quem pergunta o tamanho dessa janela recebe 500 × 500 se for Unaware, 1000 × 1000 se for System aware com DPI de sistema 192, e 1500 × 1500 se for Per-Monitor [F5].
 - Exemplo da documentação de UI Automation: um botão em (100, 48) aparece nas coordenadas físicas (125, 60) a 120 DPI, mas as coordenadas lógicas continuam (100, 48) [F11].
-- Mouse: a mesma página diz que `GetCursorPos` "tipicamente" devolve coordenadas lógicas [F11]. `GetPhysicalCursorPos` devolve a posição em coordenadas físicas [F14]. A página de `GetCursorPos` não fala de DPI [F15].
+- Mouse: a mesma página (escrita na época do Windows Vista) diz que `GetCursorPos` "tipicamente" devolve coordenadas lógicas [F11]. `GetPhysicalCursorPos` devolve a posição em coordenadas físicas [F14]. A página de `GetCursorPos` não fala de DPI [F15]. **Dedução:** num app Per-Monitor, lógico e físico são a mesma coisa (próximo item), então `GetCursorPos` já entrega pixels físicos.
 - Desde o Windows 8.1, `PhysicalToLogicalPoint` e `LogicalToPhysicalPoint` não convertem mais nada. O sistema já entrega tudo no espaço de coordenadas de cada app. Para converter entre apps de modos diferentes existem as versões `...ForPerMonitorDPI` [F12][F13].
 - Para apps Per-Monitor, coordenadas lógicas e físicas são idênticas [F13].
 
@@ -101,7 +101,7 @@ Quando o app não é Per-Monitor, o Windows converte informações que dependem 
 
 ### 4.1 De onde vem a informação: o EDID
 
-O EDID é um bloco de dados que o fabricante grava no monitor e que todo monitor deve ter. Ele segue um formato da VESA [F32]. O Windows lê o EDID e, desde o Windows 11, também o DisplayID 2.0, um formato mais novo que o Windows 11 prefere quando está presente [F31]. Para o Windows, o "tamanho físico" no descritor é **obrigatório** e "usado nos cálculos de escala de DPI". A mesma diretriz avisa: "projetores podem informar o tamanho físico como zero" [F31].
+O EDID é um bloco de dados que o fabricante grava no monitor e que todo monitor deve ter. Ele segue um formato da VESA [F32]. Além do EDID, o Windows lê o DisplayID 2.0, um formato mais novo. O Windows 10 só usa o DisplayID 2.0 avulso, e apenas quando o monitor não tem EDID. O Windows 11 também aceita o DisplayID 2.0 dentro das extensões do EDID e, quando ele cumpre os requisitos, prefere-o ao EDID [F31]. Para o Windows, o "tamanho físico" no descritor é **obrigatório** e "usado nos cálculos de escala de DPI". A mesma diretriz avisa: "projetores podem informar o tamanho físico como zero" [F31].
 
 O que a norma VESA E-EDID (Release A, Rev. 2, de 25/09/2006) define [F38]:
 
@@ -249,8 +249,9 @@ Esta seção não decide nada; lista o que é possível e as consequências de c
 - O significado real de `DisplayMonitor.PhysicalSizeInInches` (diagonal ou largura × altura) [F29].
 - Se a leitura `MDT_RAW_DPI` também é reescalada para apps Unaware [F6][F7].
 - Qual API Win32 liga um `HMONITOR` a um `DisplayMonitor` [F28].
+- Se um app Win32 comum consegue usar `DisplayInformation`: tudo o que a documentação mostra está ligado à janela de um app UWP (`GetForCurrentView`) [F24].
 - O quanto o EDID dos monitores reais erra na prática.
-- Diferenças entre Windows 10 e 11 nesse modelo: não encontrei nenhuma além do DisplayID 2.0 [F31] e de um ajuste de escala de cursores no Windows 11 [F1].
+- Diferenças entre Windows 10 e 11 nesse modelo: não encontrei nenhuma além do suporte maior a DisplayID 2.0 no Windows 11 [F31] e de um ajuste de escala de cursores no Windows 11 [F1].
 
 ## Fontes
 
