@@ -30,16 +30,28 @@ _Avoid_: DIP, device-independent pixel, effective pixel, scaled pixel
 The monitor under the cursor; the only monitor a tool measures or captures on at any moment.
 _Avoid_: active monitor, main monitor (Windows' primary monitor, a different thing)
 
+**Reference color**:
+The color a tool compares every pixel with to tell background from content: the color under the cursor in Dimensions, and the color where the drag began in Bounds.
+_Avoid_: background color, base color, sample color
+
 **Tolerance**:
-How much a pixel's color may differ from the color it is compared with and still count as the same area.
+How much a pixel's color may differ from the reference color and still count as the same area.
 _Avoid_: threshold, sensitivity, pixel difference
 
 **Edge**:
-The first pixel, moving away from the cursor along its row or column, whose color differs from the color under the cursor by more than the tolerance.
+The first pixel, moving away from the cursor along its row or column, whose color differs from the reference color by more than the tolerance.
 _Avoid_: border, boundary
 
+**Drawn rectangle**:
+The rectangle the user drags out with the mouse, exactly as drawn, before any shrinking to the content.
+_Avoid_: rough rectangle, selection, marquee
+
+**Content**:
+Every pixel inside a drawn rectangle whose color differs from the reference color by more than the tolerance, whether it forms one object or several.
+_Avoid_: object, element
+
 **Pinned measurement**:
-A measurement a click leaves fixed on screen while the tool keeps measuring; it lasts until the tool closes.
+A measurement left fixed on screen, by a click in Dimensions or by releasing the drag in Bounds, while the tool keeps measuring; it lasts until the tool closes.
 _Avoid_: frozen measurement (freezing is for the screen, a different thing), persistent measurement, annotation
 
 ## Tools
@@ -53,7 +65,7 @@ The Dimensions mode that measures width and height at once.
 _Avoid_: spacing, crosshair
 
 **Bounds**:
-The tool that shrinks a roughly drawn rectangle until it fits the content inside it.
+The tool that shrinks a drawn rectangle until it fits the content inside it, never past what was drawn.
 _Avoid_: fit, auto-size
 
 **Inspect**:
