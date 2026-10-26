@@ -1,5 +1,7 @@
 # O que as réguas de tela atuais oferecem (WPC-265)
 
+> Nota (2026-10-26): depois desta pesquisa, o app foi renomeado de Pixler para Pixmeter, porque "Pixler" soava igual a Pixlr.
+
 Data da consulta: 2026-10-26. Todas as afirmações citam a fonte primária; o que não foi possível confirmar está marcado como "não confirmado".
 
 ## Resumo
@@ -8,7 +10,7 @@ Data da consulta: 2026-10-26. Todas as afirmações citam a fonte primária; o q
 2. O Rooler (que inspirou o Screen Ruler do PowerToys) está parado desde junho de 2024, não publica binários (0 releases) e usa .NET Framework 4.5.2. Registros do próprio repositório indicam valores incorretos fora do monitor principal quando as escalas diferem.
 3. O ShareX tem uma régua (Tools → Ruler) e seletores de cor, mas é um aplicativo de captura completo (instalador de 139 MB, GPL-3.0), não uma ferramenta de medição focada.
 4. xScope (US$ 49,99) e PixelSnap (US$ 39) são só para Mac; servem de referência de funções: guias, lupa com formatos de cor, medidas fixas, exportar medidas como imagem.
-5. Nenhuma alternativa gratuita no Windows reúne medição por detecção de borda, lupa com cor e captura recortada pelo conteúdo em um único programa leve e independente. Esse é o espaço do Pixler.
+5. Nenhuma alternativa gratuita no Windows reúne medição por detecção de borda, lupa com cor e captura recortada pelo conteúdo em um único programa leve e independente. Esse é o espaço do Pixmeter.
 6. Candidatas à v1 além das cinco ferramentas decididas: tolerância de borda ajustável, copiar medida/cor para a área de transferência, unidades extras (DIP, polegadas, mm), formatos de cor (HEX/RGB/HSL), medida persistente (Shift), mover a medida com setas, atalho global configurável.
 7. Nenhuma fonte consultada demonstra bom comportamento com monitores de escalas diferentes além de declarações de manifesto; tratar isso bem (PerMonitorV2, testado) é o principal diferencial técnico possível.
 
@@ -68,7 +70,7 @@ Data da consulta: 2026-10-26. Todas as afirmações citam a fonte primária; o q
 | xScope (Mac) | Sim | Sim | Sim | Parcial | macOS 12.3+, US$ 49,99 | Pago |
 | PixelSnap (Mac) | Sim | Não descrito | Sim | Sim (Retina) | macOS 10.13+, US$ 39 | Pago |
 
-## Funções candidatas para a v1 do Pixler
+## Funções candidatas para a v1 do Pixmeter
 
 Já decididas: Dimensions, Bounds, Inspect, Snip, Settings.
 
@@ -86,9 +88,9 @@ Candidatas, da mais barata e valiosa para a menos:
 10. **Guias e marcação (Frames):** xScope e PixelSnap. Sugestão: depois da v1.
 11. **Fora do escopo sugerido:** gravação de tela, envio para a internet, anotações, OCR, desenho (ShareX, ZoomIt), por contrariar "leve" e "nada sai do computador".
 
-## O que diferenciaria o Pixler
+## O que diferenciaria o Pixmeter
 
-- **Contra o PowerToys:** instalação independente e pequena (sem suíte nem WebView2), com medição, lupa com cor e captura no mesmo programa. O tamanho do Pixler só pode ser declarado depois de medido.
+- **Contra o PowerToys:** instalação independente e pequena (sem suíte nem WebView2), com medição, lupa com cor e captura no mesmo programa. O tamanho do Pixmeter só pode ser declarado depois de medido.
 - **Contra o Rooler:** mantido, com releases publicados, sem depender do .NET Framework e com escala por monitor tratada de forma testada (o Rooler registra valores nativos incorretos fora do monitor principal).
 - **Contra o ShareX:** foco único em medição, licença MIT em vez de GPL-3.0 e nenhuma função de envio.
 - **Contra xScope e PixelSnap:** gratuito, código aberto e para Windows; ambos são pagos e só para Mac.
