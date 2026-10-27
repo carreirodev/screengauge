@@ -110,6 +110,24 @@ _Avoid_: zoom, scale (the monitor's scale is a different thing)
 The tool that takes an image of the content a drawn rectangle shrinks to, or of the drawn rectangle itself when shrinking is off.
 _Avoid_: screenshot, capture, print
 
+## Color
+
+**HDR**:
+Windows' high dynamic range mode, turned on or off for each monitor in Windows settings, which brightens the colors of SDR content on that monitor.
+_Avoid_: HD Color, Advanced Color (Windows' broader name, which also covers some SDR monitors)
+
+**SDR content**:
+Whatever ordinary apps draw in standard colors, such as windows, web pages and pictures; its exact color is what Pixmeter reports, with HDR on or off.
+_Avoid_: normal content, standard content
+
+**HDR content**:
+Video, games or pictures brighter or more saturated than any standard color, so they have no exact standard color to report.
+_Avoid_: HDR image, HDR video (both are only examples)
+
+**Approximate color**:
+Inspect's notice that the color shown may differ from the one the app drew, because HDR is on and Pixmeter can't undo its brightening on that monitor.
+_Avoid_: wrong color, HDR warning
+
 ## Distribution
 
 **Store copy**:
