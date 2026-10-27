@@ -31,7 +31,7 @@ The monitor under the cursor; the only monitor a tool measures or captures on at
 _Avoid_: active monitor, main monitor (Windows' primary monitor, a different thing)
 
 **Reference color**:
-The color a tool compares every pixel with to tell background from content: the color under the cursor in Dimensions, and the color where the drag began in Bounds.
+The color a tool compares every pixel with to tell background from content: the color under the cursor in Dimensions, and the color where the drag began in Bounds and Snip.
 _Avoid_: background color, base color, sample color
 
 **Tolerance**:
@@ -99,5 +99,5 @@ How many times larger each physical pixel appears in the magnified view.
 _Avoid_: zoom, scale (the monitor's scale is a different thing)
 
 **Snip**:
-The tool that captures an area of the screen sized exactly to its content.
+The tool that takes an image of the content a drawn rectangle shrinks to, or of the drawn rectangle itself when shrinking is off.
 _Avoid_: screenshot, capture, print
