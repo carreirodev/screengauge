@@ -77,7 +77,7 @@ The window, separate from the tools, where the user changes Pixmeter's options.
 _Avoid_: preferences, options, Settings tool
 
 **Frozen screen**:
-The still image of the screen, taken when Pixmeter is called, that the tools measure and capture in place of the live screen.
+The still image of every monitor, taken all at once when Pixmeter is called, that stays on screen in place of the live screen until the tools close; it is what the tools measure and capture.
 _Avoid_: snapshot, screenshot (the Snip's image is a different thing), still
 
 ## Tools
