@@ -109,3 +109,13 @@ _Avoid_: zoom, scale (the monitor's scale is a different thing)
 **Snip**:
 The tool that takes an image of the content a drawn rectangle shrinks to, or of the drawn rectangle itself when shrinking is off.
 _Avoid_: screenshot, capture, print
+
+## Distribution
+
+**Store copy**:
+Pixmeter as installed from the Microsoft Store, which keeps it up to date.
+_Avoid_: Store version (a version is a number), MSIX build, packaged app
+
+**Installer copy**:
+Pixmeter as installed by the installer downloaded from the project's GitHub releases.
+_Avoid_: GitHub version, desktop version, portable version (there is none)
