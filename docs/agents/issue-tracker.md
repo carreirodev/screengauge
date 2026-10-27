@@ -1,6 +1,6 @@
 # Issue tracker: Linear
 
-Issues and specs for this repo live in Linear: team **WPC Solutions** (key `WPC`), project **Pixmeter**. Use the Linear MCP tools (`mcp__claude_ai_Linear__*`) for every operation.
+Issues and specs for this repo live in Linear: team **WPC Solutions** (key `WPC`), project **Pixmeter**. Use the Linear MCP tools for every operation. Their prefix depends on how Linear is connected (currently `mcp__plugin_linear_linear__*`), so look for the operation names used below (`save_issue`, `list_issues`, `get_issue`, `save_comment`, `list_comments`) rather than a fixed prefix.
 
 ## Conventions
 
