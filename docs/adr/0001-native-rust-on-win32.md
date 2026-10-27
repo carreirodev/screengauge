@@ -12,6 +12,7 @@ Pixmeter is written in Rust directly against the Windows APIs: Win32 windows, Di
 
 ## Consequences
 
+- Capture is a single shot taken when Pixmeter is called (the frozen screen, decided in WPC-275), not a continuous stream. It uses the same Windows capture APIs, so it doesn't change this choice.
 - Theming, hit-testing, focus and per-monitor scaling of Pixmeter's own UI are Pixmeter's code.
 - The C runtime is linked statically (`-C target-feature=+crt-static`), so users need no Visual C++ Redistributable.
 - Windows 11 and later only, so Windows 11 APIs such as the dark title bar (documented from build 22000) can be relied on.
