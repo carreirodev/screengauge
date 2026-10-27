@@ -72,6 +72,10 @@ _Avoid_: hotkey, keyboard shortcut (the keys inside a tool are a different thing
 Pixmeter's icon in the Windows notification area, next to the clock; clicking it calls Pixmeter like the global shortcut.
 _Avoid_: taskbar icon, system tray icon
 
+**Frozen screen**:
+The still image of the screen, taken when Pixmeter is called, that the tools measure and capture in place of the live screen.
+_Avoid_: snapshot, screenshot (the Snip's image is a different thing), still
+
 ## Tools
 
 **Dimensions**:
