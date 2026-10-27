@@ -3,3 +3,6 @@ tasks.md
 
 # Temporary git worktrees created by subagents
 .claude/worktrees/
+
+# Page snapshots and console logs the Playwright MCP writes while browsing
+.playwright-mcp/
