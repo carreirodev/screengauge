@@ -3,7 +3,7 @@
 
 use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, HWND, LPARAM, RECT, WPARAM};
 use windows::Win32::System::ProcessStatus::{
-    GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
+    GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX2,
 };
 use windows::Win32::System::Threading::{
     GetCurrentProcess, GetProcessTimes, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -176,6 +176,8 @@ pub fn window_rect(hwnd: HWND) -> Result<PxRect, String> {
 pub struct Usage {
     pub working_set: usize,
     pub private: usize,
+    /// Task Manager's "Memory (private working set)" column.
+    pub private_ws: usize,
     pub cpu_ms: f64,
 }
 
@@ -183,17 +185,18 @@ impl std::fmt::Display for Usage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "working set {:.1} MB, private {:.1} MB, cpu {:.0} ms",
+            "working set {:.1} MB, private {:.1} MB, private working set {:.1} MB, cpu {:.0} ms",
             mb(self.working_set),
             mb(self.private),
+            mb(self.private_ws),
             self.cpu_ms
         )
     }
 }
 
 pub fn usage() -> Result<Usage, String> {
-    let mut mem = PROCESS_MEMORY_COUNTERS_EX { cb: size_u32::<PROCESS_MEMORY_COUNTERS_EX>()?, ..Default::default() };
-    // SAFETY: the pseudo handle is always valid; the buffer is the EX struct and cb says so,
+    let mut mem = PROCESS_MEMORY_COUNTERS_EX2 { cb: size_u32::<PROCESS_MEMORY_COUNTERS_EX2>()?, ..Default::default() };
+    // SAFETY: the pseudo handle is always valid; the buffer is the EX2 struct and cb says so,
     // which GetProcessMemoryInfo accepts through the base-struct pointer.
     unsafe { GetProcessMemoryInfo(GetCurrentProcess(), (&raw mut mem).cast::<PROCESS_MEMORY_COUNTERS>(), mem.cb) }
         .ctx("GetProcessMemoryInfo")?;
@@ -205,6 +208,7 @@ pub fn usage() -> Result<Usage, String> {
     Ok(Usage {
         working_set: mem.WorkingSetSize,
         private: mem.PrivateUsage,
+        private_ws: mem.PrivateWorkingSetSize,
         cpu_ms: ms_from_100ns(filetime(kernel).saturating_add(filetime(user))),
     })
 }

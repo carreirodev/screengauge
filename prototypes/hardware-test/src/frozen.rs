@@ -395,7 +395,10 @@ pub fn run_mode(args: &Args) -> Result<(), String> {
     }
     let _hook = WinEventGuard(hook);
 
-    sys::set_timer(main, TIMER_POLL, POLL_MS)?;
+    // WPC-286: HWTEST_NO_POLL drops the 1 s monitor poll, which the real app would not run.
+    if std::env::var_os("HWTEST_NO_POLL").is_none() {
+        sys::set_timer(main, TIMER_POLL, POLL_MS)?;
+    }
     sys::set_timer(main, TIMER_IDLE, IDLE_MS)?;
     sys::set_timer(main, TIMER_EXIT, opts.exit_after_secs.saturating_mul(1000))?;
     if let Some(ms) = opts.trigger_after_ms {

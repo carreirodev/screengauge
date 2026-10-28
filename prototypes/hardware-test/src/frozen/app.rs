@@ -471,9 +471,14 @@ impl App {
             log::line(format!("ERROR: the auto-close safety net is NOT armed: {e}"));
         }
         // Armed before the optional saves, so the check runs as soon as they finish.
-        match sys::set_timer(self.main, TIMER_CHECK, CHECK_DELAY_MS) {
-            Ok(()) => self.check_pending = true,
-            Err(e) => log::line(format!("ERROR: identical check {tag} not scheduled: {e}")),
+        // WPC-286: HWTEST_NO_CHECK skips the re-capture, which the real app would not run.
+        if std::env::var_os("HWTEST_NO_CHECK").is_some() {
+            log::line(format!("identical check {tag} skipped: HWTEST_NO_CHECK"));
+        } else {
+            match sys::set_timer(self.main, TIMER_CHECK, CHECK_DELAY_MS) {
+                Ok(()) => self.check_pending = true,
+                Err(e) => log::line(format!("ERROR: identical check {tag} not scheduled: {e}")),
+            }
         }
         if self.opts.save_photo {
             for photo in &photos {
@@ -515,6 +520,32 @@ impl App {
             log::now_ms() - start
         ));
         self.log_usage(&format!("after tools {tag} closed"));
+        // WPC-286: HWTEST_REPEAT=N re-triggers until N calls; HWTEST_KEEP_DXGI then holds a warm
+        // DXGI session (as an app that keeps the capture ready would) for the idle samples.
+        let repeat: u32 = match std::env::var("HWTEST_REPEAT") {
+            Ok(v) => v.parse().unwrap_or_else(|e| {
+                log::line(format!("ERROR: HWTEST_REPEAT={v} is not a count ({e}); no repeats"));
+                0
+            }),
+            Err(_) => 0,
+        };
+        if self.triggers < repeat {
+            if let Err(e) = sys::set_timer(self.main, TIMER_TRIGGER, 4000) {
+                log::line(format!("ERROR: HWTEST_REPEAT re-trigger not armed: {e}"));
+            }
+        } else if std::env::var_os("HWTEST_KEEP_DXGI").is_some() {
+            match DxgiSession::new() {
+                Ok(mut s) => {
+                    let grabs = s.grab_all();
+                    log::line(format!("HWTEST_KEEP_DXGI: warm session held after {} grab(s)", grabs.len()));
+                    drop(grabs);
+                    // Deliberately leaked: held until the process exits, like a kept capture.
+                    std::mem::forget(s);
+                    self.log_usage("after HWTEST_KEEP_DXGI session opened");
+                }
+                Err(e) => log::line(format!("ERROR: HWTEST_KEEP_DXGI: {e}")),
+            }
+        }
         if self.opts.once {
             self.quit_when_idle = true;
         }
