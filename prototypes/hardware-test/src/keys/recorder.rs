@@ -221,7 +221,7 @@ struct Session<'a> {
     hook_removed_at: Option<Instant>,
     start_result_logged: bool,
     errors: Vec<String>,
-    lines: [String; 5],
+    lines: [String; 6],
 }
 
 impl Session<'_> {
@@ -261,6 +261,8 @@ impl Session<'_> {
     fn on_hook_removed(&mut self) {
         self.hook_removed_at = Some(Instant::now());
         log::line("low-level keyboard hook removed; keys reach the system again");
+        log::line("START DETECTOR CHECK: press Win alone once now; the log must show StartMenuExperienceHost.exe");
+        self.lines[5] = "Now press Win alone once (Start detector check).".to_string();
         match (self.outcome, self.recorded) {
             (Outcome::Recorded, Some(r)) => self.register(r),
             (Outcome::Cancelled, _) => {
@@ -377,7 +379,7 @@ pub fn run(args: &Args) -> Result<(), String> {
         w!("hwtest_recorder"),
         w!("hwtest recorder"),
         Some(recorder_proc),
-        Kind::Visible { width: 640, height: 230 },
+        Kind::Visible { width: 640, height: 260 },
     )?;
     let hwnd = window.hwnd();
     let watcher = Watcher::start(PHASES)?;
@@ -395,6 +397,7 @@ pub fn run(args: &Args) -> Result<(), String> {
         lines: [
             "Press a combination with the Win key. Esc cancels.".to_string(),
             "Getting ready...".to_string(),
+            String::new(),
             String::new(),
             String::new(),
             String::new(),
@@ -430,6 +433,7 @@ pub fn run(args: &Args) -> Result<(), String> {
 
     let mut quit = false;
     let mut last_second = u64::MAX;
+    let mut last_control = 0;
     while !quit && Instant::now() < deadline {
         quit = window::pump(25)?;
 
@@ -443,6 +447,13 @@ pub fn run(args: &Args) -> Result<(), String> {
 
         if session.hook_removed_at.is_some_and(|at| at.elapsed() >= GRACE) {
             session.log_start_result();
+        }
+
+        let control = watcher.start_like(AFTER);
+        if session.start_result_logged && control != last_control {
+            last_control = control;
+            session.lines[5] = "Start detector check: Start/Search seen, the detector works.".to_string();
+            session.refresh();
         }
 
         let left = deadline.saturating_duration_since(Instant::now()).as_secs();
@@ -472,12 +483,18 @@ pub fn run(args: &Args) -> Result<(), String> {
     session.log_start_result();
 
     // The detector must have been seen to fire at least once, or "no" above proves nothing.
-    let control = watcher.start_like(AFTER);
-    log::line(format!(
-        "RESULT recorder start-detector-control: Start/Search seen after recording: {} (press Win alone once \
-         after the recording; \"no\" here means the control was not done, not that the detector is broken)",
-        if control > 0 { "yes" } else { "no" }
-    ));
+    if watcher.start_like(AFTER) > 0 {
+        log::line(
+            "RESULT recorder start-detector-control: yes, Start/Search was seen after the recording, so the \
+             detector works and \"start-menu-opened: no\" can be trusted",
+        );
+    } else {
+        log::line(
+            "RESULT recorder start-detector-control: no, Start/Search was not seen after the recording: either Win \
+             alone was not pressed afterwards (the program cannot tell, it sees no keys then) or the detector is \
+             blind; in the second case \"start-menu-opened: no\" proves nothing",
+        );
+    }
     log::line(format!(
         "RESULT recorder hotkey-presses: WM_HOTKEY={} (foreground changes after recording: {})",
         PRESSES.get(),
