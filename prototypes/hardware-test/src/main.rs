@@ -1,3 +1,4 @@
+#![windows_subsystem = "windows"]
 //! hwtest: throwaway hardware test for Pixmeter (WPC-281, then WPC-289). Never merged into main.
 //! Each mode checks one group of items and logs what it measured; see README.md.
 
