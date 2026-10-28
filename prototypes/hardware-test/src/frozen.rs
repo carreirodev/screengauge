@@ -14,8 +14,13 @@ mod tools;
 
 use std::cell::{Cell, RefCell};
 use std::panic::AssertUnwindSafe;
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::System::Console::{
+    CTRL_BREAK_EVENT, CTRL_C_EVENT, CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT, SetConsoleCtrlHandler,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId};
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook};
@@ -28,11 +33,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
     FindWindowW, GetMessageW, GetWindowThreadProcessId, ISMEX_CALLBACK, ISMEX_NOSEND, ISMEX_NOTIFY, ISMEX_REPLIED,
     ISMEX_SEND, InSendMessageEx, MSG, PostMessageW, PostQuitMessage, RegisterClassExW, RegisterWindowMessageW,
     TranslateMessage, WINDOW_EX_STYLE, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_ACTIVATEAPP, WM_APP,
-    WM_CONTEXTMENU, WM_DESTROY, WM_DEVICECHANGE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_HOTKEY, WM_LBUTTONDBLCLK,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETTINGCHANGE, WM_TIMER, WNDCLASSEXW,
-    WS_OVERLAPPED,
+    WM_CLOSE, WM_CONTEXTMENU, WM_DESTROY, WM_DEVICECHANGE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_HOTKEY,
+    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETTINGCHANGE,
+    WM_TIMER, WNDCLASSEXW, WS_OVERLAPPED,
 };
-use windows::core::{PCWSTR, w};
+use windows::core::{BOOL, PCWSTR, w};
 
 use self::app::App;
 use self::sys::{HandleGuard, HotkeyGuard, WinEventGuard, WindowGuard};
@@ -81,6 +86,14 @@ thread_local! {
     static MSG_SHOW_FROM_START: Cell<u32> = const { Cell::new(0) };
     static MSG_TASKBAR_CREATED: Cell<u32> = const { Cell::new(0) };
 }
+
+/// The main window as an integer, for the console control handler, which runs on a thread of its own
+/// (an HWND is only an identifier there; it is used for PostMessageW alone). 0 = none.
+static CTRL_TARGET: AtomicIsize = AtomicIsize::new(0);
+/// Set once run_mode has dropped every guard, so a console close can wait for the cleanup.
+static CLEANED_UP: AtomicBool = AtomicBool::new(false);
+/// How long a console close, logoff or shutdown waits for the cleanup before Windows ends the process.
+const CTRL_CLOSE_WAIT: Duration = Duration::from_secs(4);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Source {
@@ -263,6 +276,8 @@ impl Opts {
 }
 
 pub fn run_mode(args: &Args) -> Result<(), String> {
+    // Declared first, so it drops last: a console close waits for it.
+    let _cleaned_up = CleanupDone;
     let opts = Opts::parse(args)?;
 
     // SAFETY: plain mutex creation; GetLastError is read right after, before any other API call.
@@ -318,6 +333,18 @@ pub fn run_mode(args: &Args) -> Result<(), String> {
     .ctx("CreateWindowExW(main)")?;
     let _main_window = WindowGuard { hwnd: main, what: "main" };
     MAIN_HWND.with(|c| c.set(main));
+
+    // Ctrl+C or closing the console would otherwise end the process without running the guards
+    // (leaving a ghost tray icon). The handler asks the main window to leave the message loop instead.
+    CTRL_TARGET.store(main.0 as isize, Ordering::SeqCst);
+    // SAFETY: registers a plain function; it only reads atomics and posts a message.
+    let _console_handler = match unsafe { SetConsoleCtrlHandler(Some(on_console_ctrl), true) } {
+        Ok(()) => Some(ConsoleHandlerGuard),
+        Err(e) => {
+            log::line(format!("SetConsoleCtrlHandler: {e}; Ctrl+C will end the process without cleanup"));
+            None
+        }
+    };
 
     let app = App::new(main, hinstance, opts.clone())?;
     APP.with(|cell| match cell.try_borrow_mut() {
@@ -455,6 +482,75 @@ impl Drop for AppGuard {
     }
 }
 
+/// Marks the end of run_mode's cleanup for the console control handler.
+struct CleanupDone;
+
+impl Drop for CleanupDone {
+    fn drop(&mut self) {
+        CTRL_TARGET.store(0, Ordering::SeqCst);
+        CLEANED_UP.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Removes the console control handler.
+struct ConsoleHandlerGuard;
+
+impl Drop for ConsoleHandlerGuard {
+    fn drop(&mut self) {
+        // SAFETY: removes the handler registered in run_mode.
+        if let Err(e) = unsafe { SetConsoleCtrlHandler(Some(on_console_ctrl), false) } {
+            log::line(format!("cleanup: SetConsoleCtrlHandler(remove): {e}"));
+        }
+    }
+}
+
+/// Runs on a thread Windows creates for the event. Posts WM_CLOSE to the main window, whose handler
+/// leaves the message loop so every guard runs. For close, logoff and shutdown, Windows ends the process
+/// as soon as this returns, so it waits (bounded) for the cleanup.
+unsafe extern "system" fn on_console_ctrl(ctrl: u32) -> BOOL {
+    match std::panic::catch_unwind(|| console_ctrl(ctrl)) {
+        Ok(handled) => BOOL::from(handled),
+        Err(_) => {
+            log::line("ERROR: panic in the console control handler");
+            BOOL::from(false)
+        }
+    }
+}
+
+fn console_ctrl(ctrl: u32) -> bool {
+    let name = match ctrl {
+        CTRL_C_EVENT => "Ctrl+C",
+        CTRL_BREAK_EVENT => "Ctrl+Break",
+        CTRL_CLOSE_EVENT => "console closed",
+        CTRL_LOGOFF_EVENT => "logoff",
+        CTRL_SHUTDOWN_EVENT => "shutdown",
+        _ => "other",
+    };
+    let target = CTRL_TARGET.load(Ordering::SeqCst);
+    if target == 0 {
+        log::line(format!("console event {name}: no main window; default handling"));
+        return false;
+    }
+    log::line(format!("console event {name}: asking the main window to exit so the cleanup runs"));
+    // The integer is the main window's handle, stored by run_mode; it is only passed to PostMessageW.
+    let hwnd = HWND(target as *mut std::ffi::c_void);
+    // SAFETY: PostMessageW may be called from any thread.
+    if let Err(e) = unsafe { PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)) } {
+        log::line(format!("console event {name}: PostMessageW(WM_CLOSE): {e}; default handling"));
+        return false;
+    }
+    if matches!(ctrl, CTRL_CLOSE_EVENT | CTRL_LOGOFF_EVENT | CTRL_SHUTDOWN_EVENT) {
+        let start = Instant::now();
+        while !CLEANED_UP.load(Ordering::SeqCst) && start.elapsed() < CTRL_CLOSE_WAIT {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        if !CLEANED_UP.load(Ordering::SeqCst) {
+            log::line(format!("console event {name}: cleanup not finished after {CTRL_CLOSE_WAIT:?}"));
+        }
+    }
+    true
+}
+
 enum IfBusy {
     Repost,
     Skip,
@@ -568,6 +664,14 @@ fn main_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT
         WM_ACTIVATEAPP => {
             log_activate_app("main", wparam, lparam);
             default()
+        }
+        WM_CLOSE => {
+            // From the console handler (Ctrl+C, console closed) or `taskkill` without /F. Leaving the loop,
+            // instead of DefWindowProc's DestroyWindow, keeps the cleanup order of run_mode's guards.
+            log::line("WM_CLOSE on the main window: exiting");
+            // SAFETY: plain call on this thread.
+            unsafe { PostQuitMessage(0) };
+            LRESULT(0)
         }
         WM_DESTROY => {
             log::line("main window destroyed; leaving the message loop");

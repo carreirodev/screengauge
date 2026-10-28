@@ -256,17 +256,15 @@ impl App {
     }
 
     /// One DxgiSession, grabs at fixed delays after t0, every frame kept for the analysis.
+    /// The session lives only inside this function: a process can duplicate an output once, so it must be
+    /// gone before frozen_photo or the identical check create theirs.
     fn delay_series(&self, source: Source, n: u32, t0: f64) -> SeriesJob {
         let mut grabs = Vec::with_capacity(SERIES_DELAYS_MS.len());
         let start = log::now_ms();
         match DxgiSession::new() {
             Err(e) => log::line(format!("ERROR: series {} #{n}: DxgiSession::new: {e}", source.name())),
             Ok(mut dxgi) => {
-                log::line(format!(
-                    "series {} #{n}: DxgiSession::new took {:.1} ms",
-                    source.name(),
-                    log::now_ms() - start
-                ));
+                let cold = log::now_ms() - start;
                 for delay in SERIES_DELAYS_MS {
                     let wait_ms = t0 + f64::from(delay) - log::now_ms();
                     if wait_ms > 0.0 {
@@ -275,10 +273,23 @@ impl App {
                             Err(e) => log::line(format!("series: bad wait {wait_ms} ms: {e}; grabbing now")),
                         }
                     }
-                    let at = log::now_ms() - t0;
+                    let grab_start = log::now_ms();
                     let frames = dxgi.grab_all();
-                    grabs.push(Grab { delay, at, frames });
+                    let took = log::now_ms() - grab_start;
+                    grabs.push(Grab { delay, at: grab_start - t0, took, frames });
                 }
+                // Logged after the loop so the log writes do not shift the grab times.
+                let warm: Vec<f64> = grabs.iter().skip(1).map(|g| g.took).collect();
+                let warm_avg = match u32::try_from(warm.len()) {
+                    Ok(count) if count > 0 => warm.iter().sum::<f64>() / f64::from(count),
+                    _ => 0.0,
+                };
+                log::line(format!(
+                    "series {} #{n}: DxgiSession::new {cold:.1} ms (cold), first grab_all {:.1} ms, later grab_all average {warm_avg:.1} ms, max {:.1} ms (warm)",
+                    source.name(),
+                    grabs.first().map_or(0.0, |g| g.took),
+                    warm.iter().copied().fold(0.0, f64::max)
+                ));
             }
         }
         SeriesJob::new(source, n, t0, !self.opts.no_save, grabs)
@@ -425,9 +436,16 @@ impl App {
         let (n, source, t2) = (session.n, session.source, session.t2);
         let photos = session.photos.clone();
         let tag = format!("{} #{n}", source.name());
-        log::line(format!("RESULT capture {tag}: {:.1} ms", t1 - t0));
-        log::line(format!("RESULT windows {tag}: {:.1} ms", t2 - t1));
-        log::line(format!("RESULT total {tag}: {:.1} ms", t2 - t0));
+        let note = match source {
+            Source::Tray | Source::Start => " (includes the 1500 ms delay series)",
+            Source::Hotkey | Source::Timer => " (frozen_photo, which creates a cold DXGI session)",
+        };
+        log::line(format!("RESULT capture {tag}: {:.1} ms{note}", t1 - t0));
+        log::line(format!(
+            "RESULT windows {tag}: {:.1} ms (cold: render targets and bitmap uploads included; see the first-paint lines)",
+            t2 - t1
+        ));
+        log::line(format!("RESULT total {tag}: {:.1} ms{note}", t2 - t0));
         let held: usize = self.series_jobs.len();
         self.log_usage(&format!("after tools #{n} open ({held} series job(s) still holding frames)"));
 
@@ -546,9 +564,19 @@ impl App {
         ));
         let mut original_saved = vec![false; photos.len()];
 
-        // The session is released at the end of the closure, before the GDI pass.
-        match DxgiSession::new().map(|mut dxgi| dxgi.grab_all()) {
-            Ok(grabs) => {
+        // A fresh session (the series one is long gone: one duplication per output per process), released at
+        // the end of the closure, before the GDI pass.
+        let start = log::now_ms();
+        let dxgi = DxgiSession::new().map(|mut dxgi| {
+            let created = log::now_ms();
+            let grabs = dxgi.grab_all();
+            (grabs, created - start, log::now_ms() - created)
+        });
+        match dxgi {
+            Ok((grabs, cold, first)) => {
+                log::line(format!(
+                    "identical check {tag}: DxgiSession::new {cold:.1} ms (cold), first grab_all {first:.1} ms"
+                ));
                 for (i, photo) in photos.iter().enumerate() {
                     let short = short_name(&photo.device_name);
                     match grabs.iter().find(|(d, _)| *d == photo.device_name) {
@@ -570,12 +598,13 @@ impl App {
             let short = short_name(&photo.device_name);
             match self.monitors.iter().find(|m| m.device_name == photo.device_name) {
                 None => log::line(format!("RESULT identical {tag} {short} gdi: monitor not in the current list")),
-                Some(m) => match capture::gdi_monitor(m) {
-                    Ok(again) => {
+                Some(m) => match timed(|| capture::gdi_monitor(m)) {
+                    (Ok(again), took) => {
+                        log::line(format!("identical check {tag} {short}: gdi_monitor {took:.1} ms"));
                         let base = format!("identical-{}-{n}-{short}", source.name());
                         compare_identical(&tag, &base, photo, &again, "gdi", toolbar_rect, &mut original_saved[i]);
                     }
-                    Err(e) => log::line(format!("RESULT identical {tag} {short} gdi: capture failed ({e})")),
+                    (Err(e), _) => log::line(format!("RESULT identical {tag} {short} gdi: capture failed ({e})")),
                 },
             }
         }
@@ -798,6 +827,13 @@ fn describe_monitors(list: &[MonitorInfo]) -> String {
         })
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+/// Runs `f` and returns its result with the time it took, in ms.
+fn timed<T>(f: impl FnOnce() -> T) -> (T, f64) {
+    let start = log::now_ms();
+    let out = f();
+    (out, log::now_ms() - start)
 }
 
 fn contains(r: PxRect, p: POINT) -> bool {

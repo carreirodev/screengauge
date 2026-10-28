@@ -36,6 +36,8 @@ pub struct Grab {
     pub delay: u32,
     /// When the grab started, ms after t0.
     pub at: f64,
+    /// How long `grab_all` took.
+    pub took: f64,
     pub frames: Vec<(String, Result<Photo, String>)>,
 }
 
@@ -151,9 +153,10 @@ impl SeriesJob {
                     Ok(stats) => {
                         let bbox = if stats.differing > 0 { diff_bbox(photo, reference) } else { None };
                         log::line(format!(
-                            "{tag} {short} +{} ms (grab at +{:.1}, pixels taken at +{:.1}): {} vs the +{} ms frame{}",
+                            "{tag} {short} +{} ms (grab at +{:.1}, took {:.1} ms, pixels taken at +{:.1}): {} vs the +{} ms frame{}",
                             grab.delay,
                             grab.at,
+                            grab.took,
                             photo.taken_ms - self.t0,
                             describe_stats(&stats),
                             self.final_delay,
