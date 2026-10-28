@@ -468,7 +468,9 @@ fn describe(h: HWND) -> TopWindow {
     let mut rect = RECT::default();
     let mut pid = 0u32;
     // SAFETY: plain queries on a window handle; the buffers and out values live on this stack frame.
-    let (nc, nt, rect_ok, visible, ex, _) = unsafe {
+    // GetWindowThreadProcessId's return (the thread id) is not needed; when it fails `pid` stays 0 and
+    // exe_name reports the OpenProcess error instead.
+    let (nc, nt, rect_ok, visible, ex, _thread) = unsafe {
         (
             GetClassNameW(h, &mut class),
             GetWindowTextW(h, &mut title),
