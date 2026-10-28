@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — throwaway, never merged into main.
+  Question (WPC-279 "Como as medidas aparecem na tela"): what do the measurements,
+  the magnified view, the toolbar and the notices look like, in light and dark?
+  Plan: three overlay variants (A, B, C) on one page, switchable with ?variant= and
+  the yellow bar at the bottom. Toolbar is one design (from DesignInterface/), except
+  where the H/V/C mode buttons sit, which varies with the variant.
+  Pixel model: a canvas pixel is a physical pixel; logical = physical / the simulated
+  scale of that monitor. Pixmeter's own UI is not rescaled per monitor.
+  Open by double-clicking this file. No build, no server, nothing saved.
+-->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pixmeter prototype</title>
+<style>
+:root { --bar-h: 64px; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0c0e; font-family: "Segoe UI", system-ui, sans-serif; }
+#screens { position: absolute; left: 0; top: 0; right: 0; bottom: var(--bar-h); overflow: hidden; }
+#screens.tools-on { cursor: crosshair; }
+#desk, #ovl { position: absolute; left: 0; top: 0; }
+#ovl { pointer-events: none; }
+.cap { position: absolute; color: #8b919c; font: 12px/1 ui-monospace, Consolas, monospace; letter-spacing: .02em; pointer-events: none; white-space: nowrap; }
+.cap b { color: #d6d9de; font-weight: 600; }
+#labels, #fx { position: absolute; inset: 0; pointer-events: none; }
+
+/* ---------- Pixmeter theme tokens (light / dark), from DesignInterface/Pixmeter Toolbar v2 ---------- */
+.pm-dark {
+  --grp-bg: linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.02)), rgba(24,25,29,.86);
+  --grp-border: rgba(255,255,255,.08);
+  --grp-shadow: inset 0 1px 0 rgba(255,255,255,.12), inset 0 -8px 16px rgba(0,0,0,.35), 0 18px 40px -12px rgba(0,0,0,.8);
+  --btn-bg: linear-gradient(180deg, #555a64 0%, #2a2d33 55%, #1a1b1f 100%);
+  --btn-shadow: inset 0 1px 1px rgba(255,255,255,.25), inset 0 -3px 6px rgba(0,0,0,.5), 0 4px 8px rgba(0,0,0,.55);
+  --ink: #c3c7cf; --ink-on: #06141a;
+  --on-bg: linear-gradient(180deg, oklch(0.92 0.1 195) 0%, oklch(0.74 0.15 205) 50%, oklch(0.5 0.14 220) 100%);
+  --on-shadow: inset 0 1px 1px rgba(255,255,255,.6), inset 0 -3px 6px rgba(0,0,0,.3), 0 0 22px oklch(0.75 0.15 205 / .6), 0 4px 8px rgba(0,0,0,.5);
+  --sbtn-bg: linear-gradient(180deg, #4a4e57, #1e2024 85%); --sbtn-ink: #aeb3bd; --sbtn-ink-hover: #fff;
+  --panel: rgba(26,27,31,.94); --panel-solid: #1c1d21; --panel-ink: #e9ebef; --panel-dim: #9aa0aa; --panel-border: rgba(255,255,255,.1);
+  --panel-shadow: 0 10px 28px -8px rgba(0,0,0,.75), inset 0 1px 0 rgba(255,255,255,.08);
+  --accent: oklch(0.8 0.13 200); --warn: oklch(0.82 0.14 80);
+  --blank: #2a2c31;
+}
+.pm-light {
+  --grp-bg: linear-gradient(180deg, rgba(255,255,255,.85), rgba(255,255,255,.45)), rgba(226,224,219,.8);
+  --grp-border: rgba(255,255,255,.9);
+  --grp-shadow: inset 0 -6px 14px rgba(70,60,45,.08), 0 18px 36px -14px rgba(70,60,45,.45), 0 2px 4px rgba(70,60,45,.12);
+  --btn-bg: linear-gradient(180deg, #ffffff 0%, #f1efeb 50%, #d6d2cb 100%);
+  --btn-shadow: inset 0 1px 1px #ffffff, inset 0 -3px 5px rgba(70,60,45,.15), 0 4px 8px rgba(70,60,45,.22);
+  --ink: #4b4843; --ink-on: #ffffff;
+  --on-bg: linear-gradient(180deg, oklch(0.85 0.1 220) 0%, oklch(0.62 0.16 235) 55%, oklch(0.45 0.15 245) 100%);
+  --on-shadow: inset 0 1px 1px rgba(255,255,255,.6), inset 0 -3px 6px rgba(0,0,0,.2), 0 0 18px oklch(0.62 0.16 235 / .45), 0 4px 8px rgba(40,50,80,.3);
+  --sbtn-bg: linear-gradient(180deg, #ffffff, #dcd8d1 90%); --sbtn-ink: #5b5852; --sbtn-ink-hover: #111;
+  --panel: rgba(250,249,247,.96); --panel-solid: #faf9f7; --panel-ink: #1d1c1a; --panel-dim: #6b6862; --panel-border: rgba(70,60,45,.16);
+  --panel-shadow: 0 10px 26px -8px rgba(70,60,45,.45), inset 0 1px 0 #fff;
+  --accent: oklch(0.55 0.15 235); --warn: oklch(0.58 0.15 60);
+  --blank: #d9d6d0;
+}
+
+/* ---------- Toolbar ---------- */
+#toolbar { position: absolute; display: flex; align-items: center; gap: 12px; cursor: default; user-select: none; }
+#toolbar.dragging { cursor: grabbing; }
+.grp { position: relative; display: flex; gap: 10px; padding: 9px; border-radius: 20px; background: var(--grp-bg); border: 1px solid var(--grp-border); box-shadow: var(--grp-shadow); backdrop-filter: blur(14px); }
+.grp.small { gap: 8px; padding: 8px; }
+.tbtn { position: relative; width: 46px; height: 46px; border: none; border-radius: 13px; cursor: default; display: grid; place-items: center; color: var(--ink); background: var(--btn-bg); box-shadow: var(--btn-shadow); transition: transform .12s; padding: 0; }
+.tbtn:hover { transform: translateY(-2px); }
+.tbtn:active { transform: translateY(1px) scale(.95); }
+.tbtn.on { color: var(--ink-on); }
+.tbtn.on::before { content: ""; position: absolute; inset: 0; border-radius: 13px; background: var(--on-bg); box-shadow: var(--on-shadow); }
+.tbtn svg { position: relative; }
+.tbtn .key { position: absolute; right: 4px; bottom: 2px; font: 600 9px/1 "Segoe UI", sans-serif; opacity: .55; }
+.sbtn { width: 34px; height: 34px; border: none; border-radius: 10px; cursor: default; display: grid; place-items: center; color: var(--sbtn-ink); background: var(--sbtn-bg); box-shadow: inset 0 1px 1px rgba(255,255,255,.2), 0 3px 6px rgba(0,0,0,.35); transition: transform .12s, color .15s; padding: 0; }
+.sbtn:hover { color: var(--sbtn-ink-hover); }
+.sbtn:active { transform: scale(.92); }
+.sbtn.close:hover { color: #fff; background: linear-gradient(180deg, oklch(0.75 0.17 25), oklch(0.5 0.17 25) 85%); }
+.mbtn { position: relative; width: 34px; height: 34px; border: none; border-radius: 10px; cursor: default; display: grid; place-items: center; color: var(--ink); background: var(--btn-bg); box-shadow: var(--btn-shadow); padding: 0; }
+.mbtn.on { color: var(--ink-on); }
+.mbtn.on::before { content: ""; position: absolute; inset: 0; border-radius: 10px; background: var(--on-bg); box-shadow: var(--on-shadow); }
+.mbtn svg { position: relative; }
+.grp.modes { align-items: center; padding: 8px; gap: 6px; }
+.grp.modes.hidden { visibility: hidden; }
+.grp.modes.tab { position: absolute; left: 0; top: calc(100% + 6px); border-radius: 0 0 16px 16px; padding: 6px 8px 8px; }
+.grp.modes.tab::before { content: ""; position: absolute; left: 22px; top: -7px; width: 14px; height: 7px; background: inherit; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+#tbMini { position: absolute; width: 52px; height: 52px; border: none; border-radius: 15px; cursor: default; display: grid; place-items: center; color: var(--ink-on); background: var(--on-bg); box-shadow: var(--on-shadow); padding: 0; }
+#tbMini .chev { position: absolute; right: 3px; bottom: 3px; width: 14px; height: 14px; border-radius: 5px; background: rgba(0,0,0,.35); display: grid; place-items: center; color: #fff; }
+
+/* ---------- Labels, notices, magnified view (shared) ---------- */
+.lbl { position: absolute; white-space: nowrap; font: 600 12px/1 "Segoe UI", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+.dm { opacity: .62; font-weight: 500; }
+.dv { display: inline-block; width: 1px; height: 11px; margin: 0 7px; vertical-align: -1px; background: currentColor; opacity: .4; }
+.pill { padding: 5px 8px; border-radius: 7px; box-shadow: 0 2px 7px rgba(0,0,0,.35); }
+.pill.live { color: #04161b; }
+.pill.pin { background: var(--panel); color: var(--panel-ink); border: 1px solid var(--panel-border); }
+.lbl.tag { padding: 4px 7px; border-radius: 6px; font-size: 11px; line-height: 1.25; background: var(--panel); color: var(--panel-ink); border: 1px solid var(--panel-border); box-shadow: 0 2px 7px rgba(0,0,0,.3); }
+.cad.live { padding: 2px 4px; text-shadow: 0 0 2px #000, 0 0 3px #000, 0 0 5px rgba(0,0,0,.8); }
+.cad.pin { padding: 2px 5px; border-radius: 4px; background: var(--panel); color: var(--panel-ink); border: 1px solid var(--panel-border); }
+.panel { background: var(--panel); color: var(--panel-ink); border: 1px solid var(--panel-border); box-shadow: var(--panel-shadow); backdrop-filter: blur(10px); }
+.toast { position: absolute; white-space: nowrap; font: 600 12px/1.25 "Segoe UI", system-ui, sans-serif; padding: 7px 11px 7px 9px; border-radius: 10px; display: flex; gap: 7px; align-items: flex-start; animation: toastIn .14s ease-out; }
+.toast .ok { color: var(--accent); }
+.toast .bad { color: var(--warn); }
+.toast small { display: block; font-weight: 500; color: var(--panel-dim); }
+@keyframes toastIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.ind { position: absolute; white-space: nowrap; font: 600 11px/1 "Segoe UI", system-ui, sans-serif; padding: 6px 9px; border-radius: 9px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.meter { display: inline-flex; gap: 2px; }
+.meter i { width: 4px; height: 10px; border-radius: 1px; background: currentColor; opacity: .22; }
+.meter i.f { opacity: 1; background: var(--accent); }
+#mag { position: absolute; pointer-events: none; }
+#mag canvas { display: block; image-rendering: pixelated; }
+.magframe { position: relative; overflow: hidden; width: fit-content; }
+.magtag { position: absolute; left: 6px; top: 6px; font: 700 11px/1 "Segoe UI", sans-serif; padding: 4px 6px; border-radius: 6px; background: rgba(0,0,0,.6); color: #fff; }
+.info { font: 500 12px/1.35 "Segoe UI", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+.info .row { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.info .k { color: var(--panel-dim); min-width: 14px; }
+.info .v { font-weight: 600; }
+.sw { width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--panel-border); flex: none; }
+.hdr { color: var(--warn); font-weight: 600; font-size: 11px; display: flex; gap: 5px; align-items: center; }
+
+/* ---------- Variant B card ---------- */
+.card { position: absolute; min-width: 132px; padding: 9px 11px 9px; border-radius: 12px; font: 500 11px/1.3 "Segoe UI", system-ui, sans-serif; font-variant-numeric: tabular-nums; pointer-events: none; }
+.card .hd { display: flex; align-items: center; gap: 6px; color: var(--panel-dim); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: 10px; margin-bottom: 4px; }
+.card .big { font: 700 18px/1.15 "Segoe UI", system-ui, sans-serif; }
+.card .big small { font-size: 11px; font-weight: 600; color: var(--panel-dim); margin-left: 3px; }
+.card .sub { color: var(--panel-dim); margin-top: 2px; }
+.card .sub b { color: var(--panel-ink); font-weight: 600; }
+.card .ft { display: flex; align-items: center; gap: 7px; margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--panel-border); color: var(--panel-dim); transition: color .2s; }
+.card .ft.hot { color: var(--panel-ink); }
+.card .tst { margin-top: 7px; padding: 5px 7px; border-radius: 7px; background: color-mix(in oklch, var(--accent) 22%, transparent); color: var(--panel-ink); font-weight: 600; }
+.card .tst.bad { background: color-mix(in oklch, var(--warn) 25%, transparent); }
+
+/* ---------- Fake "Save As" (a Windows dialog, simulated) ---------- */
+#saveas { position: absolute; inset: 0; display: grid; place-items: center; background: transparent; }
+#saveas .dlg { width: 440px; background: #f3f3f3; color: #1a1a1a; border: 1px solid #a0a0a0; border-radius: 8px; box-shadow: 0 20px 50px rgba(0,0,0,.45); font: 13px "Segoe UI", sans-serif; overflow: hidden; }
+#saveas .tt { padding: 9px 12px; background: #fff; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; }
+#saveas .tt span { color: #888; font-size: 11px; }
+#saveas .bd { padding: 14px 12px; display: grid; gap: 8px; }
+#saveas input { width: 100%; padding: 5px 7px; border: 1px solid #8a8a8a; border-radius: 4px; font: inherit; }
+#saveas .ac { display: flex; justify-content: flex-end; gap: 8px; padding: 0 12px 12px; }
+#saveas button { min-width: 88px; padding: 5px 10px; border-radius: 4px; border: 1px solid #b5b5b5; background: #fdfdfd; font: inherit; }
+#saveas button.pri { background: #005fb8; color: #fff; border-color: #005fb8; }
+
+/* ---------- Prototype bar: deliberately not Pixmeter's style ---------- */
+#pbar { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 6px; background: #0a0a0a; color: #f2f2f2; border: 1px solid #ffd60a; border-radius: 12px; font: 12px/1 ui-monospace, Consolas, monospace; box-shadow: 0 6px 20px rgba(0,0,0,.6); white-space: nowrap; max-width: calc(100vw - 16px); z-index: 10; }
+#pbar .tag { background: #ffd60a; color: #000; font-weight: 700; padding: 4px 6px; border-radius: 6px; letter-spacing: .05em; }
+#pbar button { background: #1d1d1d; color: #f2f2f2; border: 1px solid #3a3a3a; border-radius: 7px; height: 30px; padding: 0 9px; font: inherit; cursor: pointer; }
+#pbar button:hover { border-color: #ffd60a; }
+#pbar button.arrow { width: 30px; padding: 0; }
+#pName { min-width: 230px; text-align: center; font-weight: 700; color: #ffd60a; }
+#pState { color: #bdbdbd; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
+#pState b { color: #fff; font-weight: 600; }
+#pThumb { height: 30px; border: 1px solid #555; image-rendering: pixelated; display: none; }
+.ppanel { position: fixed; left: 50%; bottom: 62px; transform: translateX(-50%); width: min(760px, calc(100vw - 16px)); max-height: calc(100vh - 80px); overflow: auto; background: #0a0a0a; color: #eaeaea; border: 1px solid #ffd60a; border-radius: 12px; padding: 14px 16px; font: 12.5px/1.45 "Segoe UI", system-ui, sans-serif; z-index: 11; box-shadow: 0 10px 30px rgba(0,0,0,.6); }
+.ppanel h3 { margin: 4px 0 6px; font-size: 13px; color: #ffd60a; }
+.ppanel h4 { margin: 10px 0 4px; font-size: 12.5px; }
+.ppanel ol { margin: 0 0 6px; padding-left: 22px; }
+.ppanel li { margin: 2px 0; }
+.ppanel code, .ppanel kbd { font: 12px ui-monospace, Consolas, monospace; background: #222; border: 1px solid #3a3a3a; border-radius: 4px; padding: 0 4px; }
+.ppanel .grid { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; align-items: center; }
+.ppanel .seg { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.ppanel .seg button { background: #1d1d1d; color: #eee; border: 1px solid #3a3a3a; border-radius: 6px; padding: 3px 8px; font: inherit; cursor: pointer; }
+.ppanel .seg button.on { background: #ffd60a; color: #000; border-color: #ffd60a; }
+.ppanel .note { color: #9b9b9b; }
+.ppanel .cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+@media (max-width: 900px) { .ppanel .cols { grid-template-columns: 1fr; } }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div id="screens">
+  <canvas id="desk"></canvas>
+  <canvas id="ovl"></canvas>
+  <div id="caps"></div>
+  <div id="pm" class="pm-dark">
+    <div id="labels"></div>
+    <div id="mag" hidden></div>
+    <div id="fx"></div>
+    <div id="toolbar"></div>
+    <button id="tbMini" hidden></button>
+    <div id="saveas" hidden></div>
+  </div>
+</div>
+
+<div id="pbar">
+  <span class="tag">PROTÓTIPO</span>
+  <button class="arrow" id="pPrev" title="Variante anterior (←)">◀</button>
+  <span id="pName"></span>
+  <button class="arrow" id="pNext" title="Próxima variante (→)">▶</button>
+  <button id="pTheme"></button>
+  <button id="pOpts">Ajustes</button>
+  <button id="pHelp">Teclas e escolhas</button>
+  <span id="pState"></span>
+  <canvas id="pThumb"></canvas>
+  <button id="pCall" hidden>Chamar o Pixmeter (M)</button>
+</div>
+<div id="pOptsPanel" class="ppanel" hidden></div>
+<div id="pHelpPanel" class="ppanel" hidden></div>
+
+<script src="desktop.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
