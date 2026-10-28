@@ -233,6 +233,9 @@ struct Opts {
     once: bool,
     no_save: bool,
     save_photo: bool,
+    /// Tray and Start triggers take the foreground before the delay series (experiment: the hidden-icons
+    /// flyout stays open until another app activates).
+    activate_first: bool,
     present: tools::Present,
     hotkey: HotkeySpec,
 }
@@ -252,6 +255,7 @@ impl Opts {
             once: args.flag("once"),
             no_save: args.flag("no-save"),
             save_photo: args.flag("save-photo"),
+            activate_first: args.flag("activate-first"),
             present: tools::Present { vsync: args.flag("present-vsync") },
         };
         if opts.auto_close_secs == 0 || opts.exit_after_secs == 0 {
@@ -262,7 +266,7 @@ impl Opts {
 
     fn describe(&self) -> String {
         format!(
-            "hotkey={} trigger-after-ms={} auto-close-secs={} exit-after-secs={} once={} no-save={} save-photo={} present={}",
+            "hotkey={} trigger-after-ms={} auto-close-secs={} exit-after-secs={} once={} no-save={} save-photo={} activate-first={} present={}",
             self.hotkey.text,
             self.trigger_after_ms.map_or_else(|| "off".to_string(), |v| v.to_string()),
             self.auto_close_secs,
@@ -270,6 +274,7 @@ impl Opts {
             self.once,
             self.no_save,
             self.save_photo,
+            self.activate_first,
             if self.present.vsync { "vsync (D2D1_PRESENT_OPTIONS_NONE)" } else { "immediately" }
         )
     }

@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::time::Duration;
 
-use windows::Win32::Foundation::{HINSTANCE, HWND, POINT};
+use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, POINT};
 use windows::Win32::Graphics::Direct2D::{D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1CreateFactory, ID2D1Factory};
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD,
@@ -16,7 +16,8 @@ use windows::Win32::Graphics::Dwm::DwmFlush;
 use windows::Win32::Graphics::Gdi::UpdateWindow;
 use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetForegroundWindow, PostQuitMessage, SW_SHOW, SW_SHOWNA, SetForegroundWindow, ShowWindow,
+    CreateWindowExW, DestroyWindow, GetCursorPos, GetForegroundWindow, LWA_ALPHA, PostQuitMessage, SW_SHOW, SW_SHOWNA,
+    SetForegroundWindow, SetLayeredWindowAttributes, ShowWindow, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::w;
 
@@ -212,6 +213,22 @@ impl App {
             log::now_ms() - t0
         ));
 
+        // Held until the tools are open, so the foreground never goes back to Explorer in between.
+        // Only on even triggers, so one session measures the same source with and without it.
+        let activate = self.opts.activate_first && n % 2 == 0;
+        if matches!(source, Source::Tray | Source::Start) {
+            log::line(format!("RESULT activate-first {} #{n}: {}", source.name(), if activate { "on" } else { "off" }));
+        }
+        let activator = match source {
+            Source::Tray | Source::Start if activate => match Activator::take(self.hinstance) {
+                Ok(a) => Some(a),
+                Err(e) => {
+                    log::line(format!("ERROR: activate-first #{n}: {e}; running the series without it"));
+                    None
+                }
+            },
+            _ => None,
+        };
         let photos = match source {
             Source::Hotkey | Source::Timer => match capture::frozen_photo() {
                 Ok(list) => list.into_iter().map(Rc::new).collect::<Vec<_>>(),
@@ -253,6 +270,7 @@ impl App {
             return;
         }
         self.after_open(t0, t1);
+        drop(activator);
     }
 
     /// One DxgiSession, grabs at fixed delays after t0, every frame kept for the analysis.
@@ -842,4 +860,58 @@ fn contains(r: PxRect, p: POINT) -> bool {
 
 fn yes_no(v: bool) -> &'static str {
     if v { "yes" } else { "no" }
+}
+
+/// A 1×1 transparent window that takes the foreground for `--activate-first`, so Explorer's panels see
+/// another app activate and close before the photo.
+struct Activator(HWND);
+
+impl Activator {
+    fn take(hinstance: HINSTANCE) -> Result<Self, String> {
+        let mut pt = POINT::default();
+        // SAFETY: fills one POINT on this stack frame.
+        unsafe { GetCursorPos(&mut pt) }.ctx("GetCursorPos")?;
+        // SAFETY: STATIC is a system class; Drop destroys the window on this thread.
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TOPMOST,
+                w!("STATIC"),
+                w!("hwtest activator"),
+                WS_POPUP,
+                pt.x,
+                pt.y,
+                1,
+                1,
+                None,
+                None,
+                Some(hinstance),
+                None,
+            )
+        }
+        .ctx("CreateWindowExW activator")?;
+        let activator = Self(hwnd);
+        // SAFETY: hwnd is ours and alive.
+        unsafe { SetLayeredWindowAttributes(hwnd, COLORREF(0), 0, LWA_ALPHA) }.ctx("SetLayeredWindowAttributes")?;
+        let t = log::now_ms();
+        // SAFETY: hwnd is ours and alive. The return value says whether it was already visible.
+        let _ = unsafe { ShowWindow(hwnd, SW_SHOW) };
+        // SAFETY: hwnd is ours and alive.
+        let ok = unsafe { SetForegroundWindow(hwnd) }.as_bool();
+        // SAFETY: plain query.
+        let ours = unsafe { GetForegroundWindow() } == hwnd;
+        log::line(format!(
+            "activate-first: SetForegroundWindow returned {ok}, foreground is the activator: {ours}, {:.1} ms",
+            log::now_ms() - t
+        ));
+        Ok(activator)
+    }
+}
+
+impl Drop for Activator {
+    fn drop(&mut self) {
+        // SAFETY: created by take() on this thread and not destroyed elsewhere.
+        if let Err(e) = unsafe { DestroyWindow(self.0) } {
+            log::line(format!("activate-first: DestroyWindow: {e}"));
+        }
+    }
 }
