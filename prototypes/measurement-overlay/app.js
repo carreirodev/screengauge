@@ -71,8 +71,8 @@ const S = {
   tbMin: false, tbPos: null, tbRel: { monId: 1, fx: .5, fy: 0 }, tbDrag: null,
   toast: null, tolAt: 0, magAt: 0,
   clip: '—', msg: '', saveAs: null,
-  settings: { lang: 'auto', theme: 'auto', tolDefault: 2, showLogical: true, colorFmt: 'both', snipDest: 'clip', folderOn: false, folder: 'C:\\Users\\ana\\Pictures\\Pixmeter' },
-  scen: { hdr2: false, saveFail: false },
+  settings: { lang: 'auto', theme: 'auto', tolDefault: 2, showLogical: true, colorFmt: 'both', snipDest: 'clip', folderOn: false, folder: '', shortcut: ['Win', 'Ctrl', 'M'], startWin: false },
+  scen: { hdr2: false, saveFail: false, shortcutBusy: false, startupBlocked: false, copy: 'installer' },
 };
 if (!VARS[S.variant]) S.variant = 'A';
 const V = () => VARS[S.variant];
@@ -206,7 +206,7 @@ tb.addEventListener('click', e => {
   else if (b.dataset.mode) { S.mode = b.dataset.mode; renderToolbar(); render(); }
   else if (b.dataset.act === 'close') closeAll();
   else if (b.dataset.act === 'min') { S.tbMin = true; renderToolbar(); render(); }
-  else if (b.dataset.act === 'settings') { closeAll(); S.msg = 'A janela de Configurações entra na etapa 2 do protótipo. Por enquanto, use "Ajustes" aqui embaixo.'; render(); }
+  else if (b.dataset.act === 'settings') { closeAll(); openSettings(); }
 });
 mini.addEventListener('click', () => { S.tbMin = false; renderToolbar(); render(); });
 tb.addEventListener('pointerdown', e => {
@@ -247,12 +247,12 @@ function setCursor(e) {
 screens.addEventListener('pointermove', e => {
   if (S.tbDrag) return;
   setCursor(e);
-  S.overTb = !!e.target.closest('#toolbar, #tbMini, #saveas');
+  S.overTb = !!e.target.closest('#toolbar, #tbMini, #saveas, #settings');
   render();
 });
 screens.addEventListener('pointerleave', () => { S.cur.mon = null; render(); });
 screens.addEventListener('pointerdown', e => {
-  if (!S.open || e.button !== 0 || e.target.closest('#toolbar, #tbMini, #saveas') || S.saveAs) return;
+  if (!S.open || e.button !== 0 || e.target.closest('#toolbar, #tbMini, #saveas, #settings') || S.saveAs) return;
   setCursor(e); S.alt = e.altKey;
   if ((S.tool === 'bounds' || S.tool === 'snip') && S.cur.mon) {
     S.drag = { x0: S.cur.x, y0: S.cur.y, mon: S.cur.mon };
@@ -263,7 +263,7 @@ screens.addEventListener('pointerdown', e => {
 screens.addEventListener('pointerup', e => {
   if (!S.open || e.button !== 0 || S.saveAs) return;
   if (S.drag) { finishDrag(e.shiftKey); return; }
-  if (e.target.closest('#toolbar, #tbMini, #saveas') || !S.cur.mon) return;
+  if (e.target.closest('#toolbar, #tbMini, #saveas, #settings') || !S.cur.mon) return;
   if (S.tool === 'dim') {
     const m = measureDim(S.cur.x, S.cur.y, S.cur.mon, S.mode);
     S.pinned.push(m); copy(copyText(m, e.shiftKey)); toast(t('copied'));
@@ -276,7 +276,7 @@ screens.addEventListener('pointerup', e => {
 });
 screens.addEventListener('wheel', e => {
   e.preventDefault();
-  if (!S.open || e.target.closest('#toolbar, #tbMini, #saveas') || S.saveAs) return;
+  if (!S.open || e.target.closest('#toolbar, #tbMini, #saveas, #settings') || S.saveAs) return;
   const up = e.deltaY < 0;
   if (S.tool === 'inspect') {
     const i = clamp(MAGS.indexOf(S.mag) + (up ? 1 : -1), 0, MAGS.length - 1);
@@ -338,6 +338,7 @@ function toast(text, sub, bad) {
 }
 
 window.addEventListener('keydown', e => {
+  if (settingsKey(e)) return; // the shortcut recorder takes every key while it records
   if (e.target.closest && e.target.closest('input, textarea, [contenteditable]')) {
     if (e.key === 'Escape' && S.saveAs) closeSaveAs(false);
     if (e.key === 'Enter' && S.saveAs) closeSaveAs(true);
@@ -366,6 +367,8 @@ function draw() {
   const isDark = S.settings.theme === 'dark' || (S.settings.theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
   pm.className = isDark ? 'pm-dark' : 'pm-light';
   screens.classList.toggle('tools-on', S.open && !S.overTb);
+  // The frozen screen covers everything while the tools are open, Settings included.
+  $('#settings').style.pointerEvents = S.open ? 'none' : '';
   octx.clearRect(0, 0, ovl.width, ovl.height);
   const L = [], F = [];
   if (S.open) {
@@ -660,7 +663,7 @@ function updateBar() {
   $('#pTheme').textContent = `Tema: ${THEMES[S.settings.theme]}`;
   $('#pCall').hidden = S.open;
   let st;
-  if (!S.open) st = S.msg || 'Pixmeter fechado. Aperte <b>M</b> (no lugar de Win + Ctrl + M) ou clique em Chamar.';
+  if (!S.open) st = S.msg || 'Ferramentas fechadas. Aperte <b>M</b> (no lugar do atalho global) ou clique em Chamar.';
   else {
     st = `<b>${t(S.tool)}</b>${S.tool === 'dim' ? ' · ' + t(S.mode) : ''}`;
     st += S.tool === 'inspect' ? ` · ampliação ${S.mag}×` : ` · tolerância ${S.tol}${S.tol !== S.settings.tolDefault ? ` (padrão ${S.settings.tolDefault})` : ''}`;
@@ -671,8 +674,9 @@ function updateBar() {
 }
 $('#pPrev').onclick = () => cycleVariant(-1);
 $('#pNext').onclick = () => cycleVariant(1);
-$('#pTheme').onclick = () => { const ks = Object.keys(THEMES); S.settings.theme = ks[(ks.indexOf(S.settings.theme) + 1) % 3]; render(); if (!$('#pOptsPanel').hidden) renderOpts(); };
+$('#pTheme').onclick = () => { const ks = Object.keys(THEMES); S.settings.theme = ks[(ks.indexOf(S.settings.theme) + 1) % 3]; render(); renderSettings(); };
 $('#pCall').onclick = () => callPixmeter();
+$('#pSettings').onclick = () => { if (S.open) closeAll(); openSettings(); };
 $('#pOpts').onclick = () => { const p = $('#pOptsPanel'); p.hidden = !p.hidden; $('#pHelpPanel').hidden = true; if (!p.hidden) renderOpts(); };
 $('#pHelp').onclick = () => { const p = $('#pHelpPanel'); p.hidden = !p.hidden; $('#pOptsPanel').hidden = true; if (!p.hidden) renderHelp(); };
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
@@ -683,32 +687,25 @@ function seg(path, opts) {
 }
 function renderOpts() {
   const p = $('#pOptsPanel');
-  p.innerHTML = `<h3>Ajustes do protótipo</h3>
-  <div class="note" style="margin-bottom:8px">São as opções de Configurações já decididas, só para mudar o que aparece na tela. Na etapa 2 elas passam para a janela de Configurações do Pixmeter.</div>
-  <div class="grid">
-    <span>Idioma</span>${seg('settings.lang', [['auto', 'Automático'], ['en', 'English'], ['pt', 'Português']])}
-    <span>Tema</span>${seg('settings.theme', [['auto', 'Automático'], ['light', 'Claro'], ['dark', 'Escuro']])}
-    <span>Mostrar também o pixel de escala</span>${seg('settings.showLogical', [[true, 'Ligado'], [false, 'Desligado']])}
-    <span>Tolerância padrão</span><span class="seg"><button data-tol="-1">−</button><b style="padding:3px 8px">${S.settings.tolDefault}</b><button data-tol="1">+</button></span>
-    <span>Formato da cor (Inspect)</span>${seg('settings.colorFmt', [['hex', 'HEX'], ['rgb', 'RGB'], ['both', 'Os dois']])}
-    <span>Destino do Snip</span>${seg('settings.snipDest', [['clip', 'Área de transferência'], ['file', 'Arquivo'], ['both', 'Os dois']])}
-    <span>Salvar na pasta padrão</span>${seg('settings.folderOn', [[true, 'Ligado'], [false, 'Desligado']])}
-  </div>
-  <h3 style="margin-top:12px">Cenários</h3>
+  p.innerHTML = `<h3>Cenários</h3>
+  <div class="note" style="margin-bottom:8px">Situações que não acontecem sozinhas no navegador. As opções do Pixmeter ficam na janela de Configurações (engrenagem da barra, ou o botão "Configurações" aqui embaixo, que faz o papel do menu do ícone perto do relógio).</div>
   <div class="grid">
     <span>HDR ligado sem correção no Monitor 2</span>${seg('scen.hdr2', [[true, 'Sim'], [false, 'Não']])}
     <span>Falha ao gravar o arquivo do Snip</span>${seg('scen.saveFail', [[true, 'Sim'], [false, 'Não']])}
-  </div>`;
+    <span>Atalho global ocupado ao iniciar</span>${seg('scen.shortcutBusy', [[true, 'Sim'], [false, 'Não']])}
+    <span>O Windows desligou o "Iniciar com o Windows"</span>${seg('scen.startupBlocked', [[true, 'Sim'], [false, 'Não']])}
+    <span>Cópia instalada</span>${seg('scen.copy', [['installer', 'Instalador (GitHub)'], ['store', 'Microsoft Store']])}
+  </div>
+  <div class="note" style="margin-top:8px">No gravador de atalho, <code>Ctrl + Shift + S</code> faz o papel de uma combinação já usada por outro programa. O navegador pode tomar para si algumas combinações (como <code>Ctrl + T</code>); no app de verdade isso não acontece.</div>`;
 }
 $('#pOptsPanel').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
-  if (b.dataset.set) {
-    const [obj, key] = b.dataset.set.split('.'), raw = b.dataset.val;
-    S[obj][key] = raw === 'true' ? true : raw === 'false' ? false : raw;
-  } else if (b.dataset.tol) {
-    S.settings.tolDefault = clamp(S.settings.tolDefault + +b.dataset.tol, 0, TOL_MAX);
-  }
-  renderOpts(); renderToolbar(); render();
+  const [obj, key] = b.dataset.set.split('.'), raw = b.dataset.val;
+  S[obj][key] = raw === 'true' ? true : raw === 'false' ? false : raw;
+  // The busy-shortcut notification's click opens Settings with the row highlighted.
+  if (b.dataset.set === 'scen.shortcutBusy' && S.scen.shortcutBusy) { closeAll(); openSettings(); }
+  if (b.dataset.set === 'scen.startupBlocked' && S.scen.startupBlocked) S.settings.startWin = false;
+  renderOpts(); renderToolbar(); render(); renderSettings();
 });
 
 function renderHelp() {
