@@ -80,6 +80,10 @@ _Avoid_: preferences, options, Settings tool
 The still image of every monitor, taken all at once when Pixmeter is called, that stays on screen in place of the live screen until the tools close; it is what the tools measure and capture.
 _Avoid_: snapshot, screenshot (the Snip's image is a different thing), still
 
+**Notice**:
+A short message Pixmeter draws on screen itself, next to the cursor or in the magnified view, such as Copied, No content found or Approximate color.
+_Avoid_: toast, popup, alert, notification (a Windows notification is the system's message in the corner of the screen, a different thing)
+
 ## Tools
 
 **Dimensions**:
