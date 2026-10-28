@@ -3,6 +3,7 @@
 mod wgc;
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL};
@@ -678,6 +679,12 @@ pub fn capture_mode(args: &Args) -> Result<(), String> {
     ));
 
     log::line("--- DXGI cold and warm");
+    // GDI grabs of every monitor before any duplication exists, to see later whether an open
+    // duplication makes Windows draw a capture border (the same check as for WGC).
+    let mut before_dxgi = Vec::new();
+    for m in &monitors {
+        before_dxgi.push(gdi_monitor(m));
+    }
     let t0 = log::now_ms();
     let mut session = DxgiSession::new()?;
     let t1 = log::now_ms();
@@ -712,6 +719,22 @@ pub fn capture_mode(args: &Args) -> Result<(), String> {
         warm.push(format!("{:.3}{}", log::now_ms() - a, if r.iter().all(|(_, x)| x.is_ok()) { "" } else { "(err)" }));
     }
     log::line(format!("dxgi warm series (ms): {}", warm.join(", ")));
+
+    // The session is still open: give a border time to appear, then grab the edges through GDI.
+    let until = log::now_ms() + 700.0;
+    while log::now_ms() < until {
+        pump_messages();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    for (m, before) in monitors.iter().zip(&before_dxgi) {
+        let label = short_name(&m.device_name);
+        let verdict = match (before, gdi_monitor(m)) {
+            (Ok(b), Ok(d)) => wgc::edge_yellow(b, &d).unwrap_or_else(|e| format!("ERROR {e}")),
+            (Err(e), _) => format!("skipped, the GDI grab before the session failed: {e}"),
+            (_, Err(e)) => format!("skipped, the GDI grab during the session failed: {e}"),
+        };
+        log::line(format!("RESULT dxgi-border-pixels {label}: {verdict}"));
+    }
 
     for m in &monitors {
         let label = short_name(&m.device_name);

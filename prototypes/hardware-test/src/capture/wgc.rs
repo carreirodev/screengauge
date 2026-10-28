@@ -245,7 +245,7 @@ fn yellowish(p: &[u8]) -> bool {
 }
 
 /// Counts edge-band pixels that are yellow-ish in `during` but were not in `before`.
-fn edge_yellow(before: &Photo, during: &Photo) -> Result<String, String> {
+pub(crate) fn edge_yellow(before: &Photo, during: &Photo) -> Result<String, String> {
     if before.width != during.width || before.height != during.height {
         return Err(format!(
             "sizes differ, {}x{} vs {}x{}",
