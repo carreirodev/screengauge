@@ -17,4 +17,4 @@ Pixmeter is written in Rust directly against the Windows APIs: Win32 windows, Di
 - The C runtime is linked statically (`-C target-feature=+crt-static`), so users need no Visual C++ Redistributable.
 - Windows 11 and later only, so Windows 11 APIs such as the dark title bar (documented from build 22000) can be relied on.
 - v1 has no Narrator support or full keyboard navigation in the toolbar and Settings. Adding it later means implementing UI Automation for hand-drawn UI.
-- The hardware test WPC-281 ("Teste da tecnologia escolhida em dois monitores com escalas diferentes") can reopen this decision.
+- The hardware test WPC-281 ("Teste da tecnologia escolhida em dois monitores com escalas diferentes", 2026-10-28) confirmed the choice. On a 4K monitor at 175% and a Full HD at 125%, each on its own GPU, monitor bounds, the cursor and every capture API came in physical pixels. Known sizes measured exactly. The frozen screen matched the live screen pixel for pixel. DXGI Desktop Duplication captured both monitors with no yellow border. A 0.9 MB `.exe` with a static C runtime imported only Windows DLLs.
