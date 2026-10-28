@@ -1,10 +1,10 @@
-# Pixmeter
+# ScreenGauge
 
 ## Agent skills
 
 ### Issue tracker
 
-Issues live in Linear, project **Pixmeter** (team WPC Solutions), via the Linear MCP tools. See `docs/agents/issue-tracker.md`.
+Issues live in Linear, project **ScreenGauge** (team WPC Solutions), via the Linear MCP tools. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

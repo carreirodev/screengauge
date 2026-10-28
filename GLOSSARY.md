@@ -1,16 +1,16 @@
-# Pixmeter
+# ScreenGauge
 
 A desktop tool for measuring and inspecting what is on the computer screen, pixel by pixel.
 
 ## Language
 
-**Pixmeter**:
+**ScreenGauge**:
 The screen-measurement app this repository builds, written from scratch.
-_Avoid_: Pixler (the name until 2026-10-26), SightLine (the toolbar design's former name)
+_Avoid_: Pixmeter (the name until 2026-10-28), Pixler (the name until 2026-10-26), SightLine (the toolbar design's former name)
 
 **Rooler**:
 Pete Blois's 2015 Windows screen-measurement app, used only as a reference for which features exist.
-_Avoid_: the old version, Pixmeter v0
+_Avoid_: the old version, ScreenGauge v0
 
 ## Measurement
 
@@ -54,34 +54,34 @@ _Avoid_: object, element
 A measurement left fixed on screen, by a click in Dimensions or by releasing the drag in Bounds, while the tool keeps measuring; it lasts until the tools close, even when the user switches to another tool.
 _Avoid_: frozen measurement (freezing is for the screen, a different thing), persistent measurement, annotation
 
-## Using Pixmeter
+## Using ScreenGauge
 
 **Toolbar**:
-The floating bar with one button per tool that appears whenever Pixmeter is called, with the active tool's button highlighted.
+The floating bar with one button per tool that appears whenever ScreenGauge is called, with the active tool's button highlighted.
 _Avoid_: floating bar, palette, dock, menu
 
 **Active tool**:
-The one tool that has the mouse at a given moment; calling Pixmeter makes the last one used active again.
+The one tool that has the mouse at a given moment; calling ScreenGauge makes the last one used active again.
 _Avoid_: current tool (the current monitor is a different thing), selected tool
 
 **Global shortcut**:
-The one key combination that calls Pixmeter from any program.
+The one key combination that calls ScreenGauge from any program.
 _Avoid_: hotkey, keyboard shortcut (the keys inside a tool are a different thing)
 
 **Tray icon**:
-Pixmeter's icon in the Windows notification area, next to the clock; clicking it calls Pixmeter like the global shortcut.
+ScreenGauge's icon in the Windows notification area, next to the clock; clicking it calls ScreenGauge like the global shortcut.
 _Avoid_: taskbar icon, system tray icon
 
 **Settings**:
-The window, separate from the tools, where the user changes Pixmeter's options.
+The window, separate from the tools, where the user changes ScreenGauge's options.
 _Avoid_: preferences, options, Settings tool
 
 **Frozen screen**:
-The still image of every monitor, taken all at once when Pixmeter is called, that stays on screen in place of the live screen until the tools close; it is what the tools measure and capture.
+The still image of every monitor, taken all at once when ScreenGauge is called, that stays on screen in place of the live screen until the tools close; it is what the tools measure and capture.
 _Avoid_: snapshot, screenshot (the Snip's image is a different thing), still
 
 **Notice**:
-A short message Pixmeter draws on screen itself, next to the cursor or in the magnified view, such as Copied, No content found or Approximate color.
+A short message ScreenGauge draws on screen itself, next to the cursor or in the magnified view, such as Copied, No content found or Approximate color.
 _Avoid_: toast, popup, alert, notification (a Windows notification is the system's message in the corner of the screen, a different thing)
 
 ## Tools
@@ -121,7 +121,7 @@ Windows' high dynamic range mode, turned on or off for each monitor in Windows s
 _Avoid_: HD Color, Advanced Color (Windows' broader name, which also covers some SDR monitors)
 
 **SDR content**:
-Whatever ordinary apps draw in standard colors, such as windows, web pages and pictures; its exact color is what Pixmeter reports, with HDR on or off.
+Whatever ordinary apps draw in standard colors, such as windows, web pages and pictures; its exact color is what ScreenGauge reports, with HDR on or off.
 _Avoid_: normal content, standard content
 
 **HDR content**:
@@ -129,15 +129,15 @@ Video, games or pictures brighter or more saturated than any standard color, so 
 _Avoid_: HDR image, HDR video (both are only examples)
 
 **Approximate color**:
-Inspect's notice that the color shown may differ from the one the app drew, because HDR is on and Pixmeter can't undo its brightening on that monitor.
+Inspect's notice that the color shown may differ from the one the app drew, because HDR is on and ScreenGauge can't undo its brightening on that monitor.
 _Avoid_: wrong color, HDR warning
 
 ## Distribution
 
 **Store copy**:
-Pixmeter as installed from the Microsoft Store, which keeps it up to date.
+ScreenGauge as installed from the Microsoft Store, which keeps it up to date.
 _Avoid_: Store version (a version is a number), MSIX build, packaged app
 
 **Installer copy**:
-Pixmeter as installed by the installer downloaded from the project's GitHub releases.
+ScreenGauge as installed by the installer downloaded from the project's GitHub releases.
 _Avoid_: GitHub version, desktop version, portable version (there is none)
