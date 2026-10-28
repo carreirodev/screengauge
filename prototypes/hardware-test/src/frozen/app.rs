@@ -530,7 +530,15 @@ impl App {
             Err(_) => 0,
         };
         if self.triggers < repeat {
-            if let Err(e) = sys::set_timer(self.main, TIMER_TRIGGER, 4000) {
+            // HWTEST_FIRST_GAP_MS leaves room for settled idle samples after the first call.
+            let gap = match std::env::var("HWTEST_FIRST_GAP_MS") {
+                Ok(v) if self.triggers == 1 => v.parse().unwrap_or_else(|e| {
+                    log::line(format!("ERROR: HWTEST_FIRST_GAP_MS={v} is not a count ({e}); using 4000"));
+                    4000
+                }),
+                _ => 4000,
+            };
+            if let Err(e) = sys::set_timer(self.main, TIMER_TRIGGER, gap) {
                 log::line(format!("ERROR: HWTEST_REPEAT re-trigger not armed: {e}"));
             }
         } else if std::env::var_os("HWTEST_KEEP_DXGI").is_some() {
