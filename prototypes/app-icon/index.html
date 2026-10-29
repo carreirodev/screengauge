@@ -178,11 +178,12 @@ const OWNER = '../../../../../DesignInterface/MS Store images/';
 const IMG_3DA = encodeURI(OWNER + 'icone 3da.png');
 const IMG_HERO = encodeURI(OWNER + 'Wide MS Store.png');
 
-// p = the body color (light, mid, dark), s = the accent/ruler color, brand = [on dark, on light].
+// p = the body color (light, mid, dark), s = the accent/ruler color, deep = the accent's darkest shade
+// (strong outline, far side of the Store icon's thickness), brand = [on dark, on light].
 const PALETTES = [
-  { key: '1', name: 'Roxo e laranja', from: 'da imagem 3da', p: ['#D8B4FE', '#9333EA', '#4C1D95'], s: ['#FED7AA', '#F97316', '#9A3412'], brand: ['#C084FC', '#7E22CE'] },
-  { key: '2', name: 'Azul e amarelo', from: 'da arte larga da Store', p: ['#93C5FD', '#2563EB', '#1E3A8A'], s: ['#FEF08A', '#FACC15', '#A16207'], brand: ['#60A5FA', '#1D4ED8'] },
-  { key: '3', name: 'Ciano e grafite', from: 'da barra e da linha de medida aprovadas', p: ['#6B7280', '#3A3F48', '#1A1C20'], s: ['#A5F3FC', '#22D3EE', '#0E7490'], brand: ['#22D3EE', '#0E7490'] },
+  { key: '1', name: 'Roxo e laranja', from: 'da imagem 3da', p: ['#D8B4FE', '#9333EA', '#4C1D95'], s: ['#FED7AA', '#F97316', '#9A3412'], deep: '#7C2D12', brand: ['#C084FC', '#7E22CE'] },
+  { key: '2', name: 'Azul e amarelo', from: 'da arte larga da Store', p: ['#93C5FD', '#2563EB', '#1E3A8A'], s: ['#FEF08A', '#FACC15', '#A16207'], deep: '#854D0E', brand: ['#60A5FA', '#1D4ED8'] },
+  { key: '3', name: 'Ciano e grafite', from: 'da barra e da linha de medida aprovadas', p: ['#6B7280', '#3A3F48', '#1A1C20'], s: ['#A5F3FC', '#22D3EE', '#0E7490'], deep: '#164E63', brand: ['#22D3EE', '#0E7490'] },
 ];
 
 let uid = 0;
@@ -278,7 +279,7 @@ const SHAPES = {
       const strong = edge === 'strong';
       const sw = (L === 's' ? 1.5 : 1.2) * (strong ? 1.8 : 1);
       let o = `<defs>${grad(g1, P.s[0], P.s[1])}</defs>`;
-      o += `<path d="${triD(L)}" fill-rule="evenodd" fill="${L === 's' ? P.s[1] : `url(#${g1})`}" stroke="${strong ? '#854D0E' : P.s[2]}" stroke-width="${sw}" stroke-linejoin="round"/>`;
+      o += `<path d="${triD(L)}" fill-rule="evenodd" fill="${L === 's' ? P.s[1] : `url(#${g1})`}" stroke="${strong ? P.deep : P.s[2]}" stroke-width="${sw}" stroke-linejoin="round"/>`;
       if (L !== 's') o += ticksD(L, P.p[2]);
       return o;
     },
@@ -347,7 +348,7 @@ function store3d(P, v, css) {
   let body = '';
   if (v > 1) body += `<ellipse cx="${v === 3 ? 27 : 25}" cy="${v === 3 ? 50 : 48.5}" rx="${v === 3 ? 22 : 20}" ry="${v === 3 ? 3 : 2.2}" fill="#000" opacity=".32" filter="url(#${bl})"/>`;
   for (let i = depth; i >= 1; i--) {
-    body += `<path d="${tri}" fill-rule="evenodd" fill="${i === depth ? '#854D0E' : P.s[2]}" stroke="${i === depth ? '#854D0E' : P.s[2]}" stroke-width="1.2" stroke-linejoin="round" transform="translate(${(i * 0.35).toFixed(2)} ${(i * 0.6).toFixed(2)})"/>`;
+    body += `<path d="${tri}" fill-rule="evenodd" fill="${i === depth ? P.deep : P.s[2]}" stroke="${i === depth ? P.deep : P.s[2]}" stroke-width="1.2" stroke-linejoin="round" transform="translate(${(i * 0.35).toFixed(2)} ${(i * 0.6).toFixed(2)})"/>`;
   }
   body += `<path d="${tri}" fill-rule="evenodd" fill="url(#${g1})"${v === 1 ? ` filter="url(#${sh})"` : ''} stroke="${P.s[2]}" stroke-width="${v === 1 ? .8 : .6}" stroke-linejoin="round"${v > 1 ? ' fill-opacity=".96"' : ''}/>`;
   body += ticksD('l', P.p[2]);
@@ -388,13 +389,14 @@ const q = new URLSearchParams(location.search);
 // Store icon: flat = the app icon as is; 3d1–3d3 = STORE3D (set square only); 3da = the owner's image.
 const STORE_KEYS = ['flat', '3d1', '3d2', '3d3', '3da'];
 const STORE_NAMES = { flat: 'Plano, como o app', '3d1': '3D 1 · Fluent', '3d2': '3D 2 · Acrílico', '3d3': '3D 3 · Inclinado', '3da': 'Imagem 3da' };
-// Defaults follow the owner's round-1 choices: set square, blue and yellow, colored tray.
+// Defaults follow the owner's choices: set square, cyan and graphite (switched from blue and yellow
+// after round 2), colored tray, wordmark 2, Store icon 3D 2.
 const S = {
   shape: SHAPE_KEYS.includes((q.get('shape') || '').toUpperCase()) ? q.get('shape').toUpperCase() : 'D',
-  color: Math.min(Math.max(parseInt(q.get('color') || '2', 10) || 2, 1), PALETTES.length),
+  color: Math.min(Math.max(parseInt(q.get('color') || '3', 10) || 3, 1), PALETTES.length),
   tray: q.get('tray') === 'mono' ? 'mono' : 'color',
-  name: Math.min(Math.max(parseInt(q.get('name') || '1', 10) || 1, 1), NAMES.length),
-  store: STORE_KEYS.includes(q.get('store')) ? q.get('store') : '3d1',
+  name: Math.min(Math.max(parseInt(q.get('name') || '2', 10) || 2, 1), NAMES.length),
+  store: STORE_KEYS.includes(q.get('store')) ? q.get('store') : '3d2',
 };
 const PAL = () => PALETTES[S.color - 1];
 const ink = th => th === 'dark' ? '#ffffff' : '#1a1a1a';
@@ -498,7 +500,7 @@ function renderRound2() {
 
 // For the real-tray check: the set square rasterized at each .ico size, as base64 RGBA rows.
 window.__icoFrames = async (edge, sizes) => {
-  const P = PALETTES[1];
+  const P = PAL();
   const out = {};
   for (const n of sizes) {
     const svg = icon('D', P, 'color', n, n, edge);
