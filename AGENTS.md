@@ -13,3 +13,7 @@ Default vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 ### Domain docs
 
 Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+## Task list
+
+`tasks.md` at the repo root stays local: the owner settled it, and `.gitignore` already lists it. Create it straight away when the work needs one.
