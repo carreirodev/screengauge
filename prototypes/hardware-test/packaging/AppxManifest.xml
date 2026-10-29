@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Test-only MSIX manifest for hwtest (WPC-289): a packaged copy that should behave like the future
+  Microsoft Store copy of ScreenGauge. The identity is deliberately not the real app's.
+  Every namespace, element and attribute here was checked on learn.microsoft.com; README.md has the links.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:uap11="http://schemas.microsoft.com/appx/manifest/uap/windows10/11"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 uap11 desktop rescap">
+
+  <!-- Publisher must equal the signing certificate's subject (new-test-cert.ps1 reads it from here). -->
+  <Identity
+    Name="WPCSolutions.ScreenGaugeHwtest"
+    Publisher="CN=ScreenGauge hwtest"
+    Version="0.1.0.0"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>ScreenGauge hwtest</DisplayName>
+    <PublisherDisplayName>WPC Solutions</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Capabilities>
+    <!-- Restricted: a package with a full-trust app must declare it. -->
+    <rescap:Capability Name="runFullTrust" />
+    <!-- General-use. Needed to call GraphicsCaptureAccess.RequestAccessAsync(Borderless). -->
+    <uap11:Capability Name="graphicsCaptureWithoutBorder" />
+    <!-- General-use. Learn ties it to GraphicsCaptureItem.TryCreateFromWindowId / TryCreateFromDisplayId;
+         hwtest uses the CreateForMonitor interop, which Learn does not mention. Declared to match the Store copy. -->
+    <uap11:Capability Name="graphicsCaptureProgrammatic" />
+  </Capabilities>
+
+  <Applications>
+    <!-- EntryPoint="Windows.FullTrustApplication" is the documented equivalent of
+         uap10:RuntimeBehavior="packagedClassicApp" + uap10:TrustLevel="mediumIL". -->
+    <Application Id="Hwtest" Executable="hwtest.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="ScreenGauge hwtest"
+        Description="Throwaway hardware test for ScreenGauge (packaged copy)"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <!-- Starts hwtest.exe with no arguments at sign-in once enabled: by the enable flag of the
+             package startup mode (README.md), or by the user in Settings > Apps > Startup. -->
+        <desktop:Extension
+          Category="windows.startupTask"
+          Executable="hwtest.exe"
+          EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="HwtestStartup" Enabled="false" DisplayName="ScreenGauge hwtest" />
+        </desktop:Extension>
+        <!-- Lets a shell start the packaged copy, with package identity: screengauge-hwtest.exe package info -->
+        <uap3:Extension
+          Category="windows.appExecutionAlias"
+          Executable="hwtest.exe"
+          EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="screengauge-hwtest.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>
