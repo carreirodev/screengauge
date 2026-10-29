@@ -28,7 +28,7 @@ use windows::core::{BOOL, Interface, PWSTR};
 
 use windows::Win32::Graphics::Gdi::SRCCOPY;
 
-use super::{create_device, gdi_rect, pump_messages, read_bgra};
+use super::{Fp16Image, create_device, gdi_rect, pump_messages, read_frame};
 use crate::common::{CaptureMethod, Ctx, MonitorInfo, Photo, PxRect};
 use crate::log;
 use crate::monitors::{px, short_name, wide};
@@ -44,11 +44,23 @@ const SCAN_EVERY_MS: f64 = 250.0;
 pub struct WgcShot {
     pub photo: Photo,
     pub during: Option<Photo>,
+    /// The FP16 frame as it was, for a capture made with a conversion table.
+    pub raw: Option<Fp16Image>,
 }
 
 /// One monitor through Windows.Graphics.Capture. `borderless` asks for the border-off access first.
 /// The session stays open for `hold_secs` so a person can look for the yellow border.
 pub fn capture_monitor(m: &MonitorInfo, borderless: bool, hold_secs: u64) -> Result<WgcShot, String> {
+    capture_monitor_as(m, borderless, hold_secs, None)
+}
+
+/// `capture_monitor` in B8G8R8A8 (`fp16_lut` None) or in R16G16B16A16Float converted through `fp16_lut`.
+pub fn capture_monitor_as(
+    m: &MonitorInfo,
+    borderless: bool,
+    hold_secs: u64,
+    fp16_lut: Option<&[u8]>,
+) -> Result<WgcShot, String> {
     let variant = if borderless { "wgc-borderless" } else { "wgc-border" };
     let label = short_name(&m.device_name);
     // Taken before anything WGC exists, so every window the capture creates shows up as new.
@@ -99,9 +111,12 @@ pub fn capture_monitor(m: &MonitorInfo, borderless: bool, hold_secs: u64) -> Res
         .ctx("CreateDirect3D11DeviceFromDXGIDevice")?
         .cast()
         .ctx("IDirect3DDevice")?;
-    let pool =
-        Direct3D11CaptureFramePool::CreateFreeThreaded(&d3d, DirectXPixelFormat::B8G8R8A8UIntNormalized, 1, size)
-            .ctx("Direct3D11CaptureFramePool::CreateFreeThreaded")?;
+    let pixel_format = match fp16_lut {
+        Some(_) => DirectXPixelFormat::R16G16B16A16Float,
+        None => DirectXPixelFormat::B8G8R8A8UIntNormalized,
+    };
+    let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(&d3d, pixel_format, 1, size)
+        .ctx("Direct3D11CaptureFramePool::CreateFreeThreaded")?;
     let session = pool.CreateCaptureSession(&item).ctx("CreateCaptureSession")?;
     let closer = CloseOnDrop { session: session.clone(), pool: pool.clone() };
     match session.SetIsCursorCaptureEnabled(false) {
@@ -154,7 +169,8 @@ pub fn capture_monitor(m: &MonitorInfo, borderless: bool, hold_secs: u64) -> Res
     let copy_start = log::now_ms();
     let mut staging = None;
     let crop = (u32::try_from(content.Width).unwrap_or(0), u32::try_from(content.Height).unwrap_or(0));
-    let (width, height, bgra) = read_bgra(&gpu, &mut staging, &tex, Some(crop))?;
+    let read = read_frame(&gpu, &mut staging, &tex, Some(crop), fp16_lut, fp16_lut.is_some())?;
+    let (width, height, bgra, raw) = (read.width, read.height, read.bgra, read.raw);
     let copy_ms = log::now_ms() - copy_start;
     if let Err(e) = frame.Close() {
         log::line(format!("{variant} {label}: frame Close ERROR {e}"));
@@ -233,6 +249,7 @@ pub fn capture_monitor(m: &MonitorInfo, borderless: bool, hold_secs: u64) -> Res
             taken_ms: taken,
         },
         during,
+        raw,
     })
 }
 

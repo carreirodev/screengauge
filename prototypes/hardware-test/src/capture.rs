@@ -1,6 +1,6 @@
 //! Builder A. Screen capture (DXGI Desktop Duplication, GDI, Windows.Graphics.Capture) and the `capture` mode.
 
-mod wgc;
+pub mod wgc;
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -12,7 +12,9 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device,
     ID3D11DeviceContext, ID3D11Texture2D,
 };
-use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
+use windows::Win32::Graphics::Dxgi::Common::{
+    DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_SAMPLE_DESC,
+};
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_NOT_FOUND, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
     IDXGIAdapter, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput1, IDXGIOutput5, IDXGIOutputDuplication, IDXGIResource,
@@ -37,6 +39,105 @@ const FIRST_ATTEMPT_TIMEOUT_MS: u32 = 100;
 /// costs nothing to re-grab, and any change since the previous acquire is returned at once.
 const LATER_TIMEOUT_MS: u32 = 0;
 
+/// Which desktop format a duplication asks DXGI for (WPC-289).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DupFormat {
+    /// `DuplicateOutput1([B8G8R8A8_UNORM])`: with HDR on, Windows itself converts the desktop to 8 bits.
+    Bgra8,
+    /// `DuplicateOutput1([R16G16B16A16_FLOAT])`, converted here with the monitor's SDR white level.
+    Fp16,
+    /// Fp16 on monitors with HDR on, Bgra8 on the others: the frozen photo's default.
+    Auto,
+    /// The old `DuplicateOutput`, which always gives B8G8R8A8.
+    Legacy,
+}
+
+impl DupFormat {
+    /// `HWTEST_DXGI_FORMAT` = bgra8 | fp16 | auto | legacy; auto when unset.
+    pub fn from_env() -> Result<Self, String> {
+        match std::env::var("HWTEST_DXGI_FORMAT").as_deref() {
+            Err(_) | Ok("auto") => Ok(Self::Auto),
+            Ok("bgra8") => Ok(Self::Bgra8),
+            Ok("fp16") => Ok(Self::Fp16),
+            Ok("legacy") => Ok(Self::Legacy),
+            Ok(other) => Err(format!("HWTEST_DXGI_FORMAT={other}: expected bgra8, fp16, auto or legacy")),
+        }
+    }
+}
+
+/// The curve that takes linear scRGB back to 8-bit SDR values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Curve {
+    /// The piecewise sRGB curve (IEC 61966-2-1).
+    Srgb,
+    /// A pure 2.2 power.
+    Gamma22,
+}
+
+impl Curve {
+    /// `HWTEST_HDR_CURVE` = srgb | g22; srgb when unset.
+    pub fn from_env() -> Result<Self, String> {
+        match std::env::var("HWTEST_HDR_CURVE").as_deref() {
+            Err(_) | Ok("srgb") => Ok(Self::Srgb),
+            Ok("g22") => Ok(Self::Gamma22),
+            Ok(other) => Err(format!("HWTEST_HDR_CURVE={other}: expected srgb or g22")),
+        }
+    }
+}
+
+/// A raw FP16 desktop image: R, G, B, A halves per pixel, top-down rows, no padding.
+pub struct Fp16Image {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u16>,
+}
+
+/// An IEEE 754 half as f32 (exact: every half is representable).
+pub fn half_to_f32(h: u16) -> f32 {
+    let sign = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
+    let exp = (h >> 10) & 0x1f;
+    let man = h & 0x3ff;
+    match exp {
+        // Subnormal: man * 2^-24.
+        0 => sign * f32::from(man) * 2f32.powi(-24),
+        31 if man == 0 => sign * f32::INFINITY,
+        31 => f32::NAN,
+        _ => sign * (1.0 + f32::from(man) / 1024.0) * 2f32.powi(i32::from(exp) - 15),
+    }
+}
+
+/// FP16 bits -> 8-bit SDR value, for every half. Learn (Advanced Color): Windows shows SDR content at
+/// `linear * SdrWhiteLevelInNits / 80` in scRGB, where 1.0 is 80 nits; this is that step undone, then the
+/// curve, rounded. Above SDR white clips to 255 and below zero to 0. NaN goes to 0.
+pub fn fp16_lut(white_nits: f64, curve: Curve) -> Vec<u8> {
+    let scale = 80.0 / white_nits;
+    (0..=u16::MAX)
+        .map(|h| {
+            let v = f64::from(half_to_f32(h));
+            if v.is_nan() {
+                return 0;
+            }
+            let lin = (v * scale).clamp(0.0, 1.0);
+            let e = match curve {
+                Curve::Srgb if lin <= 0.003_130_8 => 12.92 * lin,
+                Curve::Srgb => 1.055 * lin.powf(1.0 / 2.4) - 0.055,
+                Curve::Gamma22 => lin.powf(1.0 / 2.2),
+            };
+            // In 0..=255 after the clamp, so the cast cannot truncate.
+            (e * 255.0).round().clamp(0.0, 255.0) as u8
+        })
+        .collect()
+}
+
+/// A raw FP16 image as BGRA through a table from `fp16_lut`; alpha 255.
+pub fn fp16_to_bgra(img: &Fp16Image, lut: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(img.rgba.len());
+    for px in img.rgba.as_chunks::<4>().0 {
+        out.extend_from_slice(&[lut[usize::from(px[2])], lut[usize::from(px[1])], lut[usize::from(px[0])], 255]);
+    }
+    out
+}
+
 /// One Desktop Duplication per attached output, each created on the adapter that owns that output.
 /// Kept alive so the same session can grab several times (the frozen screen's delay series).
 /// A process may duplicate an output only once (Learn, DuplicateOutput: E_INVALIDARG when "the calling
@@ -47,8 +148,23 @@ pub struct DxgiSession {
 }
 
 impl DxgiSession {
+    /// A session in the format `HWTEST_DXGI_FORMAT` names (auto when unset).
     pub fn new() -> Result<Self, String> {
+        Self::with(DupFormat::from_env()?, false)
+    }
+
+    /// A session in `format`. With `keep_raw`, FP16 outputs also keep their last raw image (`raw`).
+    pub fn with(format: DupFormat, keep_raw: bool) -> Result<Self, String> {
         let t0 = log::now_ms();
+        let curve = Curve::from_env()?;
+        let states = match monitors::color_states() {
+            Ok(s) => s,
+            Err(e) => {
+                log::line(format!("dxgi: color states unavailable ({e}); every output treated as HDR off"));
+                Vec::new()
+            }
+        };
+        let states_ms = log::now_ms() - t0;
         // SAFETY: plain factory creation.
         let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.ctx("CreateDXGIFactory1")?;
         let mut outputs = Vec::new();
@@ -80,6 +196,35 @@ impl DxgiSession {
                 let rect = px(&d.DesktopCoordinates);
                 let gpu = gpu.get_or_insert_with(|| Gpu::on(&adapter, &adapter_name)).clone();
                 let output1: IDXGIOutput1 = output.cast().ctx("IDXGIOutput1")?;
+                let state = states.iter().find(|s| s.device_name == name);
+                let hdr = state.is_some_and(monitors::ColorState::hdr_on);
+                // With HDR off the desktop is SDR, so 80 nits (scRGB 1.0) is SDR white.
+                let white = if hdr { state.and_then(monitors::ColorState::sdr_white_nits) } else { Some(80.0) };
+                let resolved = match (format, white) {
+                    (DupFormat::Auto, Some(_)) if hdr => DupFormat::Fp16,
+                    (DupFormat::Auto, None) => {
+                        log::line(format!("dxgi: {name} has HDR on but no SDR white level; B8G8R8A8 (approximate colors)"));
+                        DupFormat::Bgra8
+                    }
+                    (DupFormat::Auto, _) => DupFormat::Bgra8,
+                    (DupFormat::Fp16, None) => {
+                        return Err(format!("dxgi: {name}: FP16 asked for, but the SDR white level is unknown"));
+                    }
+                    (f, _) => f,
+                };
+                let lut = match (resolved, white) {
+                    (DupFormat::Fp16, Some(w)) => {
+                        let a = log::now_ms();
+                        let lut = fp16_lut(w, curve);
+                        log::line(format!(
+                            "dxgi: {name} HDR {}, FP16 converted with SDR white {w:.1} nits and the {curve:?} curve (table built in {:.3} ms)",
+                            if hdr { "on" } else { "off" },
+                            log::now_ms() - a
+                        ));
+                        Some(lut)
+                    }
+                    _ => None,
+                };
                 let mut o = DupOutput {
                     device_name: name.clone(),
                     rect,
@@ -88,15 +233,22 @@ impl DxgiSession {
                     dup: Err("not created yet".to_string()),
                     staging: None,
                     cached: None,
+                    format: resolved,
+                    lut,
+                    keep_raw,
+                    raw: None,
                 };
                 // Learn (Desktop Duplication API, "Rotating the desktop image"): in a rotated mode the surface
                 // is un-rotated and the image is rotated within it, so the rows would not match DesktopCoordinates.
                 let rot = d.Rotation.0;
-                o.dup = if rot == 0 || rot == 1 {
-                    o.duplicate()
+                if rot == 0 || rot == 1 {
+                    o.reopen();
                 } else {
-                    Err(format!("output is rotated ({}); refused, this test does not un-rotate", rotation_name(d.Rotation)))
-                };
+                    o.dup = Err(format!(
+                        "output is rotated ({}); refused, this test does not un-rotate",
+                        rotation_name(d.Rotation)
+                    ));
+                }
                 match &o.dup {
                     Ok(_) => log::line(format!(
                         "dxgi: {name} on '{adapter_name}' DesktopCoordinates {rect} rotation {} ({}): ready",
@@ -111,8 +263,25 @@ impl DxgiSession {
         if outputs.is_empty() {
             return Err("DXGI reports no output attached to the desktop".to_string());
         }
-        log::line(format!("dxgi: session with {} outputs created in {:.3} ms", outputs.len(), log::now_ms() - t0));
+        let formats: Vec<String> =
+            outputs.iter().map(|o| format!("{}={:?}", short_name(&o.device_name), o.format)).collect();
+        log::line(format!(
+            "dxgi: session with {} outputs ({}; asked {format:?}) created in {:.3} ms, of which color states {states_ms:.3} ms",
+            outputs.len(),
+            formats.join(" "),
+            log::now_ms() - t0
+        ));
         Ok(Self { outputs })
+    }
+
+    /// The last raw FP16 image of one output; only kept for a session made with `keep_raw`.
+    pub fn raw(&self, device_name: &str) -> Option<&Fp16Image> {
+        self.outputs.iter().find(|o| o.device_name == device_name).and_then(|o| o.raw.as_ref())
+    }
+
+    /// The format each output ended up with, keyed by GDI device name.
+    pub fn formats(&self) -> Vec<(String, DupFormat)> {
+        self.outputs.iter().map(|o| (o.device_name.clone(), o.format)).collect()
     }
 
     /// The current image of every output: one entry per output, keyed by GDI device name.
@@ -175,6 +344,7 @@ struct Staging {
     tex: ID3D11Texture2D,
     width: u32,
     height: u32,
+    format: DXGI_FORMAT,
 }
 
 struct Cached {
@@ -193,6 +363,13 @@ struct DupOutput {
     staging: Option<Staging>,
     /// The last image read from this output, returned when DXGI reports nothing new.
     cached: Option<Cached>,
+    /// Bgra8, Fp16 or Legacy (never Auto): what this output asks DXGI for.
+    format: DupFormat,
+    /// FP16 -> 8-bit table, for Fp16 outputs.
+    lut: Option<Vec<u8>>,
+    keep_raw: bool,
+    /// The last raw FP16 image, when `keep_raw`.
+    raw: Option<Fp16Image>,
 }
 
 enum Fail {
@@ -201,40 +378,66 @@ enum Fail {
 }
 
 impl DupOutput {
+    /// (Re)creates the duplication. An FP16 duplication that fails falls back to B8G8R8A8, logged, so the
+    /// photo still comes from DXGI (with Windows' own conversion: approximate colors with HDR on).
+    fn reopen(&mut self) {
+        self.dup = match self.duplicate() {
+            Ok((d, f)) => {
+                if f != self.format {
+                    log::line(format!("dxgi: {} now {f:?} instead of {:?}", self.device_name, self.format));
+                    self.format = f;
+                    self.lut = None;
+                }
+                Ok(d)
+            }
+            Err(e) => Err(e),
+        };
+    }
+
     /// DuplicateOutput1 first (Learn recommends it "for improved performance"; it takes the format list),
     /// then DuplicateOutput. Learn states no DPI-awareness requirement for either; the process is
     /// Per-Monitor V2 from its manifest, so whichever one succeeds here is the observed fact.
-    fn duplicate(&self) -> Result<IDXGIOutputDuplication, String> {
+    fn duplicate(&self) -> Result<(IDXGIOutputDuplication, DupFormat), String> {
         let gpu = self.gpu.as_ref().map_err(String::clone)?;
         let t0 = log::now_ms();
-        let dup = match self.output.cast::<IDXGIOutput5>() {
-            // SAFETY: the device was created on the adapter that owns this output.
-            Ok(o5) => match unsafe { o5.DuplicateOutput1(&gpu.device, 0, &[DXGI_FORMAT_B8G8R8A8_UNORM]) } {
-                Ok(d) => {
-                    log::line(format!("dxgi: {} DuplicateOutput1(B8G8R8A8_UNORM) OK", self.device_name));
-                    Some(d)
-                }
+        let mut got = None;
+        if self.format != DupFormat::Legacy {
+            let o5 = match self.output.cast::<IDXGIOutput5>() {
+                Ok(o5) => Some(o5),
                 Err(e) => {
-                    log::line(format!(
-                        "dxgi: {} DuplicateOutput1 failed: {e} (0x{:08x}); trying DuplicateOutput",
-                        self.device_name,
-                        e.code().0 as u32
-                    ));
+                    log::line(format!("dxgi: {} has no IDXGIOutput5 ({e}); trying DuplicateOutput", self.device_name));
                     None
                 }
-            },
-            Err(e) => {
-                log::line(format!("dxgi: {} has no IDXGIOutput5 ({e}); trying DuplicateOutput", self.device_name));
-                None
+            };
+            let mut tries = Vec::new();
+            if self.format == DupFormat::Fp16 {
+                tries.push((DXGI_FORMAT_R16G16B16A16_FLOAT, "R16G16B16A16_FLOAT", DupFormat::Fp16));
             }
-        };
-        let dup = match dup {
-            Some(d) => d,
+            tries.push((DXGI_FORMAT_B8G8R8A8_UNORM, "B8G8R8A8_UNORM", DupFormat::Bgra8));
+            for (fmt, fmt_name, as_format) in tries {
+                let Some(o5) = &o5 else { break };
+                // SAFETY: the device was created on the adapter that owns this output.
+                match unsafe { o5.DuplicateOutput1(&gpu.device, 0, &[fmt]) } {
+                    Ok(d) => {
+                        log::line(format!("dxgi: {} DuplicateOutput1({fmt_name}) OK", self.device_name));
+                        got = Some((d, as_format));
+                        break;
+                    }
+                    Err(e) => log::line(format!(
+                        "dxgi: {} DuplicateOutput1({fmt_name}) failed: {e} (0x{:08x})",
+                        self.device_name,
+                        e.code().0 as u32
+                    )),
+                }
+            }
+        }
+        let (dup, format) = match got {
+            Some(g) => g,
             None => {
                 // SAFETY: as above.
                 let d = unsafe { self.output.DuplicateOutput(&gpu.device) }.ctx("DuplicateOutput")?;
                 log::line(format!("dxgi: {} DuplicateOutput OK", self.device_name));
-                d
+                (d, if self.format == DupFormat::Legacy { DupFormat::Legacy } else { DupFormat::Bgra8 })
             }
         };
         // SAFETY: plain query.
@@ -249,7 +452,7 @@ impl DupOutput {
             dd.DesktopImageInSystemMemory.as_bool(),
             log::now_ms() - t0
         ));
-        Ok(dup)
+        Ok((dup, format))
     }
 
     fn grab(&mut self) -> Result<Photo, String> {
@@ -264,7 +467,7 @@ impl DupOutput {
                 // Release the old duplication first: one duplication per output per process.
                 self.dup = Err("being recreated".to_string());
                 self.cached = None;
-                self.dup = self.duplicate();
+                self.reopen();
                 match self.try_grab() {
                     Ok(p) => Ok(p),
                     Err(Fail::AccessLost) => Err("DXGI_ERROR_ACCESS_LOST again after recreating".to_string()),
@@ -351,11 +554,15 @@ impl DupOutput {
             let tex: ID3D11Texture2D = resource.cast().map_err(|e| Fail::Other(format!("desktop resource as texture: {e}")))?;
             let gpu = self.gpu.as_ref().map_err(|e| Fail::Other(e.clone()))?;
             let copy_start = log::now_ms();
-            let (width, height, bgra) =
-                read_bgra(gpu, &mut self.staging, &tex, None).map_err(Fail::Other)?;
+            let frame =
+                read_frame(gpu, &mut self.staging, &tex, None, self.lut.as_deref(), self.keep_raw).map_err(Fail::Other)?;
             // The pixels are in system memory now; give the frame back to DXGI.
             held.release().map_err(Fail::Other)?;
             let copy_ms = log::now_ms() - copy_start;
+            let Frame { width, height, bgra, raw, format, convert_ms } = frame;
+            if raw.is_some() {
+                self.raw = raw;
+            }
             if width as i32 != self.rect.width() || height as i32 != self.rect.height() {
                 log::line(format!(
                     "dxgi: {} WARNING surface {width}x{height} differs from DesktopCoordinates {}",
@@ -366,7 +573,7 @@ impl DupOutput {
             self.cached = Some(Cached { width, height, bgra: bgra.clone(), grabbed_ms: returned });
             let cache_ms = log::now_ms() - cache_start;
             log::line(format!(
-                "dxgi: {} frame {width}x{height}: acquire waited {:.3} ms, copy+map {copy_ms:.3} ms, cache copy {cache_ms:.3} ms, {attempts} attempt(s), total {:.3} ms",
+                "dxgi: {} frame {width}x{height} format {format}: acquire waited {:.3} ms, copy+map {copy_ms:.3} ms (of which FP16 conversion {convert_ms:.3} ms), cache copy {cache_ms:.3} ms, {attempts} attempt(s), total {:.3} ms",
                 self.device_name,
                 returned - called,
                 log::now_ms() - start
@@ -426,21 +633,49 @@ impl Drop for HeldFrame<'_> {
     }
 }
 
-/// Copies a BGRA texture into tightly packed top-down rows with alpha 255, through a staging texture.
+/// One texture read back to system memory.
+pub struct Frame {
+    pub width: u32,
+    pub height: u32,
+    /// BGRA with alpha 255: the texture itself, or the FP16 texture through the table.
+    pub bgra: Vec<u8>,
+    /// The FP16 texture as it was, when asked for.
+    pub raw: Option<Fp16Image>,
+    /// DXGI_FORMAT of the texture: 87 B8G8R8A8_UNORM or 10 R16G16B16A16_FLOAT.
+    pub format: i32,
+    /// Time spent converting FP16 rows (0 for B8G8R8A8).
+    pub convert_ms: f64,
+}
+
+/// Copies a B8G8R8A8 or R16G16B16A16_FLOAT texture into top-down BGRA rows with alpha 255, through a
+/// staging texture. FP16 needs `lut` (from `fp16_lut`); `keep_raw` also returns the FP16 values.
 /// `crop` limits the copy to the top-left `(w, h)`.
-fn read_bgra(
+fn read_frame(
     gpu: &Gpu,
     staging: &mut Option<Staging>,
     tex: &ID3D11Texture2D,
     crop: Option<(u32, u32)>,
-) -> Result<(u32, u32, Vec<u8>), String> {
+    lut: Option<&[u8]>,
+    keep_raw: bool,
+) -> Result<Frame, String> {
     let mut desc = D3D11_TEXTURE2D_DESC::default();
     // SAFETY: fills one struct on this stack frame.
     unsafe { tex.GetDesc(&mut desc) };
-    if desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM {
-        return Err(format!("texture format {} is not B8G8R8A8_UNORM (87)", desc.Format.0));
+    let fp16 = desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
+    if desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM && !fp16 {
+        return Err(format!(
+            "texture format {} is neither B8G8R8A8_UNORM (87) nor R16G16B16A16_FLOAT (10)",
+            desc.Format.0
+        ));
     }
-    let reuse = matches!(staging, Some(s) if s.width == desc.Width && s.height == desc.Height);
+    let lut = match (fp16, lut) {
+        (true, Some(l)) => Some(l),
+        (true, None) => return Err("FP16 texture but no conversion table".to_string()),
+        (false, _) => None,
+    };
+    let bpp = if fp16 { 8 } else { 4 };
+    let reuse =
+        matches!(staging, Some(s) if s.width == desc.Width && s.height == desc.Height && s.format == desc.Format);
     if !reuse {
         let sd = D3D11_TEXTURE2D_DESC {
             Width: desc.Width,
@@ -458,7 +693,7 @@ fn read_bgra(
         // SAFETY: `sd` describes a valid staging texture; the out pointer is a local.
         unsafe { gpu.device.CreateTexture2D(&sd, None, Some(&mut t)) }.ctx("CreateTexture2D(staging)")?;
         let t = t.ok_or("CreateTexture2D returned no texture")?;
-        *staging = Some(Staging { tex: t, width: desc.Width, height: desc.Height });
+        *staging = Some(Staging { tex: t, width: desc.Width, height: desc.Height, format: desc.Format });
     }
     let st = &staging.as_ref().ok_or("staging texture missing")?.tex;
     let (w, h) = match crop {
@@ -470,22 +705,50 @@ fn read_bgra(
     let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
     // SAFETY: the staging texture has CPU read access; Map waits for the copy to finish.
     unsafe { gpu.context.Map(st, 0, D3D11_MAP_READ, 0, Some(&mut mapped)) }.ctx("Map(staging)")?;
-    let row = w as usize * 4;
+    let row = w as usize * bpp;
+    let out_row = w as usize * 4;
     let pitch = mapped.RowPitch as usize;
     let result = if mapped.pData.is_null() || pitch < row {
         Err(format!("Map returned pData {:?} RowPitch {pitch} for rows of {row} bytes", mapped.pData))
     } else {
-        let mut out = vec![0u8; row * h as usize];
+        let mut out = vec![0u8; out_row * h as usize];
+        let mut raw = if fp16 && keep_raw { Some(Vec::with_capacity(w as usize * h as usize * 4)) } else { None };
         let src = mapped.pData as *const u8;
+        let convert_start = log::now_ms();
         for y in 0..h as usize {
             // SAFETY: the mapped texture has `desc.Height >= h` rows of `pitch` bytes, and `row <= pitch`.
             let line = unsafe { std::slice::from_raw_parts(src.add(y * pitch), row) };
-            out[y * row..(y + 1) * row].copy_from_slice(line);
+            let dst = &mut out[y * out_row..(y + 1) * out_row];
+            match lut {
+                None => {
+                    dst.copy_from_slice(line);
+                    for p in dst.as_chunks_mut::<4>().0 {
+                        p[3] = 255;
+                    }
+                }
+                Some(lut) => {
+                    // R, G, B, A halves, little-endian.
+                    for (o, px) in dst.as_chunks_mut::<4>().0.iter_mut().zip(line.as_chunks::<8>().0) {
+                        let r = u16::from_le_bytes([px[0], px[1]]);
+                        let g = u16::from_le_bytes([px[2], px[3]]);
+                        let b = u16::from_le_bytes([px[4], px[5]]);
+                        *o = [lut[usize::from(b)], lut[usize::from(g)], lut[usize::from(r)], 255];
+                    }
+                    if let Some(raw) = &mut raw {
+                        raw.extend(line.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)));
+                    }
+                }
+            }
         }
-        for p in out.as_chunks_mut::<4>().0 {
-            p[3] = 255;
-        }
-        Ok((w, h, out))
+        let convert_ms = if fp16 { log::now_ms() - convert_start } else { 0.0 };
+        Ok(Frame {
+            width: w,
+            height: h,
+            bgra: out,
+            raw: raw.map(|rgba| Fp16Image { width: w, height: h, rgba }),
+            format: desc.Format.0,
+            convert_ms,
+        })
     };
     // SAFETY: unmaps the subresource mapped above.
     unsafe { gpu.context.Unmap(st, 0) };
@@ -609,10 +872,16 @@ pub fn pump_messages() {
 /// The frozen-screen photo: DXGI on every monitor, GDI for any monitor where DXGI failed.
 /// All or nothing: an error if any monitor fails both ways.
 /// Creates (and drops) its own `DxgiSession`: the caller must not hold one (one duplication per output).
+/// The DXGI format comes from `HWTEST_DXGI_FORMAT` (auto: FP16 converted on monitors with HDR on).
 pub fn frozen_photo() -> Result<Vec<Photo>, String> {
+    frozen_photo_with(DupFormat::from_env()?)
+}
+
+/// `frozen_photo` with the DXGI format given.
+pub fn frozen_photo_with(format: DupFormat) -> Result<Vec<Photo>, String> {
     let t0 = log::now_ms();
     let monitors = monitors::enumerate()?;
-    let mut by_name: HashMap<String, Result<Photo, String>> = match DxgiSession::new() {
+    let mut by_name: HashMap<String, Result<Photo, String>> = match DxgiSession::with(format, false) {
         Ok(mut s) => s.grab_all().into_iter().collect(),
         Err(e) => {
             log::line(format!("frozen: DXGI session failed, GDI for every monitor: {e}"));

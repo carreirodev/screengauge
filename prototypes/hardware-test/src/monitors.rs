@@ -3,9 +3,12 @@
 use std::collections::HashMap;
 
 use windows::Win32::Devices::Display::{
-    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME, DISPLAYCONFIG_MODE_INFO,
-    DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME,
-    DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
+    DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO, DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL,
+    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+    DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_DEVICE_INFO_TYPE, DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO,
+    DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SDR_WHITE_LEVEL, DISPLAYCONFIG_SOURCE_DEVICE_NAME,
+    DISPLAYCONFIG_TARGET_DEVICE_NAME, DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS,
+    QueryDisplayConfig,
 };
 use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, LPARAM, POINT, RECT};
 use windows::Win32::Graphics::Dxgi::Common::{
@@ -404,8 +407,8 @@ fn virtual_screen() -> String {
     format!("origin ({x},{y}) size {w}x{h}, {n} monitors, primary SM_CXSCREEN x SM_CYSCREEN = {sw}x{sh}")
 }
 
-/// GDI device name (`\\.\DISPLAYn`) -> monitor model name, through DisplayConfig.
-fn friendly_names() -> Result<HashMap<String, String>, String> {
+/// The active DisplayConfig paths (one per lit monitor).
+fn active_paths() -> Result<Vec<DISPLAYCONFIG_PATH_INFO>, String> {
     let mut paths: Vec<DISPLAYCONFIG_PATH_INFO> = Vec::new();
     let mut done = false;
     for _attempt in 0..3 {
@@ -435,19 +438,36 @@ fn friendly_names() -> Result<HashMap<String, String>, String> {
     if !done {
         return Err("QueryDisplayConfig kept returning ERROR_INSUFFICIENT_BUFFER".to_string());
     }
+    Ok(paths)
+}
+
+/// The GDI device name (`\\.\DISPLAYn`) of a path's source.
+fn source_gdi_name(p: &DISPLAYCONFIG_PATH_INFO) -> Result<String, String> {
+    let mut src = DISPLAYCONFIG_SOURCE_DEVICE_NAME::default();
+    src.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+    src.header.size = size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32;
+    src.header.adapterId = p.sourceInfo.adapterId;
+    src.header.id = p.sourceInfo.id;
+    // SAFETY: header.size matches the struct that the header pointer belongs to.
+    let e = unsafe { DisplayConfigGetDeviceInfo(&mut src.header) };
+    if e != 0 {
+        return Err(format!("DisplayConfigGetDeviceInfo(source name) error {e}"));
+    }
+    Ok(wide(&src.viewGdiDeviceName))
+}
+
+/// GDI device name (`\\.\DISPLAYn`) -> monitor model name, through DisplayConfig.
+fn friendly_names() -> Result<HashMap<String, String>, String> {
+    let paths = active_paths()?;
     let mut names = HashMap::new();
     for p in &paths {
-        let mut src = DISPLAYCONFIG_SOURCE_DEVICE_NAME::default();
-        src.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
-        src.header.size = size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32;
-        src.header.adapterId = p.sourceInfo.adapterId;
-        src.header.id = p.sourceInfo.id;
-        // SAFETY: header.size matches the struct that the header pointer belongs to.
-        let e = unsafe { DisplayConfigGetDeviceInfo(&mut src.header) };
-        if e != 0 {
-            log::line(format!("monitors: DisplayConfigGetDeviceInfo(source name) error {e}; path skipped"));
-            continue;
-        }
+        let gdi = match source_gdi_name(p) {
+            Ok(n) => n,
+            Err(e) => {
+                log::line(format!("monitors: {e}; path skipped"));
+                continue;
+            }
+        };
         let mut tgt = DISPLAYCONFIG_TARGET_DEVICE_NAME::default();
         tgt.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
         tgt.header.size = size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>() as u32;
@@ -459,9 +479,173 @@ fn friendly_names() -> Result<HashMap<String, String>, String> {
             log::line(format!("monitors: DisplayConfigGetDeviceInfo(target name) error {e}; path skipped"));
             continue;
         }
-        names.insert(wide(&src.viewGdiDeviceName), wide(&tgt.monitorFriendlyDeviceName));
+        names.insert(gdi, wide(&tgt.monitorFriendlyDeviceName));
     }
     Ok(names)
+}
+
+/// `DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO_2` from wingdi.h (SDK 10.0.26100.0, Windows 11 and later),
+/// missing from windows 0.62.2. The bitfield union is kept as its `value`.
+#[repr(C)]
+#[derive(Default)]
+struct AdvancedColorInfo2 {
+    header: DISPLAYCONFIG_DEVICE_INFO_HEADER,
+    value: u32,
+    color_encoding: i32,
+    bits_per_color_channel: u32,
+    active_color_mode: i32,
+}
+
+/// `DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO_2` in wingdi.h.
+const GET_ADVANCED_COLOR_INFO_2: DISPLAYCONFIG_DEVICE_INFO_TYPE = DISPLAYCONFIG_DEVICE_INFO_TYPE(15);
+
+/// HDR state and SDR white level of one monitor, as DisplayConfig and DXGI report them right now.
+/// Every field is `None` when its query failed (the failure is logged).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ColorState {
+    /// GDI device name, e.g. `\\.\DISPLAY1`.
+    pub device_name: String,
+    /// `IDXGIOutput6::GetDesc1().ColorSpace`.
+    pub dxgi_color_space: Option<i32>,
+    pub dxgi_bits_per_color: Option<u32>,
+    /// `DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO` bitfield: supported 1, enabled 2, wide color enforced 4, force disabled 8.
+    pub ac_bits: Option<u32>,
+    pub bits_per_channel: Option<u32>,
+    /// `DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO_2` bitfield: supported 1, active 2, limited by policy 8,
+    /// HDR supported 0x10, HDR user enabled 0x20, wide color supported 0x40, wide color user enabled 0x80.
+    pub ac2_bits: Option<u32>,
+    /// `activeColorMode`: 0 SDR, 1 WCG, 2 HDR.
+    pub ac2_mode: Option<i32>,
+    /// `DISPLAYCONFIG_SDR_WHITE_LEVEL.SDRWhiteLevel`: 1000 = 80 nits.
+    pub sdr_white_raw: Option<u32>,
+}
+
+impl ColorState {
+    /// HDR is on: the active color mode says so, or (without it) DXGI reports the ST.2084 color space.
+    pub fn hdr_on(&self) -> bool {
+        match self.ac2_mode {
+            Some(mode) => mode == 2,
+            None => self.dxgi_color_space == Some(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020.0),
+        }
+    }
+
+    /// Learn (DISPLAYCONFIG_SDR_WHITE_LEVEL): nits = SDRWhiteLevel / 1000 * 80.
+    pub fn sdr_white_nits(&self) -> Option<f64> {
+        self.sdr_white_raw.map(|raw| f64::from(raw) / 1000.0 * 80.0)
+    }
+
+    pub fn describe(&self) -> String {
+        let opt = |v: Option<String>| v.unwrap_or_else(|| "?".to_string());
+        let mode = match self.ac2_mode {
+            Some(0) => "SDR".to_string(),
+            Some(1) => "WCG".to_string(),
+            Some(2) => "HDR".to_string(),
+            Some(m) => format!("unknown {m}"),
+            None => "?".to_string(),
+        };
+        let cs = match self.dxgi_color_space {
+            Some(cs) if cs == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020.0 => "G2084_P2020 (HDR)".to_string(),
+            Some(cs) if cs == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709.0 => "G22_P709 (SDR)".to_string(),
+            Some(cs) => format!("{cs}"),
+            None => "?".to_string(),
+        };
+        format!(
+            "HDR {} (activeColorMode {mode}, info2 bits {}, info bits {}, DXGI ColorSpace {cs}, DXGI bits {}, link bits {}), SDR white level {} = {} nits",
+            if self.hdr_on() { "ON" } else { "off" },
+            opt(self.ac2_bits.map(|b| format!("0x{b:02x}"))),
+            opt(self.ac_bits.map(|b| format!("0x{b:x}"))),
+            opt(self.dxgi_bits_per_color.map(|b| b.to_string())),
+            opt(self.bits_per_channel.map(|b| b.to_string())),
+            opt(self.sdr_white_raw.map(|r| r.to_string())),
+            opt(self.sdr_white_nits().map(|n| format!("{n:.1}")))
+        )
+    }
+}
+
+/// The color state of every active monitor, keyed by GDI device name. Queried fresh on every call.
+pub fn color_states() -> Result<Vec<ColorState>, String> {
+    let mut out = Vec::new();
+    for p in &active_paths()? {
+        let device_name = source_gdi_name(p)?;
+        let mut s = ColorState { device_name, ..Default::default() };
+
+        let mut ac = DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO::default();
+        ac.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO;
+        ac.header.size = size_of::<DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO>() as u32;
+        ac.header.adapterId = p.targetInfo.adapterId;
+        ac.header.id = p.targetInfo.id;
+        // SAFETY: the pointer covers the whole struct that header.size describes.
+        let e = unsafe { DisplayConfigGetDeviceInfo((&raw mut ac).cast()) };
+        if e == 0 {
+            // SAFETY: both union members are a u32 view of the same bits.
+            s.ac_bits = Some(unsafe { ac.Anonymous.value });
+            s.bits_per_channel = Some(ac.bitsPerColorChannel);
+        } else {
+            log::line(format!("monitors: {} advanced color info error {e}", s.device_name));
+        }
+
+        let mut ac2 = AdvancedColorInfo2::default();
+        ac2.header.r#type = GET_ADVANCED_COLOR_INFO_2;
+        ac2.header.size = size_of::<AdvancedColorInfo2>() as u32;
+        ac2.header.adapterId = p.targetInfo.adapterId;
+        ac2.header.id = p.targetInfo.id;
+        // SAFETY: AdvancedColorInfo2 mirrors the SDK struct; the pointer covers all of it.
+        let e = unsafe { DisplayConfigGetDeviceInfo((&raw mut ac2).cast()) };
+        if e == 0 {
+            s.ac2_bits = Some(ac2.value);
+            s.ac2_mode = Some(ac2.active_color_mode);
+        } else {
+            log::line(format!("monitors: {} advanced color info 2 error {e}", s.device_name));
+        }
+
+        let mut white = DISPLAYCONFIG_SDR_WHITE_LEVEL::default();
+        white.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL;
+        white.header.size = size_of::<DISPLAYCONFIG_SDR_WHITE_LEVEL>() as u32;
+        white.header.adapterId = p.targetInfo.adapterId;
+        white.header.id = p.targetInfo.id;
+        // SAFETY: as above.
+        let e = unsafe { DisplayConfigGetDeviceInfo((&raw mut white).cast()) };
+        if e == 0 {
+            s.sdr_white_raw = Some(white.SDRWhiteLevel);
+        } else {
+            log::line(format!("monitors: {} SDR white level error {e}", s.device_name));
+        }
+        out.push(s);
+    }
+
+    // SAFETY: plain factory creation; a new factory sees the current outputs.
+    let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.ctx("CreateDXGIFactory1")?;
+    for ai in 0u32.. {
+        // SAFETY: plain enumeration; NOT_FOUND ends it.
+        let adapter = match unsafe { factory.EnumAdapters1(ai) } {
+            Ok(a) => a,
+            Err(e) if e.code() == DXGI_ERROR_NOT_FOUND => break,
+            Err(e) => return Err(format!("EnumAdapters1({ai}): {e}")),
+        };
+        for oi in 0u32.. {
+            // SAFETY: plain enumeration; NOT_FOUND ends it.
+            let output = match unsafe { adapter.EnumOutputs(oi) } {
+                Ok(o) => o,
+                Err(e) if e.code() == DXGI_ERROR_NOT_FOUND => break,
+                Err(e) => return Err(format!("EnumOutputs({oi}): {e}")),
+            };
+            let o6: IDXGIOutput6 = match output.cast() {
+                Ok(o) => o,
+                Err(e) => {
+                    log::line(format!("monitors: output {oi} has no IDXGIOutput6: {e}"));
+                    continue;
+                }
+            };
+            // SAFETY: plain query.
+            let d1 = unsafe { o6.GetDesc1() }.ctx("IDXGIOutput6::GetDesc1")?;
+            let name = wide(&d1.DeviceName);
+            if let Some(s) = out.iter_mut().find(|s| s.device_name == name) {
+                s.dxgi_color_space = Some(d1.ColorSpace.0);
+                s.dxgi_bits_per_color = Some(d1.BitsPerColor);
+            }
+        }
+    }
+    Ok(out)
 }
 
 struct DxgiOutput {
