@@ -72,6 +72,10 @@ _Avoid_: hotkey, keyboard shortcut (the keys inside a tool are a different thing
 ScreenGauge's icon in the Windows notification area, next to the clock; clicking it calls ScreenGauge like the global shortcut.
 _Avoid_: taskbar icon, system tray icon
 
+**Hidden icons panel**:
+The Windows panel that opens from the arrow next to the clock and holds the notification-area icons not shown directly on the taskbar; the tray icon may sit there or on the taskbar itself.
+_Avoid_: overflow, tray flyout, hidden icon menu (the Windows setting that turns the panel on or off)
+
 **Settings**:
 The window, separate from the tools, where the user changes ScreenGauge's options.
 _Avoid_: preferences, options, Settings tool
