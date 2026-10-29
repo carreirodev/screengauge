@@ -145,3 +145,21 @@ _Avoid_: Store version (a version is a number), MSIX build, packaged app
 **Installer copy**:
 ScreenGauge as installed by the installer downloaded from the project's GitHub releases.
 _Avoid_: GitHub version, desktop version, portable version (there is none)
+
+## Identity
+
+**App icon**:
+The set square that stands for ScreenGauge in Start, on the taskbar, in the installed apps list and, as the tray icon, next to the clock.
+_Avoid_: logo (it could mean the wordmark too), Store icon (a different drawing of the same set square)
+
+**Store icon**:
+The app icon drawn with thickness and reflection, shown only on ScreenGauge's Microsoft Store page.
+_Avoid_: Store logo, tile icon
+
+**Store art**:
+The wide picture at the top of ScreenGauge's Microsoft Store page.
+_Avoid_: banner, hero image, wide image
+
+**Wordmark**:
+The name ScreenGauge written as a mark, with "Screen" light and "Gauge" bold, as at the top of the README.
+_Avoid_: logo, logotype
