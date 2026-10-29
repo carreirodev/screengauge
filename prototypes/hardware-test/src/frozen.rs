@@ -795,7 +795,7 @@ fn suggested_rect(lparam: LPARAM) -> String {
 }
 
 /// WM_SETTINGCHANGE's lParam is NULL or a NUL-terminated string naming the changed area.
-fn setting_string(lparam: LPARAM) -> String {
+pub(crate) fn setting_string(lparam: LPARAM) -> String {
     let p = lparam.0 as *const u16;
     if p.is_null() {
         return "null".to_string();

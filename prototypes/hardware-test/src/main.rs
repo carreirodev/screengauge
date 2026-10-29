@@ -5,6 +5,7 @@
 mod capture;
 mod common;
 mod frozen;
+mod hdr;
 mod image;
 mod keys;
 mod log;
@@ -18,7 +19,7 @@ use windows::Win32::UI::HiDpi::{
     AreDpiAwarenessContextsEqual, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetThreadDpiAwarenessContext,
 };
 
-const MODES: &str = "info, capture, measure, hotkey, recorder, run";
+const MODES: &str = "info, capture, measure, hotkey, recorder, run, hdr";
 
 fn main() -> ExitCode {
     let args = common::Args::from_env();
@@ -51,6 +52,7 @@ fn main() -> ExitCode {
         "hotkey-child" => keys::hotkey_child_mode(&args),
         "recorder" => keys::recorder_mode(&args),
         "run" => frozen::run_mode(&args),
+        "hdr" => hdr::hdr_mode(&args),
         other => Err(format!("unknown mode '{other}'; modes: {MODES}")),
     };
     match result {
