@@ -49,6 +49,8 @@ pub struct App {
     pending_change: Option<PendingChange>,
     changes: u32,
     triggers: u32,
+    /// Tray triggers only, for `--overflow-cycle`.
+    tray_triggers: u32,
     session: Option<Session>,
     check_pending: bool,
     series_jobs: VecDeque<SeriesJob>,
@@ -144,6 +146,7 @@ impl App {
             pending_change: None,
             changes: 0,
             triggers: 0,
+            tray_triggers: 0,
             session: None,
             check_pending: false,
             series_jobs: VecDeque::new(),
@@ -229,6 +232,14 @@ impl App {
             },
             _ => None,
         };
+        let overflow = if source == Source::Tray && self.opts.overflow_cycle {
+            self.tray_triggers = self.tray_triggers.saturating_add(1);
+            let attempt = OverflowAttempt::ALL[usize::try_from(self.tray_triggers - 1).unwrap_or(0) % 3];
+            self.overflow_attempt(attempt, n, t0);
+            Some(attempt)
+        } else {
+            None
+        };
         let photos = match source {
             Source::Hotkey | Source::Timer => match capture::frozen_photo() {
                 Ok(list) => list.into_iter().map(Rc::new).collect::<Vec<_>>(),
@@ -248,6 +259,9 @@ impl App {
                 match photo {
                     Ok(list) => {
                         log::line(format!("series #{n}: the photo is the +{final_at:.1} ms grab"));
+                        if let Some(attempt) = overflow {
+                            log_overflow(&format!("RESULT overflow #{n} {}: at the photo", attempt.name()));
+                        }
                         list
                     }
                     Err(e) => {
@@ -271,6 +285,23 @@ impl App {
         }
         self.after_open(t0, t1);
         drop(activator);
+    }
+
+    /// WPC-290: one way of closing the hidden-icons flyout before the delay series, with the flyout's state
+    /// before and right after. The series then shows when (if ever) it leaves the screen.
+    fn overflow_attempt(&self, attempt: OverflowAttempt, n: u32, t0: f64) {
+        let tag = format!("RESULT overflow #{n} {}", attempt.name());
+        log_overflow(&format!("{tag}: at the click (+{:.1} ms)", log::now_ms() - t0));
+        let action = match attempt {
+            OverflowAttempt::Nothing => return,
+            OverflowAttempt::SetFocus => self.tray.set_focus().map(|()| "NIM_SETFOCUS sent".to_string()),
+            OverflowAttempt::Hide => sys::hide_overflow(),
+        };
+        match action {
+            Ok(done) => log::line(format!("{tag}: {done} (+{:.1} ms)", log::now_ms() - t0)),
+            Err(e) => log::line(format!("ERROR: {tag}: {e}")),
+        }
+        log_overflow(&format!("{tag}: right after (+{:.1} ms)", log::now_ms() - t0));
     }
 
     /// One DxgiSession, grabs at fixed delays after t0, every frame kept for the analysis.
@@ -514,11 +545,15 @@ impl App {
             DPICHANGED_ON_TOOLS.with(std::cell::Cell::get)
         ));
         let start = log::now_ms();
+        let from_tray = session.source == Source::Tray;
         drop(session);
         log::line(format!(
             "tools {tag} closed: windows destroyed and photo released in {:.1} ms",
             log::now_ms() - start
         ));
+        if from_tray && self.opts.overflow_cycle {
+            log_overflow(&format!("RESULT overflow {tag}: after closing"));
+        }
         self.log_usage(&format!("after tools {tag} closed"));
         // WPC-286: HWTEST_REPEAT=N re-triggers until N calls; HWTEST_KEEP_DXGI then holds a warm
         // DXGI session (as an app that keeps the capture ready would) for the idle samples.
@@ -887,6 +922,33 @@ fn describe_monitors(list: &[MonitorInfo]) -> String {
 }
 
 /// Runs `f` and returns its result with the time it took, in ms.
+/// WPC-290: what a tray trigger does to the hidden-icons flyout before the photo.
+#[derive(Clone, Copy)]
+enum OverflowAttempt {
+    Nothing,
+    SetFocus,
+    Hide,
+}
+
+impl OverflowAttempt {
+    const ALL: [Self; 3] = [Self::Nothing, Self::SetFocus, Self::Hide];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Nothing => "nothing",
+            Self::SetFocus => "setfocus",
+            Self::Hide => "hide",
+        }
+    }
+}
+
+fn log_overflow(label: &str) {
+    match sys::overflow_state() {
+        Ok((_, state)) => log::line(format!("{label}: flyout {state}")),
+        Err(e) => log::line(format!("ERROR: {label}: {e}")),
+    }
+}
+
 fn timed<T>(f: impl FnOnce() -> T) -> (T, f64) {
     let start = log::now_ms();
     let out = f();

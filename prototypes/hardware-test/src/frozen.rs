@@ -236,6 +236,9 @@ struct Opts {
     /// Tray and Start triggers take the foreground before the delay series (experiment: the hidden-icons
     /// flyout stays open until another app activates).
     activate_first: bool,
+    /// Tray triggers cycle through doing nothing, NIM_SETFOCUS and hiding the flyout window before the photo
+    /// (WPC-290: does anything close the hidden-icons flyout, and harmlessly).
+    overflow_cycle: bool,
     present: tools::Present,
     hotkey: HotkeySpec,
 }
@@ -256,6 +259,7 @@ impl Opts {
             no_save: args.flag("no-save"),
             save_photo: args.flag("save-photo"),
             activate_first: args.flag("activate-first"),
+            overflow_cycle: args.flag("overflow-cycle"),
             present: tools::Present { vsync: args.flag("present-vsync") },
         };
         if opts.auto_close_secs == 0 || opts.exit_after_secs == 0 {
@@ -266,7 +270,7 @@ impl Opts {
 
     fn describe(&self) -> String {
         format!(
-            "hotkey={} trigger-after-ms={} auto-close-secs={} exit-after-secs={} once={} no-save={} save-photo={} activate-first={} present={}",
+            "hotkey={} trigger-after-ms={} auto-close-secs={} exit-after-secs={} once={} no-save={} save-photo={} activate-first={} overflow-cycle={} present={}",
             self.hotkey.text,
             self.trigger_after_ms.map_or_else(|| "off".to_string(), |v| v.to_string()),
             self.auto_close_secs,
@@ -275,6 +279,7 @@ impl Opts {
             self.no_save,
             self.save_photo,
             self.activate_first,
+            self.overflow_cycle,
             if self.present.vsync { "vsync (D2D1_PRESENT_OPTIONS_NONE)" } else { "immediately" }
         )
     }

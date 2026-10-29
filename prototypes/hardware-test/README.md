@@ -23,7 +23,7 @@ Run `target/release/hwtest.exe <mode>`. Each mode logs what it measured to stdou
 hwtest.exe run --hotkey win+ctrl+shift+m --save-photo --auto-close-secs 30
 ```
 
-Other `run` options: `--trigger-after-ms N` (opens the tools once without keys), `--once`, `--no-save`, `--activate-first` (on even triggers, the tray and Start paths take the foreground before the photo), `--present-vsync`, `--exit-after-secs N`. A left click on the tray icon opens the tools; a right click exits. The Start path needs a Start menu shortcut to `hwtest.exe run`.
+Other `run` options: `--trigger-after-ms N` (opens the tools once without keys), `--once`, `--no-save`, `--activate-first` (on even triggers, the tray and Start paths take the foreground before the photo), `--overflow-cycle` (WPC-290: tray triggers cycle through doing nothing, `NIM_SETFOCUS` and hiding the hidden-icons flyout window before the photo, and log the flyout's state at the click, right after, at the photo and after closing), `--present-vsync`, `--exit-after-secs N`. A left click on the tray icon opens the tools; a right click exits. The Start path needs a Start menu shortcut to `hwtest.exe run`.
 
 For the WPC-286 consumption targets, `run` also reads environment variables: `HWTEST_NO_CHECK` skips the identical-check re-capture, `HWTEST_NO_POLL` drops the 1 s monitor poll, `HWTEST_REPEAT=N` re-triggers 4 s after each close until N calls (`HWTEST_FIRST_GAP_MS` sets a longer gap after the first call, for settled idle samples), and `HWTEST_KEEP_DXGI` then holds a warm DXGI session for the idle samples. Usage lines include the private working set, which should be the number Task Manager's Memory column shows (not compared side by side). The WPC-286 measurement:
 

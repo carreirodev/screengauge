@@ -2,6 +2,7 @@
 //! and the few numeric conversions Win32 forces on us.
 
 use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, HWND, LPARAM, RECT, WPARAM};
+use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
 use windows::Win32::System::ProcessStatus::{
     GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX2,
 };
@@ -12,14 +13,14 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, UnhookWinEvent};
 use windows::Win32::UI::Input::KeyboardAndMouse::UnregisterHotKey;
 use windows::Win32::UI::Shell::{
-    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION, NOTIFYICON_VERSION_4,
-    NOTIFYICONDATAW, Shell_NotifyIconW,
+    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETFOCUS, NIM_SETVERSION,
+    NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DestroyWindow, GetClassNameW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IDI_APPLICATION, IsWindow,
-    KillTimer, LoadIconW, SetTimer,
+    DestroyWindow, FindWindowW, GetClassNameW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId,
+    IDI_APPLICATION, IsWindow, IsWindowVisible, KillTimer, LoadIconW, SW_HIDE, SetTimer, ShowWindow,
 };
-use windows::core::PWSTR;
+use windows::core::{PCWSTR, PWSTR, w};
 
 use crate::common::{Ctx, PxRect};
 use crate::log;
@@ -97,6 +98,17 @@ impl TrayIcon {
         Ok(())
     }
 
+    /// NIM_SETFOCUS: "returns focus to the taskbar notification area" once the icon's UI is done. Documented;
+    /// whether it closes the hidden-icons flyout is what WPC-290 tests.
+    pub fn set_focus(&self) -> Result<(), String> {
+        let nid = self.data()?;
+        // SAFETY: nid identifies our icon by hWnd + uID.
+        if !unsafe { Shell_NotifyIconW(NIM_SETFOCUS, &nid) }.as_bool() {
+            return Err("Shell_NotifyIconW(NIM_SETFOCUS) returned FALSE".to_string());
+        }
+        Ok(())
+    }
+
     fn data(&self) -> Result<NOTIFYICONDATAW, String> {
         Ok(NOTIFYICONDATAW {
             cbSize: size_u32::<NOTIFYICONDATAW>()?,
@@ -119,6 +131,82 @@ impl Drop for TrayIcon {
             Err(e) => log::line(format!("cleanup: tray icon: {e}")),
         }
     }
+}
+
+/// Explorer's hidden-icons flyout windows, by class: the Windows 11 XAML host (22621+) and the classic one.
+/// Undocumented; PowerToys' UI tests find the flyout the same way and call it open when visible and not cloaked.
+const OVERFLOW_CLASSES: [(&str, PCWSTR); 2] = [
+    ("TopLevelWindowForOverflowXamlIsland", w!("TopLevelWindowForOverflowXamlIsland")),
+    ("NotifyIconOverflowWindow", w!("NotifyIconOverflowWindow")),
+];
+
+struct OverflowWindow {
+    class: &'static str,
+    hwnd: HWND,
+    visible: bool,
+    cloaked: Result<bool, String>,
+}
+
+impl OverflowWindow {
+    fn open(&self) -> bool {
+        self.visible && matches!(self.cloaked, Ok(false))
+    }
+}
+
+fn overflow_windows() -> Result<Vec<OverflowWindow>, String> {
+    let mut found = Vec::new();
+    for (class, wide) in OVERFLOW_CLASSES {
+        // SAFETY: a constant class name, no window name. A missing window is an Err, which only means "not found".
+        let Ok(hwnd) = (unsafe { FindWindowW(wide, PCWSTR::null()) }) else { continue };
+        // SAFETY: IsWindowVisible accepts any window handle.
+        let visible = unsafe { IsWindowVisible(hwnd) }.as_bool();
+        let mut cloaked = 0u32;
+        let size = size_u32::<u32>()?;
+        // SAFETY: DWMWA_CLOAKED writes a DWORD into `cloaked`, whose size is passed.
+        let cloaked = unsafe { DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, (&raw mut cloaked).cast(), size) }
+            .map(|()| cloaked != 0)
+            .map_err(|e| format!("DwmGetWindowAttribute(DWMWA_CLOAKED): {e}"));
+        found.push(OverflowWindow { class, hwnd, visible, cloaked });
+    }
+    Ok(found)
+}
+
+/// Whether the flyout counts as open, and one line per flyout window found: class, visible, cloaked, rect.
+pub fn overflow_state() -> Result<(bool, String), String> {
+    let windows = overflow_windows()?;
+    if windows.is_empty() {
+        return Ok((false, "closed: no flyout window found".to_string()));
+    }
+    let open = windows.iter().any(OverflowWindow::open);
+    let parts: Vec<String> = windows
+        .iter()
+        .map(|w| {
+            let rect = window_rect(w.hwnd).map_or_else(|e| format!("? ({e})"), |r| r.to_string());
+            let cloaked = match &w.cloaked {
+                Ok(c) => c.to_string(),
+                Err(e) => format!("? ({e})"),
+            };
+            format!("{} visible={} cloaked={cloaked} rect={rect}", w.class, w.visible)
+        })
+        .collect();
+    Ok((open, format!("{}: {}", if open { "OPEN" } else { "closed" }, parts.join("; "))))
+}
+
+/// ShowWindow(SW_HIDE) on every flyout window that is open. Undocumented: hides Explorer's window from outside.
+pub fn hide_overflow() -> Result<String, String> {
+    let open: Vec<OverflowWindow> = overflow_windows()?.into_iter().filter(OverflowWindow::open).collect();
+    if open.is_empty() {
+        return Ok("nothing to hide (no open flyout window)".to_string());
+    }
+    let parts: Vec<String> = open
+        .iter()
+        .map(|w| {
+            // SAFETY: ShowWindow accepts any window handle; it returns the previous visibility, not an error.
+            let was_visible = unsafe { ShowWindow(w.hwnd, SW_HIDE) }.as_bool();
+            format!("ShowWindow({}, SW_HIDE): was visible={was_visible}", w.class)
+        })
+        .collect();
+    Ok(parts.join("; "))
 }
 
 /// UnregisterHotKey on drop.
