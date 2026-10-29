@@ -1,6 +1,6 @@
 # Native Rust on Win32 and Direct2D, with no UI framework
 
-ScreenGauge is written in Rust directly against the Windows APIs: Win32 windows, Direct2D and DirectWrite for drawing, and the Windows screen-capture APIs. It uses no UI framework and no web engine. ScreenGauge draws everything users see: the measurements on screen, the toolbar and the Settings window, light and dark themes included. Only the Windows file dialogs (Save As, choosing a folder) belong to the system. The project exists so that a single screen tool does not mean installing a suite like PowerToys and its runtimes, so "installs only ScreenGauge" outranks ready-made controls.
+ScreenGauge is written in Rust directly against the Windows APIs: Win32 windows, Direct2D and DirectWrite for drawing, and the Windows screen-capture APIs. It uses no UI framework and no web engine. ScreenGauge draws everything users see: the measurements on screen, the toolbar and the Settings window, light and dark themes included. Only the Windows file dialogs (Save As, choosing a folder) and Windows notifications belong to the system. The project exists so that a single screen tool does not mean installing a suite like PowerToys and its runtimes, so "installs only ScreenGauge" outranks ready-made controls.
 
 ## Considered Options
 
@@ -13,7 +13,8 @@ ScreenGauge is written in Rust directly against the Windows APIs: Win32 windows,
 ## Consequences
 
 - Capture is a single shot taken when ScreenGauge is called (the frozen screen, decided in WPC-275), not a continuous stream. It uses the same Windows capture APIs, so it doesn't change this choice.
-- Theming, hit-testing, focus and per-monitor scaling of ScreenGauge's own UI are ScreenGauge's code.
+- Theming, hit-testing, focus and per-monitor scaling of ScreenGauge's own UI are ScreenGauge's code. That includes the tray icon's menu.
+- Messages shown while no tool is open are Windows notifications, drawn by Windows: the global shortcut already taken at startup, damaged settings, a failed screen capture and two installed copies (decided in WPC-274, WPC-278, WPC-284 and WPC-292).
 - The C runtime is linked statically (`-C target-feature=+crt-static`), so users need no Visual C++ Redistributable.
 - Windows 11 and later only, so Windows 11 APIs such as the dark title bar (documented from build 22000) can be relied on.
 - v1 has no Narrator support or full keyboard navigation in the toolbar and Settings. Adding it later means implementing UI Automation for hand-drawn UI.
