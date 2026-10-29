@@ -150,6 +150,8 @@ svg.ic, img.ic { display: block; flex: none; }
   <p class="lead" id="scaleInfo"></p>
   <div class="notes" id="notes" hidden></div>
 
+  <div id="round2"></div>
+
   <section>
     <h2>Todas as formas perto do relógio <small>tamanho real; a linha amarela marca a forma escolhida na barra</small></h2>
     <div class="matrix" id="matrix"></div>
@@ -164,7 +166,7 @@ svg.ic, img.ic { display: block; flex: none; }
   <span class="grp"><span class="k">Cor</span><button id="coPrev" title="Cor anterior (↓)">◀</button><span class="v" id="coName"></span><button id="coNext" title="Próxima cor (↑)">▶</button></span>
   <span class="grp"><span class="k">Bandeja</span><button id="trColor">Colorido</button><button id="trMono">Uma cor</button></span>
   <span class="grp"><span class="k">Nome</span><button id="nmNext" title="Próximo jeito de escrever o nome (N)"></button></span>
-  <span class="grp"><span class="k">Ícone na Store</span><button id="stSame">Mesma forma</button><button id="st3da">Imagem 3da</button></span>
+  <span class="grp"><span class="k">Ícone na Store</span><button id="stPrev" title="Ícone anterior da Store (S com Shift)">◀</button><span class="v" id="stName"></span><button id="stNext" title="Próximo ícone da Store (S)">▶</button></span>
   <span class="grp"><button id="notesBtn" title="O que a Microsoft pede para ícones e para a página da Store">Regras</button></span>
 </div>
 
@@ -270,10 +272,13 @@ const SHAPES = {
   D: {
     name: 'Esquadro',
     why: 'Um esquadro de desenho, com marcas de medida: uma silhueta só, sem tela.',
-    color(P, L) {
+    // edge 'strong' is the round-2 tray candidate with a darker, thicker outline for the light taskbar.
+    color(P, L, edge) {
       const g1 = nid('g');
+      const strong = edge === 'strong';
+      const sw = (L === 's' ? 1.5 : 1.2) * (strong ? 1.8 : 1);
       let o = `<defs>${grad(g1, P.s[0], P.s[1])}</defs>`;
-      o += `<path d="${triD(L)}" fill-rule="evenodd" fill="${L === 's' ? P.s[1] : `url(#${g1})`}" stroke="${P.s[2]}" stroke-width="${L === 's' ? 1.5 : 1.2}" stroke-linejoin="round"/>`;
+      o += `<path d="${triD(L)}" fill-rule="evenodd" fill="${L === 's' ? P.s[1] : `url(#${g1})`}" stroke="${strong ? '#854D0E' : P.s[2]}" stroke-width="${sw}" stroke-linejoin="round"/>`;
       if (L !== 's') o += ticksD(L, P.p[2]);
       return o;
     },
@@ -316,12 +321,40 @@ function ticksD(L, c) {
 }
 
 // One icon at `css` CSS px; detail follows the physical pixels it will really get.
-function icon(shapeKey, P, mode, css, physOverride) {
+function icon(shapeKey, P, mode, css, physOverride, edge) {
   const phys = physOverride ?? Math.round(css * devicePixelRatio);
   if (shapeKey === 'X') return `<img class="ic" src="${IMG_3DA}" width="${css}" height="${css}" alt="">`;
   const S = SHAPES[shapeKey];
-  const inner = mode === 'mono' ? S.mono(level(phys)) : S.color(P, level(phys));
+  const inner = mode === 'mono' ? S.mono(level(phys)) : S.color(P, level(phys), edge);
   return `<svg class="ic" xmlns="http://www.w3.org/2000/svg" width="${css}" height="${css}" viewBox="0 0 48 48">${inner}</svg>`;
+}
+
+// Round 2: the set square with volume, for the Store's 300 × 300 icon only.
+const STORE3D = [
+  { key: '1', name: 'Fluent', why: 'Plano com sombra suave e brilho na borda, como os ícones do Windows 11.' },
+  { key: '2', name: 'Acrílico', why: 'Um esquadro de plástico de verdade, com espessura e reflexo, de frente.' },
+  { key: '3', name: 'Inclinado', why: 'O mesmo de acrílico, girado e mais grosso, no espírito da imagem 3da.' },
+];
+function store3d(P, v, css) {
+  const tri = triD('l');
+  const g1 = nid('g'), g2 = nid('g'), cp = nid('c'), sh = nid('f'), bl = nid('f');
+  const depth = v === 1 ? 0 : v === 2 ? 6 : 9;
+  let defs = `${grad(g1, P.s[0], P.s[1])}
+    <linearGradient id="${g2}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="${v === 3 ? .75 : .5}"/><stop offset=".45" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <clipPath id="${cp}"><path d="${tri}" clip-rule="evenodd"/></clipPath>
+    <filter id="${sh}" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="1.2" stdDeviation="1.4" flood-color="#000" flood-opacity=".28"/><feDropShadow dx="0" dy=".3" stdDeviation=".3" flood-color="#000" flood-opacity=".22"/></filter>
+    <filter id="${bl}" x="-50%" y="-200%" width="200%" height="500%"><feGaussianBlur stdDeviation="${v === 3 ? 2.2 : 1.6}"/></filter>`;
+  let body = '';
+  if (v > 1) body += `<ellipse cx="${v === 3 ? 27 : 25}" cy="${v === 3 ? 50 : 48.5}" rx="${v === 3 ? 22 : 20}" ry="${v === 3 ? 3 : 2.2}" fill="#000" opacity=".32" filter="url(#${bl})"/>`;
+  for (let i = depth; i >= 1; i--) {
+    body += `<path d="${tri}" fill-rule="evenodd" fill="${i === depth ? '#854D0E' : P.s[2]}" stroke="${i === depth ? '#854D0E' : P.s[2]}" stroke-width="1.2" stroke-linejoin="round" transform="translate(${(i * 0.35).toFixed(2)} ${(i * 0.6).toFixed(2)})"/>`;
+  }
+  body += `<path d="${tri}" fill-rule="evenodd" fill="url(#${g1})"${v === 1 ? ` filter="url(#${sh})"` : ''} stroke="${P.s[2]}" stroke-width="${v === 1 ? .8 : .6}" stroke-linejoin="round"${v > 1 ? ' fill-opacity=".96"' : ''}/>`;
+  body += ticksD('l', P.p[2]);
+  body += `<g clip-path="url(#${cp})"><rect x="0" y="0" width="48" height="48" fill="url(#${g2})"/>` +
+    (v > 1 ? `<path d="M5 5L5 43" stroke="#fff" stroke-opacity="${v === 3 ? .8 : .55}" stroke-width="1.4"/>` : `<path d="M5 5L5 43" stroke="#fff" stroke-opacity=".35" stroke-width=".8"/>`) + `</g>`;
+  if (v === 3) body = `<g transform="rotate(-12 24 26)">${body}</g>`;
+  return `<svg class="ic" xmlns="http://www.w3.org/2000/svg" width="${css}" height="${css}" viewBox="-4 -4 56 56"><defs>${defs}</defs>${body}</svg>`;
 }
 
 // Generic neighbors, so the icon is judged among others (no real brands).
@@ -352,12 +385,16 @@ const NAMES = [
 ];
 
 const q = new URLSearchParams(location.search);
+// Store icon: flat = the app icon as is; 3d1–3d3 = STORE3D (set square only); 3da = the owner's image.
+const STORE_KEYS = ['flat', '3d1', '3d2', '3d3', '3da'];
+const STORE_NAMES = { flat: 'Plano, como o app', '3d1': '3D 1 · Fluent', '3d2': '3D 2 · Acrílico', '3d3': '3D 3 · Inclinado', '3da': 'Imagem 3da' };
+// Defaults follow the owner's round-1 choices: set square, blue and yellow, colored tray.
 const S = {
-  shape: SHAPE_KEYS.includes((q.get('shape') || '').toUpperCase()) ? q.get('shape').toUpperCase() : 'A',
-  color: Math.min(Math.max(parseInt(q.get('color') || '1', 10) || 1, 1), PALETTES.length),
+  shape: SHAPE_KEYS.includes((q.get('shape') || '').toUpperCase()) ? q.get('shape').toUpperCase() : 'D',
+  color: Math.min(Math.max(parseInt(q.get('color') || '2', 10) || 2, 1), PALETTES.length),
   tray: q.get('tray') === 'mono' ? 'mono' : 'color',
   name: Math.min(Math.max(parseInt(q.get('name') || '1', 10) || 1, 1), NAMES.length),
-  store: q.get('store') === '3da' ? '3da' : 'same',
+  store: STORE_KEYS.includes(q.get('store')) ? q.get('store') : '3d1',
 };
 const PAL = () => PALETTES[S.color - 1];
 const ink = th => th === 'dark' ? '#ffffff' : '#1a1a1a';
@@ -394,7 +431,9 @@ function renderDetail() {
   const P = PAL();
   const k = S.shape;
   const N = NAMES[S.name - 1];
-  const storeIcon = css => S.store === '3da' ? `<img class="ic" src="${IMG_3DA}" width="${css}" height="${css}" alt="">` : icon(k, P, 'color', css);
+  const storeIcon = css => S.store === '3da' ? `<img class="ic" src="${IMG_3DA}" width="${css}" height="${css}" alt="">`
+    : S.store !== 'flat' && k === 'D' ? store3d(P, +S.store.slice(2), css)
+    : icon(k, P, 'color', css);
   let o = '';
 
   o += `<section><h2>Perto do relógio e no painel de ícones escondidos <small>16 px; bandeja: ${S.tray === 'mono' ? 'uma cor, segue o tema' : 'colorido'}</small></h2>` +
@@ -419,7 +458,7 @@ function renderDetail() {
   o += `<section><h2>Configurações do Windows › Aplicativos instalados <small>24 px</small></h2>` +
     themeCells(() => `<div class="inst">${icon(k, P, 'color', 24)}<div><div>ScreenGauge</div><div class="sub">1.0.0 | WPC Solutions | 29/10/2026</div></div><span class="sp"></span><span>⋯</span></div>`) + `</section>`;
 
-  o += `<section><h2>Página da Microsoft Store <small>ícone de 300 × 300 mostrado a 112 px, sobre a arte larga escolhida; ícone: ${S.store === '3da' ? 'imagem 3da (só na Store)' : 'a mesma forma'}</small></h2>` +
+  o += `<section><h2>Página da Microsoft Store <small>ícone de 300 × 300 mostrado a 112 px, sobre a arte larga escolhida; ícone: ${STORE_NAMES[S.store]}${S.store.startsWith('3d') && S.store !== '3da' && k !== 'D' ? ' (só existe para o Esquadro; aqui aparece plano)' : ''}</small></h2>` +
     themeCells(th => `<div class="store"><div class="hero" style="background-image:url('${IMG_HERO}')"></div>
       <div class="info"><div class="tile">${storeIcon(96)}</div><div><div class="nm">ScreenGauge</div><div class="pub">WPC Solutions</div><span class="btn">Obter</span></div></div>
       <img src="${IMG_HERO}" alt="" style="display:none" onerror="this.parentNode.querySelector('.missing').hidden=false"><span class="missing" hidden>arte larga não encontrada no checkout principal</span></div>`) + `</section>`;
@@ -437,6 +476,46 @@ function renderDetail() {
   document.getElementById('detail').innerHTML = o;
   drawPeeks();
 }
+
+// Round 2 compares the choices still open for the set square, side by side.
+function renderRound2() {
+  const P = PAL();
+  let o = `<section><h2>Rodada 2 · Ícone da Store com volume <small>Esquadro em ${P.name.toLowerCase()}, a 150 px; o primeiro é o ícone do app como está</small></h2>` +
+    themeCells(() => `<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">` +
+      STORE_KEYS.slice(0, 4).map(key => `<figure style="margin:0;width:140px;display:flex;flex-direction:column;align-items:center;gap:6px;font-size:12px;text-align:center">` +
+        (key === 'flat' ? icon('D', P, 'color', 120) : store3d(P, +key.slice(2), 120)) +
+        `<b${S.store === key ? ' style="color:#ffd60a;background:#0a0a0a;padding:1px 5px;border-radius:4px"' : ''}>${STORE_NAMES[key]}</b><span style="opacity:.75">${key === 'flat' ? 'O mesmo arquivo do menu Iniciar.' : STORE3D[+key.slice(2) - 1].why}</span></figure>`).join('') +
+      `</div>`) + `</section>`;
+  o += `<section><h2>Rodada 2 · O nome escrito <small>ao lado do Esquadro, como no topo do README</small></h2>` +
+    themeCells(th => `<div style="display:grid;gap:14px">` + NAMES.map(N => `<div style="display:flex;align-items:center;gap:12px"><span style="width:22px;font-size:12px;opacity:.6">${N.key}</span>${icon('D', P, 'color', 40)}<span style="font:28px/1 'Segoe UI Variable Display','Segoe UI',sans-serif">${N.html(P, th)}</span></div>`).join('') + `</div>`) + `</section>`;
+  o += `<section><h2>Rodada 2 · Contorno perto do relógio <small>16 px colorido; à esquerda o contorno do protótipo, à direita um contorno mais escuro e grosso para o tema claro</small></h2>` +
+    themeCells(th => `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">` +
+      ['normal', 'strong'].map(edge => `<div><div style="font-size:12px;opacity:.7;margin:0 0 4px">${edge === 'normal' ? 'Contorno 1 · normal' : 'Contorno 2 · forte'}</div>` +
+        `<div class="tb ${th}"><span class="slot">${NB.chev(ink(th))}</span><span class="slot">${NB.shield()}</span><span class="slot">${icon('D', P, 'color', 16, undefined, edge)}</span><span class="slot">${NB.cloud()}</span><span class="spacer"></span><span class="clock">20:36</span></div></div>`).join('') +
+      `</div>`) + `</section>`;
+  document.getElementById('round2').innerHTML = o;
+}
+
+// For the real-tray check: the set square rasterized at each .ico size, as base64 RGBA rows.
+window.__icoFrames = async (edge, sizes) => {
+  const P = PALETTES[1];
+  const out = {};
+  for (const n of sizes) {
+    const svg = icon('D', P, 'color', n, n, edge);
+    const img = new Image();
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = c.height = n;
+    const x = c.getContext('2d');
+    x.drawImage(img, 0, 0, n, n);
+    const px = x.getImageData(0, 0, n, n).data;
+    let bin = '';
+    for (let i = 0; i < px.length; i++) bin += String.fromCharCode(px[i]);
+    out[n] = btoa(bin);
+  }
+  return out;
+};
 
 // Rasterizes the icon at exactly n×n pixels, as an .ico entry would hold it, then enlarges it.
 function drawPeeks() {
@@ -483,8 +562,7 @@ function renderBar() {
   document.getElementById('trColor').classList.toggle('on', S.tray === 'color');
   document.getElementById('trMono').classList.toggle('on', S.tray === 'mono');
   document.getElementById('nmNext').textContent = `${S.name} · ${NAMES[S.name - 1].name}`;
-  document.getElementById('stSame').classList.toggle('on', S.store === 'same');
-  document.getElementById('st3da').classList.toggle('on', S.store === '3da');
+  document.getElementById('stName').textContent = STORE_NAMES[S.store];
   document.getElementById('notesBtn').classList.toggle('on', !document.getElementById('notes').hidden);
   history.replaceState(null, '', `?shape=${S.shape}&color=${S.color}&tray=${S.tray}&name=${S.name}&store=${S.store}`);
 }
@@ -496,7 +574,7 @@ function renderScale() {
     `Deixe o zoom do navegador em 100% (Ctrl + 0) e arraste a janela para o outro monitor para ver a outra escala.`;
 }
 
-function render() { uid = 0; renderScale(); renderMatrix(); renderDetail(); renderBar(); }
+function render() { uid = 0; renderScale(); renderRound2(); renderMatrix(); renderDetail(); renderBar(); }
 
 const step = (v, d, n) => ((v - 1 + d + n) % n) + 1;
 function shapeStep(d) { S.shape = SHAPE_KEYS[(SHAPE_KEYS.indexOf(S.shape) + d + SHAPE_KEYS.length) % SHAPE_KEYS.length]; render(); }
@@ -508,8 +586,9 @@ document.getElementById('coNext').onclick = () => colorStep(1);
 document.getElementById('trColor').onclick = () => { S.tray = 'color'; render(); };
 document.getElementById('trMono').onclick = () => { S.tray = 'mono'; render(); };
 document.getElementById('nmNext').onclick = () => { S.name = step(S.name, 1, NAMES.length); render(); };
-document.getElementById('stSame').onclick = () => { S.store = 'same'; render(); };
-document.getElementById('st3da').onclick = () => { S.store = '3da'; render(); };
+function storeStep(d) { S.store = STORE_KEYS[(STORE_KEYS.indexOf(S.store) + d + STORE_KEYS.length) % STORE_KEYS.length]; render(); }
+document.getElementById('stPrev').onclick = () => storeStep(-1);
+document.getElementById('stNext').onclick = () => storeStep(1);
 document.getElementById('notesBtn').onclick = () => { const n = document.getElementById('notes'); n.hidden = !n.hidden; renderBar(); };
 window.addEventListener('keydown', e => {
   const t = e.target;
@@ -520,6 +599,8 @@ window.addEventListener('keydown', e => {
   else if (e.key === 'ArrowDown') { e.preventDefault(); colorStep(-1); }
   else if (e.key === 'b' || e.key === 'B') { S.tray = S.tray === 'mono' ? 'color' : 'mono'; render(); }
   else if (e.key === 'n' || e.key === 'N') { S.name = step(S.name, 1, NAMES.length); render(); }
+  else if (e.key === 's') storeStep(1);
+  else if (e.key === 'S') storeStep(-1);
 });
 
 // Re-render when the window moves to a monitor with another scale.
