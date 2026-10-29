@@ -921,7 +921,6 @@ fn describe_monitors(list: &[MonitorInfo]) -> String {
         .join("; ")
 }
 
-/// Runs `f` and returns its result with the time it took, in ms.
 /// WPC-290: what a tray trigger does to the hidden-icons flyout before the photo.
 #[derive(Clone, Copy)]
 enum OverflowAttempt {
@@ -949,6 +948,7 @@ fn log_overflow(label: &str) {
     }
 }
 
+/// Runs `f` and returns its result with the time it took, in ms.
 fn timed<T>(f: impl FnOnce() -> T) -> (T, f64) {
     let start = log::now_ms();
     let out = f();
