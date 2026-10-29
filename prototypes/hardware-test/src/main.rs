@@ -11,6 +11,7 @@ mod keys;
 mod log;
 mod measure;
 mod monitors;
+mod package;
 
 use std::process::ExitCode;
 
@@ -19,12 +20,17 @@ use windows::Win32::UI::HiDpi::{
     AreDpiAwarenessContextsEqual, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetThreadDpiAwarenessContext,
 };
 
-const MODES: &str = "info, capture, measure, hotkey, recorder, run, hdr";
+const MODES: &str = "info, capture, measure, hotkey, recorder, run, hdr, package";
 
 fn main() -> ExitCode {
-    let args = common::Args::from_env();
+    let mut args = common::Args::from_env();
+    // A packaged copy picks its log folder and default mode before the log opens.
+    let package_notes = package::apply_packaged_defaults(&mut args);
     log::init(&args.mode);
     log::line(format!("hwtest {} mode={} args={:?}", env!("CARGO_PKG_VERSION"), args.mode, args.rest));
+    for note in package_notes {
+        log::line(note);
+    }
 
     // SAFETY: plain queries on the calling thread's DPI context.
     let pmv2 = unsafe {
@@ -53,6 +59,7 @@ fn main() -> ExitCode {
         "recorder" => keys::recorder_mode(&args),
         "run" => frozen::run_mode(&args),
         "hdr" => hdr::hdr_mode(&args),
+        "package" => package::package_mode(&args),
         other => Err(format!("unknown mode '{other}'; modes: {MODES}")),
     };
     match result {
