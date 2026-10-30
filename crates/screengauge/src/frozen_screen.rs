@@ -1,14 +1,16 @@
 //! The frozen screen on screen: one window over each monitor, at its exact place and size in physical pixels, drawing
-//! that monitor's photo pixel for pixel with Direct2D. Nothing marks the screen as frozen (no dimming, border, icon or
-//! word), and the cursor over it is the thin cross. Each window owns its photo, so destroying the windows when the
-//! tools close, by dropping [`FrozenScreen`], erases the photos with them.
+//! the session core's scene. Each window draws its monitor's photo pixel for pixel with Direct2D, shows the cursor the
+//! scene names, and hands the core what the user does over it. The windows share the session; destroying them when the
+//! tools close, by dropping [`FrozenScreen`], drops the session and erases the photos with it.
 
 use std::cell::RefCell;
 use std::ffi::c_void;
+use std::rc::Rc;
 
+use screengauge_core::session::{Cursor, Effect, Event, Input, Rect, Session};
 use windows::Win32::Foundation::{
     D2DERR_RECREATE_TARGET, E_FAIL, ERROR_SUCCESS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT,
-    POINT, RECT, SetLastError, WPARAM,
+    POINT, SetLastError, WPARAM,
 };
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_SIZE_U, D2D1_ALPHA_MODE_IGNORE, D2D1_PIXEL_FORMAT,
@@ -27,34 +29,32 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, PAINTSTRUCT};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos,
-    GetWindowLongPtrW, IDC_CROSS, LoadCursorW, PostMessageW, RegisterClassExW, SW_SHOWNA,
+    GetWindowLongPtrW, HTCLIENT, IDC_CROSS, LoadCursorW, PostMessageW, RegisterClassExW, SW_SHOWNA,
     SetCursor, SetForegroundWindow, SetWindowLongPtrW, ShowWindow, WM_APP, WM_CLOSE, WM_ERASEBKGND,
-    WM_KEYDOWN, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-    WS_POPUP,
+    WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
+    WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDCLASSEXW,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{Error, PCWSTR, w};
 
-use crate::capture::Photo;
-use crate::log;
-use crate::win32::struct_size;
+use crate::win32::{low_word, struct_size};
+use crate::{event, log};
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.FrozenScreen");
 
-/// What a frozen screen window posts to the resident window when the user closes the tools. Posted, never sent: the
-/// resident window then destroys these windows, which must not happen inside one of their own window procedures.
-pub const CLOSE_REQUEST: u32 = WM_APP + 2;
+/// What a frozen screen window posts to the resident window when the session core returned effects for it to carry
+/// out. Posted, never sent: closing the tools destroys these windows, which must not happen inside one of their own
+/// window procedures.
+pub const EFFECTS_READY: u32 = WM_APP + 2;
 
-/// Registered once at startup. The cursor over the frozen screen is Windows' thin cross.
+/// Registered once at startup. The class has no cursor: the session core's scene names it.
 pub fn register_class(instance: HINSTANCE) -> windows::core::Result<()> {
     let class = WNDCLASSEXW {
         cbSize: const { struct_size::<WNDCLASSEXW>() },
         lpfnWndProc: Some(window_proc),
         hInstance: instance,
-        // SAFETY: loads a shared system cursor, which is never freed.
-        hCursor: unsafe { LoadCursorW(None, IDC_CROSS) }?,
         lpszClassName: CLASS_NAME,
         ..Default::default()
     };
@@ -91,27 +91,48 @@ pub fn release_factory() {
     drop(FACTORY.with_borrow_mut(Option::take));
 }
 
-/// The frozen screen's windows, one per monitor, while the tools are open.
+/// The frozen screen's windows, one per monitor, and the session they show, while the tools are open.
 pub struct FrozenScreen {
     windows: Vec<HWND>,
+    shared: Rc<Shared>,
+}
+
+/// What the windows share.
+struct Shared {
+    /// Borrowed mutably only while the core handles an event, which calls no Windows function, so no window procedure
+    /// runs meanwhile.
+    session: RefCell<Session>,
+    /// What the core returned while handling the windows' events, for the resident window to carry out.
+    effects: RefCell<Vec<Effect>>,
+    /// Receives [`EFFECTS_READY`].
+    resident: HWND,
 }
 
 impl FrozenScreen {
-    /// Shows `photos`, one window per monitor, and gives the keyboard to the window under the cursor so Esc reaches
-    /// it. `resident` receives [`CLOSE_REQUEST`].
-    pub fn show(photos: Vec<Photo>, resident: HWND) -> windows::core::Result<FrozenScreen> {
+    /// Shows the session's scene, one window per monitor, and gives the keyboard to the window under the cursor so
+    /// Esc reaches it. `resident` receives [`EFFECTS_READY`].
+    pub fn show(session: Session, resident: HWND) -> windows::core::Result<FrozenScreen> {
         // SAFETY: no module name, so this is the handle of ScreenGauge.exe itself.
         let instance: HINSTANCE = unsafe { GetModuleHandleW(None) }?.into();
         let factory = factory()?;
-        let rects: Vec<RECT> = photos.iter().map(|photo| photo.rect).collect();
+        let rects: Vec<Rect> = session
+            .scene()
+            .frozen_screen
+            .iter()
+            .map(|photo| photo.rect)
+            .collect();
         // Should a window fail, dropping `frozen` destroys the ones already made.
         let mut frozen = FrozenScreen {
-            windows: Vec::with_capacity(photos.len()),
+            windows: Vec::with_capacity(rects.len()),
+            shared: Rc::new(Shared {
+                session: RefCell::new(session),
+                effects: RefCell::new(Vec::new()),
+                resident,
+            }),
         };
-        for photo in photos {
-            frozen
-                .windows
-                .push(create_window(instance, photo, &factory, resident)?);
+        for (monitor, &rect) in rects.iter().enumerate() {
+            let window = create_window(instance, monitor, rect, &factory, &frozen.shared)?;
+            frozen.windows.push(window);
         }
         for &window in &frozen.windows {
             // SAFETY: our own window. ShowWindow returns whether it was visible before, not an error.
@@ -126,18 +147,37 @@ impl FrozenScreen {
         Ok(frozen)
     }
 
-    /// Brings the window under the cursor to the front, so the keyboard goes to it, and shows the cross. The photo is
-    /// already on screen and closes with the global shortcut, so a failure here is logged and the call goes on. The
-    /// global shortcut grants ScreenGauge the right to come to the front; should Windows refuse anyway, Esc won't
-    /// reach the frozen screen until it is clicked.
-    fn take_keyboard(&self, rects: &[RECT]) {
+    /// Hands `event` to the session core and returns what it makes happen, with whatever the windows' events left for
+    /// the resident window and it hasn't carried out yet, first.
+    pub fn handle(&self, event: Event) -> Vec<Effect> {
+        let mut effects = self.take_effects();
+        effects.extend(self.shared.handle(event));
+        effects
+    }
+
+    /// What the windows' events left for the resident window since it last took them.
+    pub fn take_effects(&self) -> Vec<Effect> {
+        match self.shared.effects.try_borrow_mut() {
+            Ok(mut queued) => std::mem::take(&mut *queued),
+            Err(_) => {
+                log::failure(
+                    "frozen screen",
+                    &"the effects were being queued while being taken",
+                );
+                Vec::new()
+            }
+        }
+    }
+
+    /// Brings the window under the cursor to the front, so the keyboard goes to it, and shows the scene's cursor. The
+    /// photo is already on screen and closes with the global shortcut, so a failure here is logged and the call goes
+    /// on. The global shortcut grants ScreenGauge the right to come to the front; should Windows refuse anyway, Esc
+    /// won't reach the frozen screen until it is clicked.
+    fn take_keyboard(&self, rects: &[Rect]) {
         let mut cursor = POINT::default();
         // SAFETY: fills a local.
         let under_cursor = match unsafe { GetCursorPos(&mut cursor) } {
-            Ok(()) => rects.iter().position(|rect| {
-                (rect.left..rect.right).contains(&cursor.x)
-                    && (rect.top..rect.bottom).contains(&cursor.y)
-            }),
+            Ok(()) => rects.iter().position(|&rect| contains(rect, cursor)),
             Err(e) => {
                 log::failure("frozen screen: finding the cursor", &e);
                 None
@@ -153,15 +193,8 @@ impl FrozenScreen {
                 );
             }
         }
-        // The cross shows at once, without waiting for the mouse to move.
-        // SAFETY: loads a shared system cursor, which is never freed.
-        match unsafe { LoadCursorW(None, IDC_CROSS) } {
-            Ok(cross) => {
-                // SAFETY: a valid cursor. SetCursor returns the previous one, which needs nothing.
-                let _ = unsafe { SetCursor(Some(cross)) };
-            }
-            Err(e) => log::failure("frozen screen: showing the cross", &e),
-        }
+        // The cursor shows at once, without waiting for the mouse to move.
+        self.shared.show_cursor();
     }
 }
 
@@ -171,6 +204,78 @@ impl Drop for FrozenScreen {
             destroy(window);
         }
     }
+}
+
+impl Shared {
+    fn handle(&self, event: Event) -> Vec<Effect> {
+        match self.session.try_borrow_mut() {
+            Ok(mut session) => session.handle(event),
+            // Can't happen: the core calls no Windows function, so no event arrives while it handles one.
+            Err(_) => {
+                log::failure(
+                    "frozen screen",
+                    &"an event came while the session core was handling another, and was dropped",
+                );
+                Vec::new()
+            }
+        }
+    }
+
+    /// Hands what happened over a window to the session core, and passes what it returns to the resident window.
+    fn input(&self, input: Input) {
+        let effects = self.handle(event::of_message(input));
+        if effects.is_empty() {
+            return;
+        }
+        match self.effects.try_borrow_mut() {
+            Ok(mut queued) => queued.extend(effects),
+            // Can't happen: the queue is borrowed only for a moment, with no Windows call.
+            Err(_) => {
+                log::failure(
+                    "frozen screen",
+                    &"the effects were being taken while being queued, and were dropped",
+                );
+                return;
+            }
+        }
+        // Should the message be lost, the resident window still takes the effects with the next global shortcut.
+        // SAFETY: posts to the resident window, which outlives the frozen screen.
+        let posted =
+            unsafe { PostMessageW(Some(self.resident), EFFECTS_READY, WPARAM(0), LPARAM(0)) };
+        if let Err(e) = posted {
+            log::failure("frozen screen: handing effects to the resident window", &e);
+        }
+    }
+
+    /// Shows the scene's cursor.
+    fn show_cursor(&self) {
+        let Ok(session) = self.session.try_borrow() else {
+            log::failure(
+                "frozen screen",
+                &"the cursor was asked for while an event was handled",
+            );
+            return;
+        };
+        let name = match session.scene().cursor {
+            Cursor::Cross => IDC_CROSS,
+        };
+        // SAFETY: loads a shared system cursor, which is never freed.
+        match unsafe { LoadCursorW(None, name) } {
+            Ok(cursor) => {
+                // SAFETY: a valid cursor. SetCursor returns the previous one, which needs nothing.
+                let _ = unsafe { SetCursor(Some(cursor)) };
+            }
+            Err(e) => log::failure("frozen screen: showing the cursor", &e),
+        }
+    }
+}
+
+/// Whether `point`, in physical pixels of the virtual screen, is in `rect`.
+fn contains(rect: Rect, point: POINT) -> bool {
+    let (x, y) = (i64::from(point.x), i64::from(point.y));
+    let (left, top) = (i64::from(rect.left), i64::from(rect.top));
+    (left..left + i64::from(rect.width)).contains(&x)
+        && (top..top + i64::from(rect.height)).contains(&y)
 }
 
 /// Destroys one of the frozen screen's windows, from outside its window procedure.
@@ -183,9 +288,10 @@ fn destroy(window: HWND) {
 
 /// What each window keeps, from WM_NCCREATE to WM_NCDESTROY.
 struct Window {
-    photo: Photo,
+    /// Its monitor's place in the scene's frozen screen.
+    monitor: usize,
+    shared: Rc<Shared>,
     factory: ID2D1Factory,
-    resident: HWND,
     /// Made at the first draw, and again when Direct2D says the graphics device was lost.
     drawing: RefCell<Option<Drawing>>,
 }
@@ -202,15 +308,18 @@ type Slot = Option<Box<Window>>;
 
 fn create_window(
     instance: HINSTANCE,
-    photo: Photo,
+    monitor: usize,
+    rect: Rect,
     factory: &ID2D1Factory,
-    resident: HWND,
+    shared: &Rc<Shared>,
 ) -> windows::core::Result<HWND> {
-    let rect = photo.rect;
+    let too_large = || Error::new(E_FAIL, "the monitor is too large for a window");
+    let width = i32::try_from(rect.width).map_err(|_| too_large())?;
+    let height = i32::try_from(rect.height).map_err(|_| too_large())?;
     let mut slot: Slot = Some(Box::new(Window {
-        photo,
+        monitor,
+        shared: Rc::clone(shared),
         factory: factory.clone(),
-        resident,
         drawing: RefCell::new(None),
     }));
     // SAFETY: the class is registered. `slot` outlives the call, and only WM_NCCREATE reaches it, through this
@@ -223,8 +332,8 @@ fn create_window(
             WS_POPUP,
             rect.left,
             rect.top,
-            rect.right - rect.left,
-            rect.bottom - rect.top,
+            width,
+            height,
             None,
             None,
             Some(instance),
@@ -261,22 +370,43 @@ extern "system" fn window_proc(
         WM_NCDESTROY => release(hwnd),
         _ => {}
     }
-    let handled = with_state(hwnd, |window| match message {
-        WM_ERASEBKGND => Some(LRESULT(1)),
-        WM_PAINT => {
-            paint(hwnd, window);
+    let handled = with_state(hwnd, |window| {
+        let input = |input: Input| {
+            window.shared.input(input);
             Some(LRESULT(0))
+        };
+        match message {
+            WM_ERASEBKGND => Some(LRESULT(1)),
+            WM_PAINT => {
+                paint(hwnd, window);
+                Some(LRESULT(0))
+            }
+            WM_SETCURSOR if low_word(lparam) == HTCLIENT => {
+                window.shared.show_cursor();
+                Some(LRESULT(1))
+            }
+            WM_MOUSEMOVE => input(Input::Move),
+            WM_LBUTTONDOWN => input(Input::Press),
+            WM_LBUTTONUP => input(Input::Release),
+            WM_MOUSEWHEEL => input(Input::Wheel(event::wheel(wparam))),
+            WM_KEYDOWN => event::key(wparam).and_then(|key| input(Input::KeyDown(key))),
+            WM_KEYUP => event::key(wparam).and_then(|key| input(Input::KeyUp(key))),
+            // Alt, and keys pressed with it, come as system keys. Windows handles them afterwards as before, so
+            // Alt+F4 still turns into WM_CLOSE.
+            WM_SYSKEYDOWN | WM_SYSKEYUP => {
+                if let Some(key) = event::key(wparam) {
+                    window.shared.input(if message == WM_SYSKEYDOWN {
+                        Input::KeyDown(key)
+                    } else {
+                        Input::KeyUp(key)
+                    });
+                }
+                None
+            }
+            // Alt+F4: the core closes the tools as a whole, never one monitor's window alone.
+            WM_CLOSE => input(Input::CloseAsked),
+            _ => None,
         }
-        WM_KEYDOWN if wparam.0 == usize::from(VK_ESCAPE.0) => {
-            request_close(window.resident);
-            Some(LRESULT(0))
-        }
-        // Alt+F4 closes the tools as a whole, never one monitor's window alone.
-        WM_CLOSE => {
-            request_close(window.resident);
-            Some(LRESULT(0))
-        }
-        _ => None,
     });
     // SAFETY: the arguments are the ones Windows passed to this window procedure.
     handled
@@ -321,7 +451,7 @@ fn adopt(hwnd: HWND, lparam: LPARAM) -> bool {
     true
 }
 
-/// Frees the window state, the photo with it.
+/// Frees the window state, and the window's share of the session with it.
 fn release(hwnd: HWND) {
     // SAFETY: our own window; clearing the pointer first means no later message can reach the state.
     let window = unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) } as *mut Window;
@@ -342,6 +472,7 @@ fn paint(hwnd: HWND, window: &Window) {
     let _ = unsafe { EndPaint(hwnd, &paint) };
 }
 
+/// Draws the window's part of the scene: its monitor's photo, with nothing over it yet.
 fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
     let mut drawing = window
         .drawing
@@ -385,26 +516,26 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
 }
 
 impl Drawing {
+    /// Puts the window's photo, from the scene, on the graphics card.
     fn new(hwnd: HWND, window: &Window) -> windows::core::Result<Drawing> {
-        let image = &window.photo.image;
+        let session = window
+            .shared
+            .session
+            .try_borrow()
+            .map_err(|_| Error::new(E_FAIL, "drawing started while an event was handled"))?;
+        let scene = session.scene();
+        let image = &scene
+            .frozen_screen
+            .get(window.monitor)
+            .ok_or_else(|| Error::new(E_FAIL, "the scene has no photo for this window"))?
+            .image;
         let pitch = image
-            .width
+            .width()
             .checked_mul(4)
             .ok_or_else(|| Error::new(E_FAIL, "the photo is too wide"))?;
-        // CreateBitmap below reads `height` rows of `pitch` bytes from the pixels.
-        let length = usize::try_from(pitch)
-            .ok()
-            .zip(usize::try_from(image.height).ok())
-            .and_then(|(pitch, height)| pitch.checked_mul(height));
-        if length != Some(image.bgra.len()) {
-            return Err(Error::new(
-                E_FAIL,
-                "the photo's pixels don't match its size",
-            ));
-        }
         let size = D2D_SIZE_U {
-            width: image.width,
-            height: image.height,
+            width: image.width(),
+            height: image.height(),
         };
         let format = D2D1_PIXEL_FORMAT {
             format: DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -436,24 +567,15 @@ impl Drawing {
             dpiX: 96.0,
             dpiY: 96.0,
         };
-        // SAFETY: `image.bgra` holds exactly `height` rows of `pitch` bytes (checked above) and outlives the call,
-        // which copies it.
+        // SAFETY: an Image holds exactly `height` rows of `pitch` bytes, and outlives the call, which copies them.
         let bitmap = unsafe {
             target.CreateBitmap(
                 size,
-                Some(image.bgra.as_ptr().cast()),
+                Some(image.bgra().as_ptr().cast()),
                 pitch,
                 &bitmap_properties,
             )
         }?;
         Ok(Drawing { target, bitmap })
-    }
-}
-
-/// Asks the resident window to close the tools.
-fn request_close(resident: HWND) {
-    // SAFETY: posts to the resident window, which outlives the frozen screen.
-    if let Err(e) = unsafe { PostMessageW(Some(resident), CLOSE_REQUEST, WPARAM(0), LPARAM(0)) } {
-        log::failure("frozen screen: asking to close", &e);
     }
 }

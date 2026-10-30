@@ -14,3 +14,10 @@ pub const fn struct_size<T>() -> u32 {
 pub fn low_word(lparam: LPARAM) -> u32 {
     u32::from(lparam.0 as u16)
 }
+
+/// The low and high 16 bits of a packed pair, each signed, as GET_X_LPARAM, GET_Y_LPARAM and GET_WHEEL_DELTA_WPARAM
+/// read them: a monitor left of or above the main one has negative coordinates. Keeping 16 bits of each is the point,
+/// so the truncating casts are intended.
+pub fn signed_words(packed: usize) -> (i16, i16) {
+    (packed as u16 as i16, (packed >> 16) as u16 as i16)
+}

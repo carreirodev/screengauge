@@ -1,9 +1,11 @@
 //! The capture behind the frozen screen: every monitor through DXGI Desktop Duplication, in 8 bits and without the
-//! mouse pointer, one right after the other (v1 spec WPC-296, Frozen screen). Everything DXGI and Direct3D create
-//! for it is released before [`every_monitor`] returns, so the capture exists only during the call.
+//! mouse pointer, one right after the other (v1 spec WPC-296, Frozen screen), with the place, scale and HDR state the
+//! session core receives with each photo. Everything DXGI and Direct3D create for it is released before
+//! [`every_monitor`] returns, so the capture exists only during the call.
 
 use std::time::{Duration, Instant};
 
+use screengauge_core::session::{Colors, Image, Photo, Rect, Scale};
 use windows::Win32::Foundation::{E_FAIL, HMODULE, LPARAM, RECT};
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
 use windows::Win32::Graphics::Direct3D11::{
@@ -12,17 +14,18 @@ use windows::Win32::Graphics::Direct3D11::{
     ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
-    DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_MODE_ROTATION_IDENTITY, DXGI_MODE_ROTATION_UNSPECIFIED,
-    DXGI_SAMPLE_DESC,
+    DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, DXGI_FORMAT_B8G8R8A8_UNORM,
+    DXGI_MODE_ROTATION_IDENTITY, DXGI_MODE_ROTATION_UNSPECIFIED, DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_NOT_FOUND, DXGI_ERROR_WAIT_TIMEOUT,
     DXGI_OUTDUPL_FRAME_INFO, IDXGIAdapter, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput, IDXGIOutput5,
-    IDXGIOutputDuplication,
+    IDXGIOutput6, IDXGIOutputDuplication,
 };
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
 };
+use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::core::{BOOL, Error, Interface};
 
 use crate::win32::struct_size;
@@ -31,21 +34,6 @@ use crate::win32::struct_size;
 const FIRST_IMAGE_BUDGET: Duration = Duration::from_millis(500);
 /// How long each wait for that image lasts, in milliseconds.
 const WAIT_MS: u32 = 100;
-
-/// One monitor's part of the frozen screen.
-pub struct Photo {
-    /// The monitor, in physical pixels of the virtual screen. The image has its size.
-    pub rect: RECT,
-    pub image: Image,
-}
-
-/// A desktop image read into memory.
-pub struct Image {
-    pub width: u32,
-    pub height: u32,
-    /// `height` rows of `width` opaque BGRA pixels, from the top, with no gap between rows.
-    pub bgra: Vec<u8>,
-}
 
 /// Takes the photo of every monitor, or none: a monitor DXGI can't photograph fails the whole call. Taking it
 /// through GDI instead, and telling the user when both fail, comes with WPC-303.
@@ -59,12 +47,16 @@ pub fn every_monitor() -> windows::core::Result<Vec<Photo>> {
 struct Monitor {
     /// The GDI device name, such as `\\.\DISPLAY1`; DXGI names its outputs the same way.
     device: String,
+    /// In physical pixels of the virtual screen.
     rect: RECT,
+    scale: Scale,
 }
 
 /// What one DXGI output gave.
 struct Grab {
     device: String,
+    /// HDR is on for the output's monitor.
+    hdr: bool,
     image: windows::core::Result<Image>,
 }
 
@@ -91,9 +83,16 @@ fn monitors() -> windows::core::Result<Vec<Monitor>> {
             {
                 return Err(Error::new(E_FAIL, "GetMonitorInfoW returned FALSE"));
             }
+            let (mut dpi, mut unused) = (0, 0);
+            // SAFETY: a monitor EnumDisplayMonitors just listed; both out pointers are locals. The process is
+            // Per-Monitor V2, so this is the monitor's own DPI.
+            unsafe { GetDpiForMonitor(handle, MDT_EFFECTIVE_DPI, &mut dpi, &mut unused) }?;
+            let scale = Scale::from_dpi(dpi)
+                .ok_or_else(|| Error::new(E_FAIL, "GetDpiForMonitor returned a DPI of 0"))?;
             Ok(Monitor {
                 device: device_name(&info.szDevice),
                 rect: info.monitorInfo.rcMonitor,
+                scale,
             })
         })
         .collect()
@@ -113,17 +112,24 @@ fn device_name(buffer: &[u16]) -> String {
 fn grab_every_output() -> windows::core::Result<Vec<Grab>> {
     Ok(duplicate_every_output()?
         .into_iter()
-        .map(|(device, duplication)| Grab {
-            device,
-            image: duplication.and_then(Duplication::image),
+        .map(|output| Grab {
+            device: output.device,
+            hdr: output.hdr,
+            image: output.duplication.and_then(Duplication::image),
         })
         .collect())
 }
 
+/// An output attached to the desktop, ready to give its image.
+struct Output {
+    device: String,
+    hdr: bool,
+    duplication: windows::core::Result<Duplication>,
+}
+
 /// A duplication of every output attached to the desktop, on every adapter (the owner's two monitors are on two
-/// graphics cards), by device name, or why it couldn't be made.
-fn duplicate_every_output()
--> windows::core::Result<Vec<(String, windows::core::Result<Duplication>)>> {
+/// graphics cards), or why it couldn't be made.
+fn duplicate_every_output() -> windows::core::Result<Vec<Output>> {
     // SAFETY: no arguments; the factory is released when it drops.
     let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }?;
     let mut duplications = Vec::new();
@@ -143,8 +149,9 @@ fn duplicate_every_output()
                 Err(e) if e.code() == DXGI_ERROR_NOT_FOUND => break,
                 Err(e) => return Err(e),
             };
+            // IDXGIOutput6 is there on every Windows 11.
             // SAFETY: a plain query on a live output.
-            let description = unsafe { output.GetDesc() }?;
+            let description = unsafe { output.cast::<IDXGIOutput6>()?.GetDesc1() }?;
             if !description.AttachedToDesktop.as_bool() {
                 continue;
             }
@@ -156,7 +163,12 @@ fn duplicate_every_output()
                 )),
                 Err(e) => Err(e.clone()),
             };
-            duplications.push((device_name(&description.DeviceName), duplication));
+            duplications.push(Output {
+                device: device_name(&description.DeviceName),
+                // Microsoft's documented test for HDR (research/hdr-screen-colors).
+                hdr: description.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020,
+                duplication,
+            });
         }
     }
     Ok(duplications)
@@ -360,11 +372,8 @@ fn mapped_image(
     let mapped_rows = unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>(), length) };
     let bgra = tight_rows(mapped_rows, pitch, columns, rows)
         .ok_or_else(|| Error::new(E_FAIL, "Map returned fewer rows than the image has"))?;
-    Ok(Image {
-        width,
-        height,
-        bgra,
-    })
+    Image::new(width, height, bgra)
+        .ok_or_else(|| Error::new(E_FAIL, "the rows read don't fill the image"))
 }
 
 /// Copies `rows` rows of `columns` BGRA pixels that start `pitch` bytes apart into rows with no gap, and makes every
@@ -403,14 +412,28 @@ fn one_per_monitor(
             u32::try_from(monitor.rect.right - monitor.rect.left),
             u32::try_from(monitor.rect.bottom - monitor.rect.top),
         );
-        if size != (Ok(image.width), Ok(image.height)) {
+        if size != (Ok(image.width()), Ok(image.height())) {
             return Err(failed(format!(
                 "the image is {}x{}, and the monitor is {:?}",
-                image.width, image.height, monitor.rect
+                image.width(),
+                image.height(),
+                monitor.rect
             )));
         }
         photos.push(Photo {
-            rect: monitor.rect,
+            rect: Rect {
+                left: monitor.rect.left,
+                top: monitor.rect.top,
+                width: image.width(),
+                height: image.height(),
+            },
+            scale: monitor.scale,
+            // With HDR on, the 8-bit photo has Windows' brightening in it (WPC-289); undoing it comes with WPC-327.
+            colors: if grab.hdr {
+                Colors::Approximate
+            } else {
+                Colors::Exact
+            },
             image,
         });
     }
@@ -466,32 +489,39 @@ mod tests {
         bottom: 2160,
     };
 
-    fn monitor(device: &str, rect: RECT) -> Monitor {
+    fn monitor(device: &str, rect: RECT, dpi: u32) -> Monitor {
         Monitor {
             device: device.to_owned(),
             rect,
+            scale: Scale::from_dpi(dpi).expect("a real scale"),
         }
     }
 
     /// An image whose first byte tells it apart.
     fn grab(device: &str, width: u32, height: u32, mark: u8) -> Grab {
-        let mut bgra = vec![0; 4];
+        let mut bgra = vec![0; usize::try_from(width * height * 4).expect("a small image")];
         bgra[0] = mark;
         Grab {
             device: device.to_owned(),
-            image: Ok(Image {
-                width,
-                height,
-                bgra,
-            }),
+            hdr: false,
+            image: Ok(Image::new(width, height, bgra).expect("a whole image")),
+        }
+    }
+
+    fn rect(rect: RECT) -> Rect {
+        Rect {
+            left: rect.left,
+            top: rect.top,
+            width: u32::try_from(rect.right - rect.left).expect("a monitor's width"),
+            height: u32::try_from(rect.bottom - rect.top).expect("a monitor's height"),
         }
     }
 
     #[test]
     fn every_monitor_gets_its_own_image_in_the_monitors_order() {
         let monitors = [
-            monitor(r"\\.\DISPLAY1", RIGHT),
-            monitor(r"\\.\DISPLAY2", LEFT),
+            monitor(r"\\.\DISPLAY1", RIGHT, 168),
+            monitor(r"\\.\DISPLAY2", LEFT, 120),
         ];
         let grabs = vec![
             grab(r"\\.\DISPLAY2", 1920, 1080, 2),
@@ -500,63 +530,65 @@ mod tests {
         let photos = one_per_monitor(&monitors, grabs).expect("a photo per monitor");
         let seen: Vec<_> = photos
             .iter()
-            .map(|photo| {
-                (
-                    photo.rect,
-                    photo.image.width,
-                    photo.image.height,
-                    photo.image.bgra[0],
-                )
-            })
+            .map(|photo| (photo.rect, photo.scale.dpi(), photo.image.bgra()[0]))
             .collect();
-        assert_eq!(seen, [(RIGHT, 3840, 2160, 1), (LEFT, 1920, 1080, 2)]);
+        assert_eq!(seen, [(rect(RIGHT), 168, 1), (rect(LEFT), 120, 2)]);
+    }
+
+    #[test]
+    fn a_monitor_with_hdr_on_gets_approximate_colors() {
+        let monitors = [
+            monitor(r"\\.\DISPLAY1", RIGHT, 168),
+            monitor(r"\\.\DISPLAY2", LEFT, 120),
+        ];
+        let mut hdr_on = grab(r"\\.\DISPLAY2", 1920, 1080, 2);
+        hdr_on.hdr = true;
+        let grabs = vec![grab(r"\\.\DISPLAY1", 3840, 2160, 1), hdr_on];
+        let photos = one_per_monitor(&monitors, grabs).expect("a photo per monitor");
+        let colors: Vec<_> = photos.iter().map(|photo| photo.colors).collect();
+        assert_eq!(colors, [Colors::Exact, Colors::Approximate]);
     }
 
     #[test]
     fn an_output_without_a_monitor_is_left_out() {
-        let monitors = [monitor(r"\\.\DISPLAY1", RIGHT)];
+        let monitors = [monitor(r"\\.\DISPLAY1", RIGHT, 168)];
         let grabs = vec![
             grab(r"\\.\DISPLAY1", 3840, 2160, 1),
             grab(r"\\.\DISPLAY7", 1920, 1080, 7),
         ];
         let photos = one_per_monitor(&monitors, grabs).expect("a photo per monitor");
         assert_eq!(photos.len(), 1);
-        assert_eq!(photos[0].image.bgra[0], 1);
+        assert_eq!(photos[0].image.bgra()[0], 1);
     }
 
     #[test]
     fn a_monitor_without_an_image_fails_them_all() {
         let monitors = [
-            monitor(r"\\.\DISPLAY1", RIGHT),
-            monitor(r"\\.\DISPLAY2", LEFT),
+            monitor(r"\\.\DISPLAY1", RIGHT, 168),
+            monitor(r"\\.\DISPLAY2", LEFT, 120),
         ];
         let grabs = vec![grab(r"\\.\DISPLAY1", 3840, 2160, 1)];
-        let error = one_per_monitor(&monitors, grabs)
-            .err()
-            .expect("no frozen screen");
+        let error = one_per_monitor(&monitors, grabs).expect_err("no frozen screen");
         assert!(error.message().contains(r"\\.\DISPLAY2"), "{error}");
     }
 
     #[test]
     fn an_image_of_another_size_fails_them_all() {
-        let monitors = [monitor(r"\\.\DISPLAY1", RIGHT)];
+        let monitors = [monitor(r"\\.\DISPLAY1", RIGHT, 168)];
         let grabs = vec![grab(r"\\.\DISPLAY1", 1920, 1080, 1)];
-        let error = one_per_monitor(&monitors, grabs)
-            .err()
-            .expect("no frozen screen");
+        let error = one_per_monitor(&monitors, grabs).expect_err("no frozen screen");
         assert!(error.message().contains("1920x1080"), "{error}");
     }
 
     #[test]
     fn a_failed_image_fails_them_all_and_keeps_its_cause() {
-        let monitors = [monitor(r"\\.\DISPLAY1", RIGHT)];
+        let monitors = [monitor(r"\\.\DISPLAY1", RIGHT, 168)];
         let grabs = vec![Grab {
             device: r"\\.\DISPLAY1".to_owned(),
+            hdr: false,
             image: Err(Error::new(DXGI_ERROR_ACCESS_LOST, "lost")),
         }];
-        let error = one_per_monitor(&monitors, grabs)
-            .err()
-            .expect("no frozen screen");
+        let error = one_per_monitor(&monitors, grabs).expect_err("no frozen screen");
         assert_eq!(error.code(), DXGI_ERROR_ACCESS_LOST);
         assert!(error.message().contains(r"\\.\DISPLAY1"), "{error}");
     }

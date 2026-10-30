@@ -6,4 +6,5 @@
 
 #![forbid(unsafe_code)]
 
+pub mod session;
 pub mod settings;
