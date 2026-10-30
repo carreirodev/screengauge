@@ -34,8 +34,13 @@ const WAIT_MS: u32 = 100;
 
 /// One monitor's part of the frozen screen.
 pub struct Photo {
-    /// The monitor, in physical pixels of the virtual screen.
+    /// The monitor, in physical pixels of the virtual screen. The image has its size.
     pub rect: RECT,
+    pub image: Image,
+}
+
+/// A desktop image read into memory.
+pub struct Image {
     pub width: u32,
     pub height: u32,
     /// `height` rows of `width` opaque BGRA pixels, from the top, with no gap between rows.
@@ -61,13 +66,6 @@ struct Monitor {
 struct Grab {
     device: String,
     image: windows::core::Result<Image>,
-}
-
-/// A desktop image read into memory.
-struct Image {
-    width: u32,
-    height: u32,
-    bgra: Vec<u8>,
 }
 
 fn monitors() -> windows::core::Result<Vec<Monitor>> {
@@ -110,12 +108,25 @@ fn device_name(buffer: &[u16]) -> String {
     String::from_utf16_lossy(&buffer[..end])
 }
 
-/// The current image of every output attached to the desktop, on every adapter: the owner's two monitors are on two
-/// graphics cards.
+/// The current image of every output attached to the desktop. Every device and duplication is made first, so the
+/// images come one right after the other.
 fn grab_every_output() -> windows::core::Result<Vec<Grab>> {
+    Ok(duplicate_every_output()?
+        .into_iter()
+        .map(|(device, duplication)| Grab {
+            device,
+            image: duplication.and_then(Duplication::image),
+        })
+        .collect())
+}
+
+/// A duplication of every output attached to the desktop, on every adapter (the owner's two monitors are on two
+/// graphics cards), by device name, or why it couldn't be made.
+fn duplicate_every_output()
+-> windows::core::Result<Vec<(String, windows::core::Result<Duplication>)>> {
     // SAFETY: no arguments; the factory is released when it drops.
     let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }?;
-    let mut grabs = Vec::new();
+    let mut duplications = Vec::new();
     for index in 0.. {
         // SAFETY: enumerating until DXGI says there is no adapter at `index`.
         let adapter = match unsafe { factory.EnumAdapters1(index) } {
@@ -137,21 +148,18 @@ fn grab_every_output() -> windows::core::Result<Vec<Grab>> {
             if !description.AttachedToDesktop.as_bool() {
                 continue;
             }
-            let image = match gpu.get_or_insert_with(|| Gpu::on(&adapter)) {
-                Ok(gpu) if is_upright(description.Rotation) => grab(gpu, &output),
+            let duplication = match gpu.get_or_insert_with(|| Gpu::on(&adapter)) {
+                Ok(gpu) if is_upright(description.Rotation) => Duplication::of(gpu, output),
                 Ok(_) => Err(Error::new(
                     E_FAIL,
                     "the monitor is rotated, and DXGI gives its image unrotated",
                 )),
                 Err(e) => Err(e.clone()),
             };
-            grabs.push(Grab {
-                device: device_name(&description.DeviceName),
-                image,
-            });
+            duplications.push((device_name(&description.DeviceName), duplication));
         }
     }
-    Ok(grabs)
+    Ok(duplications)
 }
 
 /// A rotated monitor's desktop image comes in the monitor's native orientation; turning it upright isn't built.
@@ -160,6 +168,7 @@ fn is_upright(rotation: windows::Win32::Graphics::Dxgi::Common::DXGI_MODE_ROTATI
 }
 
 /// A Direct3D device on one adapter. DuplicateOutput needs the device of the adapter the output is connected to.
+#[derive(Clone)]
 struct Gpu {
     device: ID3D11Device,
     context: ID3D11DeviceContext,
@@ -194,29 +203,46 @@ impl Gpu {
     }
 }
 
-/// The output's current image, through a duplication made for it and released before returning.
-fn grab(gpu: &Gpu, output: &IDXGIOutput) -> windows::core::Result<Image> {
-    // Each block drops its duplication: Windows allows one per output and process at a time.
-    let first = {
-        let duplication = duplicate(gpu, output)?;
-        first_image(gpu, &duplication)
-    };
-    match first {
-        // The duplication was lost, as when the display mode or the desktop changes; a new one gets one more try.
-        Err(e) if e.code() == DXGI_ERROR_ACCESS_LOST => {
-            let duplication = duplicate(gpu, output)?;
-            first_image(gpu, &duplication)
-        }
-        first => first,
-    }
+/// An output's duplication, with what it takes to read its image and to make it again.
+struct Duplication {
+    gpu: Gpu,
+    output: IDXGIOutput,
+    duplication: IDXGIOutputDuplication,
 }
 
-/// Asks for B8G8R8A8, the 8-bit format; with HDR on, the 16-bit path comes with WPC-327.
-fn duplicate(gpu: &Gpu, output: &IDXGIOutput) -> windows::core::Result<IDXGIOutputDuplication> {
-    // IDXGIOutput5 is there on every Windows 11.
-    let output: IDXGIOutput5 = output.cast()?;
-    // SAFETY: the device was created on the adapter this output is connected to.
-    unsafe { output.DuplicateOutput1(&gpu.device, 0, &[DXGI_FORMAT_B8G8R8A8_UNORM]) }
+impl Duplication {
+    /// Asks for B8G8R8A8, the 8-bit format; with HDR on, the 16-bit path comes with WPC-327.
+    fn of(gpu: &Gpu, output: IDXGIOutput) -> windows::core::Result<Duplication> {
+        // IDXGIOutput5 is there on every Windows 11.
+        let output5: IDXGIOutput5 = output.cast()?;
+        // SAFETY: the device was created on the adapter this output is connected to.
+        let duplication =
+            unsafe { output5.DuplicateOutput1(&gpu.device, 0, &[DXGI_FORMAT_B8G8R8A8_UNORM]) }?;
+        Ok(Duplication {
+            gpu: gpu.clone(),
+            output,
+            duplication,
+        })
+    }
+
+    /// The output's current image. The duplication is released before this returns.
+    fn image(self) -> windows::core::Result<Image> {
+        match first_image(&self.gpu, &self.duplication) {
+            // The duplication was lost, as when the display mode or the desktop changes, and a new one gets one more
+            // try. Windows allows one duplication per output and process at a time, so the lost one goes first.
+            Err(e) if e.code() == DXGI_ERROR_ACCESS_LOST => {
+                let Duplication {
+                    gpu,
+                    output,
+                    duplication,
+                } = self;
+                drop(duplication);
+                let again = Duplication::of(&gpu, output)?;
+                first_image(&again.gpu, &again.duplication)
+            }
+            first => first,
+        }
+    }
 }
 
 /// Waits for the duplication's first desktop image and reads it into memory. An error between acquiring a frame and
@@ -242,13 +268,17 @@ fn first_image(gpu: &Gpu, duplication: &IDXGIOutputDuplication) -> windows::core
                     return Ok(image);
                 }
             }
+            // Nothing new on screen within the wait; waiting again is the only thing to do, until the deadline.
             Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => {}
             Err(e) => return Err(e),
         }
         if Instant::now() >= deadline {
             return Err(Error::new(
                 DXGI_ERROR_WAIT_TIMEOUT,
-                "no desktop image within 500 ms",
+                format!(
+                    "no desktop image within {} ms",
+                    FIRST_IMAGE_BUDGET.as_millis()
+                ),
             ));
         }
     }
@@ -381,9 +411,7 @@ fn one_per_monitor(
         }
         photos.push(Photo {
             rect: monitor.rect,
-            width: image.width,
-            height: image.height,
-            bgra: image.bgra,
+            image,
         });
     }
     Ok(photos)
@@ -472,7 +500,14 @@ mod tests {
         let photos = one_per_monitor(&monitors, grabs).expect("a photo per monitor");
         let seen: Vec<_> = photos
             .iter()
-            .map(|photo| (photo.rect, photo.width, photo.height, photo.bgra[0]))
+            .map(|photo| {
+                (
+                    photo.rect,
+                    photo.image.width,
+                    photo.image.height,
+                    photo.image.bgra[0],
+                )
+            })
             .collect();
         assert_eq!(seen, [(RIGHT, 3840, 2160, 1), (LEFT, 1920, 1080, 2)]);
     }
@@ -486,7 +521,7 @@ mod tests {
         ];
         let photos = one_per_monitor(&monitors, grabs).expect("a photo per monitor");
         assert_eq!(photos.len(), 1);
-        assert_eq!(photos[0].bgra[0], 1);
+        assert_eq!(photos[0].image.bgra[0], 1);
     }
 
     #[test]

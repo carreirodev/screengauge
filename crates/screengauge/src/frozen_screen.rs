@@ -7,7 +7,8 @@ use std::cell::{OnceCell, RefCell};
 use std::ffi::c_void;
 
 use windows::Win32::Foundation::{
-    D2DERR_RECREATE_TARGET, E_FAIL, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
+    D2DERR_RECREATE_TARGET, E_FAIL, ERROR_SUCCESS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT,
+    POINT, RECT, SetLastError, WPARAM,
 };
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_SIZE_U, D2D1_ALPHA_MODE_IGNORE, D2D1_PIXEL_FORMAT,
@@ -24,9 +25,7 @@ use windows::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
-use windows::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, InvalidateRect, PAINTSTRUCT, UpdateWindow,
-};
+use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, PAINTSTRUCT};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -111,29 +110,35 @@ impl FrozenScreen {
         for &window in &frozen.windows {
             // SAFETY: our own window. ShowWindow returns whether it was visible before, not an error.
             let _ = unsafe { ShowWindow(window, SW_SHOWNA) };
-            // SAFETY: our own window; paints it now, so it never appears empty.
-            if !unsafe { UpdateWindow(window) }.as_bool() {
-                return Err(Error::new(E_FAIL, "UpdateWindow returned FALSE"));
-            }
+            // Drawn here rather than left to WM_PAINT, so a photo that can't be drawn fails the call instead of
+            // leaving an empty window over its monitor. The WM_PAINT still pending draws it once more.
+            with_state(window, |state| draw(window, state)).unwrap_or_else(|| {
+                Err(Error::new(E_FAIL, "a frozen screen window has no state"))
+            })?;
         }
-        frozen.take_keyboard(&rects)?;
+        frozen.take_keyboard(&rects);
         Ok(frozen)
     }
 
-    /// Brings the window under the cursor to the front, so the keyboard goes to it. The global shortcut grants
-    /// ScreenGauge that right; should Windows refuse anyway, the tools still close with the global shortcut.
-    fn take_keyboard(&self, rects: &[RECT]) -> windows::core::Result<()> {
+    /// Brings the window under the cursor to the front, so the keyboard goes to it, and shows the cross. The photo is
+    /// already on screen and closes with the global shortcut, so a failure here is logged and the call goes on. The
+    /// global shortcut grants ScreenGauge the right to come to the front; should Windows refuse anyway, Esc won't
+    /// reach the frozen screen until it is clicked.
+    fn take_keyboard(&self, rects: &[RECT]) {
         let mut cursor = POINT::default();
         // SAFETY: fills a local.
-        unsafe { GetCursorPos(&mut cursor) }?;
-        let under_cursor = rects
-            .iter()
-            .position(|rect| {
+        let under_cursor = match unsafe { GetCursorPos(&mut cursor) } {
+            Ok(()) => rects.iter().position(|rect| {
                 (rect.left..rect.right).contains(&cursor.x)
                     && (rect.top..rect.bottom).contains(&cursor.y)
-            })
-            .unwrap_or(0);
-        if let Some(&window) = self.windows.get(under_cursor) {
+            }),
+            Err(e) => {
+                log::failure("frozen screen: finding the cursor", &e);
+                None
+            }
+        };
+        // The cursor is always on a monitor; should it not be, the first monitor's window takes the keyboard.
+        if let Some(&window) = self.windows.get(under_cursor.unwrap_or(0)) {
             // SAFETY: our own window.
             if !unsafe { SetForegroundWindow(window) }.as_bool() {
                 log::failure(
@@ -143,20 +148,30 @@ impl FrozenScreen {
             }
         }
         // The cross shows at once, without waiting for the mouse to move.
-        // SAFETY: loads a shared system cursor, which is never freed. SetCursor returns the previous cursor.
-        let _ = unsafe { SetCursor(Some(LoadCursorW(None, IDC_CROSS)?)) };
-        Ok(())
+        // SAFETY: loads a shared system cursor, which is never freed.
+        match unsafe { LoadCursorW(None, IDC_CROSS) } {
+            Ok(cross) => {
+                // SAFETY: a valid cursor. SetCursor returns the previous one, which needs nothing.
+                let _ = unsafe { SetCursor(Some(cross)) };
+            }
+            Err(e) => log::failure("frozen screen: showing the cross", &e),
+        }
     }
 }
 
 impl Drop for FrozenScreen {
     fn drop(&mut self) {
         for window in self.windows.drain(..) {
-            // SAFETY: our own window, on the thread that created it, and outside its window procedure.
-            if let Err(e) = unsafe { DestroyWindow(window) } {
-                log::failure("frozen screen: closing a window", &e);
-            }
+            destroy(window);
         }
+    }
+}
+
+/// Destroys one of the frozen screen's windows, from outside its window procedure.
+fn destroy(window: HWND) {
+    // SAFETY: our own window, on the thread that created it, and outside its window procedure.
+    if let Err(e) = unsafe { DestroyWindow(window) } {
+        log::failure("frozen screen: closing a window", &e);
     }
 }
 
@@ -165,7 +180,7 @@ struct Window {
     photo: Photo,
     factory: ID2D1Factory,
     resident: HWND,
-    /// Made at the first paint, and again when Direct2D says the graphics device was lost.
+    /// Made at the first draw, and again when Direct2D says the graphics device was lost.
     drawing: RefCell<Option<Drawing>>,
 }
 
@@ -222,10 +237,7 @@ fn create_window(
         )
     };
     if let Err(e) = squared {
-        // SAFETY: the window was just created on this thread, and nothing else holds it.
-        if let Err(destroyed) = unsafe { DestroyWindow(window) } {
-            log::failure("frozen screen: closing a window", &destroyed);
-        }
+        destroy(window);
         return Err(e);
     }
     Ok(window)
@@ -238,43 +250,69 @@ extern "system" fn window_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     match message {
-        WM_NCCREATE => adopt(hwnd, lparam),
+        // FALSE from WM_NCCREATE makes CreateWindowExW fail.
+        WM_NCCREATE if !adopt(hwnd, lparam) => return LRESULT(0),
         WM_NCDESTROY => release(hwnd),
         _ => {}
     }
-    // SAFETY: the pointer was stored by `adopt` and is cleared by `release` before the window state is freed, all
-    // on this thread; nothing frees it while this message is handled.
-    let window = unsafe { (GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const Window).as_ref() };
-    match (window, message) {
-        (Some(_), WM_ERASEBKGND) => LRESULT(1),
-        (Some(window), WM_PAINT) => {
+    let handled = with_state(hwnd, |window| match message {
+        WM_ERASEBKGND => Some(LRESULT(1)),
+        WM_PAINT => {
             paint(hwnd, window);
-            LRESULT(0)
+            Some(LRESULT(0))
         }
-        (Some(window), WM_KEYDOWN) if wparam.0 == usize::from(VK_ESCAPE.0) => {
+        WM_KEYDOWN if wparam.0 == usize::from(VK_ESCAPE.0) => {
             request_close(window.resident);
-            LRESULT(0)
+            Some(LRESULT(0))
         }
         // Alt+F4 closes the tools as a whole, never one monitor's window alone.
-        (Some(window), WM_CLOSE) => {
+        WM_CLOSE => {
             request_close(window.resident);
-            LRESULT(0)
+            Some(LRESULT(0))
         }
-        // SAFETY: the arguments are the ones Windows passed to this window procedure.
-        _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
-    }
+        _ => None,
+    });
+    // SAFETY: the arguments are the ones Windows passed to this window procedure.
+    handled
+        .flatten()
+        .unwrap_or_else(|| unsafe { DefWindowProcW(hwnd, message, wparam, lparam) })
 }
 
-/// Moves the window state from `create_window`'s slot to the window.
-fn adopt(hwnd: HWND, lparam: LPARAM) {
+/// Runs `f` with the window's state, when it has one: from WM_NCCREATE to WM_NCDESTROY.
+fn with_state<R>(hwnd: HWND, f: impl FnOnce(&Window) -> R) -> Option<R> {
+    // SAFETY: the pointer was stored by `adopt` and is cleared by `release` before the state is freed, all on this
+    // thread. Only WM_NCDESTROY frees it, and nothing `f` does destroys the window.
+    let window = unsafe { (GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const Window).as_ref() };
+    window.map(f)
+}
+
+/// Moves the window state from `create_window`'s slot to the window. False when it can't, so the window is never
+/// created: without its state it would show nothing and ignore Esc.
+fn adopt(hwnd: HWND, lparam: LPARAM) -> bool {
     // SAFETY: WM_NCCREATE's lParam is the CREATESTRUCTW of the CreateWindowExW call in `create_window`.
     let create = unsafe { &*(lparam.0 as *const CREATESTRUCTW) };
-    let slot = create.lpCreateParams.cast::<Slot>();
     // SAFETY: `create_window` passed a pointer to its live slot and doesn't touch it during the call.
-    if let Some(window) = unsafe { slot.as_mut() }.and_then(Option::take) {
-        // SAFETY: our own window. The previous value, 0 for a new window, is all SetWindowLongPtrW returns.
-        unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(window) as isize) };
+    let Some(slot) = (unsafe { create.lpCreateParams.cast::<Slot>().as_mut() }) else {
+        return false;
+    };
+    let Some(window) = slot.take() else {
+        return false;
+    };
+    let window = Box::into_raw(window);
+    // SetWindowLongPtrW returns the previous value, 0 for a new window, and 0 on failure too: only the thread's last
+    // error tells them apart.
+    // SAFETY: sets this thread's last error.
+    unsafe { SetLastError(ERROR_SUCCESS) };
+    // SAFETY: our own window.
+    let previous = unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, window as isize) };
+    // SAFETY: reads this thread's last error.
+    if previous == 0 && unsafe { GetLastError() } != ERROR_SUCCESS {
+        // SAFETY: the pointer came from Box::into_raw above and was never stored, so the slot owns it again and
+        // `create_window` drops it.
+        *slot = Some(unsafe { Box::from_raw(window) });
+        return false;
     }
+    true
 }
 
 /// Frees the window state, the photo with it.
@@ -342,10 +380,25 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
 
 impl Drawing {
     fn new(hwnd: HWND, window: &Window) -> windows::core::Result<Drawing> {
-        let photo = &window.photo;
+        let image = &window.photo.image;
+        let pitch = image
+            .width
+            .checked_mul(4)
+            .ok_or_else(|| Error::new(E_FAIL, "the photo is too wide"))?;
+        // CreateBitmap below reads `height` rows of `pitch` bytes from the pixels.
+        let length = usize::try_from(pitch)
+            .ok()
+            .zip(usize::try_from(image.height).ok())
+            .and_then(|(pitch, height)| pitch.checked_mul(height));
+        if length != Some(image.bgra.len()) {
+            return Err(Error::new(
+                E_FAIL,
+                "the photo's pixels don't match its size",
+            ));
+        }
         let size = D2D_SIZE_U {
-            width: photo.width,
-            height: photo.height,
+            width: image.width,
+            height: image.height,
         };
         let format = D2D1_PIXEL_FORMAT {
             format: DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -372,21 +425,17 @@ impl Drawing {
                 .factory
                 .CreateHwndRenderTarget(&target_properties, &window_properties)
         }?;
-        let pitch = photo
-            .width
-            .checked_mul(4)
-            .ok_or_else(|| Error::new(E_FAIL, "the photo is too wide"))?;
         let bitmap_properties = D2D1_BITMAP_PROPERTIES {
             pixelFormat: format,
             dpiX: 96.0,
             dpiY: 96.0,
         };
-        // SAFETY: `photo.bgra` holds `height` rows of `pitch` bytes (capture's Photo promises it) and outlives the
-        // call, which copies it.
+        // SAFETY: `image.bgra` holds exactly `height` rows of `pitch` bytes (checked above) and outlives the call,
+        // which copies it.
         let bitmap = unsafe {
             target.CreateBitmap(
                 size,
-                Some(photo.bgra.as_ptr().cast()),
+                Some(image.bgra.as_ptr().cast()),
                 pitch,
                 &bitmap_properties,
             )
