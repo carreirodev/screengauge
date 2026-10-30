@@ -86,6 +86,10 @@ impl Session {
             // Esc closes the tools whatever tool is active (v1 spec WPC-296, derived rule 3), and so does the global
             // shortcut pressed again. Alt+F4 closes them as a whole, never one monitor's window alone.
             Input::KeyDown(Key::Esc) | Input::GlobalShortcut | Input::CloseAsked => self.close(),
+            // Only the global shortcut closes the tools: calling ScreenGauge another way while they are open changes
+            // nothing (v1 spec WPC-296, "abrir pelo menu Iniciar com a toolbar na tela não muda nada"), and the photo
+            // isn't taken again.
+            Input::Called => Vec::new(),
             _ => Vec::new(),
         }
     }

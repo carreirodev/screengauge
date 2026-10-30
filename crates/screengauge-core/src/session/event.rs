@@ -58,6 +58,9 @@ pub enum Input {
     Toolbar(ToolbarButton),
     /// The global shortcut was pressed again.
     GlobalShortcut,
+    /// ScreenGauge was called again another way than the global shortcut: from its tray icon, or by opening it again
+    /// from the Start menu or another program.
+    Called,
     /// Windows asked the tools to close, as with Alt+F4.
     CloseAsked,
     /// Another program came to the front, as with Alt+Tab or the Windows key.

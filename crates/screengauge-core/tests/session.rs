@@ -156,6 +156,22 @@ fn the_global_shortcut_again_closes_the_tools() {
 }
 
 #[test]
+fn calling_again_by_the_tray_icon_or_by_opening_screengauge_changes_nothing() {
+    let mut session = open(owners_monitors());
+    // No effect: the tools stay open on the same photo, which isn't taken again.
+    assert_eq!(session.handle(event(Input::Called)), []);
+    assert_eq!(
+        session.scene().frozen_screen[0].image.bgra()[0],
+        1,
+        "the 4K monitor's photo"
+    );
+    assert_eq!(
+        session.handle(event(Input::KeyDown(Key::Esc))),
+        [Effect::Close]
+    );
+}
+
+#[test]
 fn alt_f4_closes_the_tools_as_a_whole() {
     let mut session = open(owners_monitors());
     assert_eq!(session.handle(event(Input::CloseAsked)), [Effect::Close]);
