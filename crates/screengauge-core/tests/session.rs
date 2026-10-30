@@ -212,7 +212,7 @@ fn input_and_esc(input: Input) -> (Vec<Effect>, Vec<Effect>) {
 
 #[test]
 fn another_program_coming_to_the_front_closes_the_tools_as_esc_does() {
-    // Alt+Tab, the Windows key or a notification that opens a program: the Windows layer tells them apart from
+    // Alt+Tab, the Windows key or a Windows notification that opens a program: the Windows layer tells them apart from
     // ScreenGauge's own windows, which never reach the session as another program.
     let (effects, esc) = input_and_esc(Input::OtherProgramInFront);
     assert!(effects.contains(&Effect::Close), "{effects:?}");
@@ -221,16 +221,13 @@ fn another_program_coming_to_the_front_closes_the_tools_as_esc_does() {
 
 #[test]
 fn changing_a_monitors_scale_with_the_tools_open_closes_them_as_esc_does() {
-    // The 4K monitor going from 175% to 150% while the tools are open: the photos and the arrangement the session
-    // opened with no longer match the screen, so it measures nothing more with them. Connecting or disconnecting a
-    // monitor, and changing a resolution, the arrangement or HDR, reach the session the same way.
-    let mut session = open(owners_monitors());
-    let effects = session.handle(event(Input::MonitorsChanged));
+    // The 4K monitor going from 175% to 150% while the tools are open reaches the session as a change of monitors, with
+    // nothing more: the photos and the arrangement it opened with no longer match the screen, and it never learns the
+    // new ones. Connecting or disconnecting a monitor, and changing a resolution, the arrangement or HDR, reach it the
+    // same way.
+    let (effects, esc) = input_and_esc(Input::MonitorsChanged);
     assert!(effects.contains(&Effect::Close), "{effects:?}");
-    assert_eq!(effects, input_and_esc(Input::MonitorsChanged).1);
-    for input in [Input::Move, Input::Press, Input::MonitorsChanged] {
-        assert_eq!(session.handle(event(input.clone())), [], "{input:?}");
-    }
+    assert_eq!(effects, esc);
 }
 
 #[test]

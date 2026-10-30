@@ -50,6 +50,9 @@ const CLASS_NAME: PCWSTR = w!("ScreenGauge.FrozenScreen");
 /// window procedures.
 pub const EFFECTS_READY: u32 = WM_APP + 2;
 
+/// What a frozen screen window posts to itself when Windows says the monitors changed.
+const MONITORS_CHANGED: u32 = WM_APP + 4;
+
 /// Registered once at startup. The class has no cursor: the session core's scene names it.
 pub fn register_class(instance: HINSTANCE) -> windows::core::Result<()> {
     let class = WNDCLASSEXW {
@@ -96,7 +99,7 @@ pub fn release_factory() {
 pub struct FrozenScreen {
     windows: Vec<HWND>,
     session: Rc<SharedSession>,
-    /// Tells the first window when another program comes to the front, from the moment the frozen screen took the
+    /// Tells the first window when another program comes to the front, from the moment the frozen screen asked for the
     /// keyboard. `None` before, and when Windows refused it.
     watch: Option<foreground::Watch>,
 }
@@ -204,10 +207,13 @@ impl FrozenScreen {
         self.session.show_cursor();
     }
 
-    /// From here on, another program coming to the front closes the tools. Watched only once the frozen screen took
-    /// the keyboard, so nothing on the way here counts, such as the Start menu closing or the click on the tray icon.
-    /// Should Windows refuse, the tools still close with Esc and the global shortcut, so the call goes on.
+    /// From here on, another program coming to the front closes the tools. Watched only once the frozen screen asked
+    /// for the keyboard, so nothing on the way here counts, such as the Start menu closing or the click on the tray
+    /// icon. When Windows kept the front with the program the user was in, that program bringing another of its windows
+    /// to the front closes the tools too. Should Windows refuse the watch, the tools still close with Esc and the
+    /// global shortcut, so the call goes on.
     fn watch_the_front(&mut self) {
+        // Can't happen: the session core refuses a frozen screen without monitors.
         let Some(&window) = self.windows.first() else {
             return;
         };
@@ -220,7 +226,8 @@ impl FrozenScreen {
 
 impl Drop for FrozenScreen {
     fn drop(&mut self) {
-        // The watch goes first: closing the window in front hands the front to another program, which is no news.
+        // The watch goes before the window it tells: closing the window in front hands the front to another program,
+        // which isn't one coming to the front while the tools are open.
         self.watch = None;
         for window in self.windows.drain(..) {
             destroy(window);
@@ -428,10 +435,21 @@ extern "system" fn window_proc(
             WM_CLOSE => deliver(Input::CloseAsked),
             foreground::OTHER_PROGRAM_IN_FRONT => deliver(Input::OtherProgramInFront),
             // Windows sends this to every top-level window for any change of monitors: one connected or disconnected,
-            // a scale, resolution or arrangement changed, HDR turned on or off (seen in WPC-281 and WPC-289). Each
-            // window passes it on; the first closes the tools, and the core takes nothing after. Moving the SDR content
-            // brightness sends nothing.
-            WM_DISPLAYCHANGE => deliver(Input::MonitorsChanged),
+            // a scale, resolution or arrangement changed, HDR turned on or off (seen in WPC-281 and WPC-289). Moving
+            // the SDR content brightness sends nothing. It comes from another thread, so it may arrive inside any
+            // Windows call that waits on one, even while a window draws with the photo borrowed; posted on, it reaches
+            // the core from the message loop. Each window passes it on; the first closes the tools, and the core takes
+            // nothing after.
+            WM_DISPLAYCHANGE => {
+                // SAFETY: our own window; the message carries nothing.
+                let posted =
+                    unsafe { PostMessageW(Some(hwnd), MONITORS_CHANGED, WPARAM(0), LPARAM(0)) };
+                if let Err(e) = posted {
+                    log::failure("frozen screen: passing on a change of monitors", &e);
+                }
+                Some(LRESULT(0))
+            }
+            MONITORS_CHANGED => deliver(Input::MonitorsChanged),
             _ => None,
         }
     });

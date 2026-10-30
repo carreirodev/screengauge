@@ -97,7 +97,7 @@ impl Session {
             Input::KeyDown(Key::Esc) | Input::GlobalShortcut | Input::CloseAsked => self.close(),
             // Another program in front closes them as Esc does, so the user is never left on a frozen screen behind it,
             // and so does any change of monitors Windows reports, so nothing is measured with the wrong arrangement
-            // (v1 spec WPC-296, Fechar as ferramentas).
+            // (v1 spec WPC-296, Closing the tools).
             Input::OtherProgramInFront | Input::MonitorsChanged => self.close(),
             // Only the global shortcut closes the tools: calling ScreenGauge another way while they are open changes
             // nothing (v1 spec WPC-296, "abrir pelo menu Iniciar com a toolbar na tela não muda nada"), and the photo
