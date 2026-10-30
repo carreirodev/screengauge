@@ -51,19 +51,29 @@ thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
 }
 
-/// Shows `notification` now. When the tray icon can't show it, it waits for the icon, unless it means something only
-/// right away.
+/// Shows `notification` now, or once the tools close. When the tray icon can't show it, it waits for the icon, unless
+/// it means something only right away.
 pub fn show(window: HWND, notification: Notification) {
     STATE.with_borrow_mut(|state| state.show(notification, balloon(window)));
 }
 
-/// Keeps `notification` until [`SHOW_WAITING`] or the tray icon's return shows it.
+/// Keeps `notification` until [`SHOW_WAITING`], the tools closing or the tray icon's return shows it.
 pub fn wait(notification: Notification) {
     STATE.with_borrow_mut(|state| state.waiting.push(notification));
 }
 
+/// The frozen screen is on the monitors: notifications wait until [`tools_closed`].
+pub fn tools_opened() {
+    STATE.with_borrow_mut(State::tools_opened);
+}
+
+/// The frozen screen is gone: the notifications waiting show on `window`'s tray icon.
+pub fn tools_closed(window: HWND) {
+    STATE.with_borrow_mut(|state| state.tools_closed(balloon(window)));
+}
+
 /// Shows the notifications waiting once the messages already posted to `window` are handled: at startup, after the
-/// call's photo, so a notification never lands in it.
+/// call's photo, so a notification never lands in it; when the call opened the tools, after they close.
 pub fn post_show_waiting(window: HWND) {
     // SAFETY: the resident window; the message carries nothing.
     if let Err(e) = unsafe { PostMessageW(Some(window), SHOW_WAITING, WPARAM(0), LPARAM(0)) } {
@@ -91,18 +101,34 @@ fn balloon(window: HWND) -> impl FnMut(Notification) -> windows::core::Result<()
 
 #[derive(Debug, Default)]
 struct State {
-    /// Waiting for the tray icon, or for the startup call's photo, in the order they came.
+    /// Waiting for the tray icon, for the startup call's photo or for the tools to close, in the order they came.
     waiting: Vec<Notification>,
     /// The last one Windows took, whose click comes back as NIN_BALLOONUSERCLICK.
     showing: Option<Notification>,
+    /// The frozen screen covers the monitors. Windows drops a notification while a full-screen window is in front
+    /// (SHQueryUserNotificationState says QUNS_BUSY), so none shows until the tools close.
+    tools_open: bool,
 }
 
 impl State {
+    fn tools_opened(&mut self) {
+        self.tools_open = true;
+    }
+
+    fn tools_closed(&mut self, balloon: impl FnMut(Notification) -> windows::core::Result<()>) {
+        self.tools_open = false;
+        self.show_waiting(balloon);
+    }
+
     fn show(
         &mut self,
         notification: Notification,
         mut balloon: impl FnMut(Notification) -> windows::core::Result<()>,
     ) {
+        if self.tools_open {
+            self.waiting.push(notification);
+            return;
+        }
         match balloon(notification) {
             Ok(()) => self.showing = Some(notification),
             Err(e) if notification.right_away_only() => {
@@ -119,6 +145,9 @@ impl State {
     }
 
     fn show_waiting(&mut self, mut balloon: impl FnMut(Notification) -> windows::core::Result<()>) {
+        if self.tools_open {
+            return;
+        }
         for notification in std::mem::take(&mut self.waiting) {
             self.show(notification, &mut balloon);
         }
@@ -215,6 +244,20 @@ mod tests {
         assert_eq!(state.waiting, [Notification::SettingsReset]);
         let mut shown = Vec::new();
         state.show_waiting(shown_into(&mut shown));
+        assert_eq!(shown, [Notification::SettingsReset]);
+        assert!(state.waiting.is_empty());
+    }
+
+    #[test]
+    fn a_notification_waits_while_the_tools_are_open_and_shows_once_they_close() {
+        // Windows drops a notification while the frozen screen covers the monitors, as for a full-screen program.
+        let mut state = State::default();
+        state.tools_opened();
+        let mut shown = Vec::new();
+        state.show(Notification::SettingsReset, shown_into(&mut shown));
+        state.show_waiting(shown_into(&mut shown));
+        assert_eq!(shown, []);
+        state.tools_closed(shown_into(&mut shown));
         assert_eq!(shown, [Notification::SettingsReset]);
         assert!(state.waiting.is_empty());
     }

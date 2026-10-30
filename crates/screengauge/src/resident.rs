@@ -104,7 +104,8 @@ pub fn run(file: Option<SettingsFile>, stored: Stored) -> windows::core::Result<
         log::failure(&format!("global shortcut: registering {shortcut}"), &e);
     }
     post_call(hwnd);
-    // After the call, so a notification from startup, such as the damaged settings file, never lands in its photo.
+    // After the call, so a notification from startup, such as the damaged settings file, never lands in its photo;
+    // when the call opened the tools, it waits for them to close.
     notification::post_show_waiting(hwnd);
 
     let mut message = MSG::default();
@@ -158,7 +159,7 @@ extern "system" fn window_proc(
                     .map(FrozenScreen::take_effects)
                     .unwrap_or_default()
             });
-            carry_out(effects);
+            carry_out(hwnd, effects);
             LRESULT(0)
         }
         notification::SHOW_WAITING => {
@@ -203,9 +204,12 @@ fn on_call(resident: HWND, input: Input) {
             .map(|frozen| frozen.handle(event::of_message(input)))
     });
     match told {
-        Some(effects) => carry_out(effects),
+        Some(effects) => carry_out(resident, effects),
         None => match open(resident) {
-            Ok(frozen) => FROZEN_SCREEN.set(Some(frozen)),
+            Ok(frozen) => {
+                FROZEN_SCREEN.set(Some(frozen));
+                notification::tools_opened();
+            }
             // Whatever kept the tools closed, the user hears of it, never a failure in silence (v1 spec WPC-296,
             // Frozen screen). Most often it is a monitor neither capture path could photograph.
             Err(e) => {
@@ -235,12 +239,14 @@ fn open(resident: HWND) -> windows::core::Result<FrozenScreen> {
     FrozenScreen::show(session, resident)
 }
 
-/// Does what the session core asked, in its order.
-fn carry_out(effects: Vec<Effect>) {
+/// Does what the session core asked, in its order. `resident` shows the notifications that waited for the tools to
+/// close.
+fn carry_out(resident: HWND, effects: Vec<Effect>) {
     for effect in effects {
         let not_built = match effect {
             Effect::Close => {
                 close();
+                notification::tools_closed(resident);
                 continue;
             }
             Effect::SaveRemembered(remembered) => {
