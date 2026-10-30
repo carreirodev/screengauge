@@ -3,7 +3,7 @@
 //! word), and the cursor over it is the thin cross. Each window owns its photo, so destroying the windows when the
 //! tools close, by dropping [`FrozenScreen`], erases the photos with them.
 
-use std::cell::{OnceCell, RefCell};
+use std::cell::RefCell;
 use std::ffi::c_void;
 
 use windows::Win32::Foundation::{
@@ -70,19 +70,25 @@ thread_local! {
     /// keeps the graphics device its windows draw with, and with it the graphics card's driver. On the owner's
     /// computer, a factory made for each call made every call about 350 ms slower, past the 250 ms target (WPC-286);
     /// kept, ScreenGauge at rest after four calls used 47 MB in Task Manager, under the 80 MB target.
-    static FACTORY: OnceCell<ID2D1Factory> = const { OnceCell::new() };
+    static FACTORY: RefCell<Option<ID2D1Factory>> = const { RefCell::new(None) };
 }
 
 fn factory() -> windows::core::Result<ID2D1Factory> {
-    FACTORY.with(|kept| {
-        if let Some(factory) = kept.get() {
+    FACTORY.with_borrow_mut(|kept| {
+        if let Some(factory) = kept {
             return Ok(factory.clone());
         }
         // SAFETY: a single-threaded factory with default options, used only on this thread.
         let factory: ID2D1Factory =
             unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None) }?;
-        Ok(kept.get_or_init(|| factory).clone())
+        Ok(kept.insert(factory).clone())
     })
+}
+
+/// Releases the kept factory, and the graphics device with it, as ScreenGauge exits. Left to the end of the process,
+/// the release happened while Windows was already taking it down: the exit took 3 seconds and failed.
+pub fn release_factory() {
+    drop(FACTORY.with_borrow_mut(Option::take));
 }
 
 /// The frozen screen's windows, one per monitor, while the tools are open.

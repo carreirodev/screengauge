@@ -126,6 +126,7 @@ extern "system" fn window_proc(
         }
         WM_DESTROY => {
             close();
+            frozen_screen::release_factory();
             if let Err(e) = global_shortcut::unregister(hwnd) {
                 log::failure("exit: unregistering the global shortcut", &e);
             }
