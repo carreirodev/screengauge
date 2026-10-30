@@ -83,10 +83,11 @@ fn monitors() -> windows::core::Result<Vec<Monitor>> {
             {
                 return Err(Error::new(E_FAIL, "GetMonitorInfoW returned FALSE"));
             }
-            let (mut dpi, mut unused) = (0, 0);
+            // Windows gives the same DPI on both axes.
+            let (mut dpi, mut dpi_y) = (0, 0);
             // SAFETY: a monitor EnumDisplayMonitors just listed; both out pointers are locals. The process is
             // Per-Monitor V2, so this is the monitor's own DPI.
-            unsafe { GetDpiForMonitor(handle, MDT_EFFECTIVE_DPI, &mut dpi, &mut unused) }?;
+            unsafe { GetDpiForMonitor(handle, MDT_EFFECTIVE_DPI, &mut dpi, &mut dpi_y) }?;
             let scale = Scale::from_dpi(dpi)
                 .ok_or_else(|| Error::new(E_FAIL, "GetDpiForMonitor returned a DPI of 0"))?;
             Ok(Monitor {

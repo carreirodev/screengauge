@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::rc::Rc;
 
-use screengauge_core::session::{Cursor, Effect, Event, Input, Rect, Session};
+use screengauge_core::session::{Cursor, Effect, Event, Image, Input, Rect, Session};
 use windows::Win32::Foundation::{
     D2DERR_RECREATE_TARGET, E_FAIL, ERROR_SUCCESS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT,
     POINT, SetLastError, WPARAM,
@@ -94,14 +94,14 @@ pub fn release_factory() {
 /// The frozen screen's windows, one per monitor, and the session they show, while the tools are open.
 pub struct FrozenScreen {
     windows: Vec<HWND>,
-    shared: Rc<Shared>,
+    session: Rc<SharedSession>,
 }
 
-/// What the windows share.
-struct Shared {
+/// The session, as the windows and the resident window share it.
+struct SharedSession {
     /// Borrowed mutably only while the core handles an event, which calls no Windows function, so no window procedure
     /// runs meanwhile.
-    session: RefCell<Session>,
+    core: RefCell<Session>,
     /// What the core returned while handling the windows' events, for the resident window to carry out.
     effects: RefCell<Vec<Effect>>,
     /// Receives [`EFFECTS_READY`].
@@ -124,14 +124,14 @@ impl FrozenScreen {
         // Should a window fail, dropping `frozen` destroys the ones already made.
         let mut frozen = FrozenScreen {
             windows: Vec::with_capacity(rects.len()),
-            shared: Rc::new(Shared {
-                session: RefCell::new(session),
+            session: Rc::new(SharedSession {
+                core: RefCell::new(session),
                 effects: RefCell::new(Vec::new()),
                 resident,
             }),
         };
         for (monitor, &rect) in rects.iter().enumerate() {
-            let window = create_window(instance, monitor, rect, &factory, &frozen.shared)?;
+            let window = create_window(instance, monitor, rect, &factory, &frozen.session)?;
             frozen.windows.push(window);
         }
         for &window in &frozen.windows {
@@ -151,13 +151,13 @@ impl FrozenScreen {
     /// the resident window and it hasn't carried out yet, first.
     pub fn handle(&self, event: Event) -> Vec<Effect> {
         let mut effects = self.take_effects();
-        effects.extend(self.shared.handle(event));
+        effects.extend(self.session.handle(event));
         effects
     }
 
     /// What the windows' events left for the resident window since it last took them.
     pub fn take_effects(&self) -> Vec<Effect> {
-        match self.shared.effects.try_borrow_mut() {
+        match self.session.effects.try_borrow_mut() {
             Ok(mut queued) => std::mem::take(&mut *queued),
             Err(_) => {
                 log::failure(
@@ -194,7 +194,7 @@ impl FrozenScreen {
             }
         }
         // The cursor shows at once, without waiting for the mouse to move.
-        self.shared.show_cursor();
+        self.session.show_cursor();
     }
 }
 
@@ -206,9 +206,9 @@ impl Drop for FrozenScreen {
     }
 }
 
-impl Shared {
+impl SharedSession {
     fn handle(&self, event: Event) -> Vec<Effect> {
-        match self.session.try_borrow_mut() {
+        match self.core.try_borrow_mut() {
             Ok(mut session) => session.handle(event),
             // Can't happen: the core calls no Windows function, so no event arrives while it handles one.
             Err(_) => {
@@ -249,7 +249,7 @@ impl Shared {
 
     /// Shows the scene's cursor.
     fn show_cursor(&self) {
-        let Ok(session) = self.session.try_borrow() else {
+        let Ok(session) = self.core.try_borrow() else {
             log::failure(
                 "frozen screen",
                 &"the cursor was asked for while an event was handled",
@@ -288,9 +288,9 @@ fn destroy(window: HWND) {
 
 /// What each window keeps, from WM_NCCREATE to WM_NCDESTROY.
 struct Window {
-    /// Its monitor's place in the scene's frozen screen.
+    /// Its monitor's index in the scene's frozen screen.
     monitor: usize,
-    shared: Rc<Shared>,
+    session: Rc<SharedSession>,
     factory: ID2D1Factory,
     /// Made at the first draw, and again when Direct2D says the graphics device was lost.
     drawing: RefCell<Option<Drawing>>,
@@ -311,14 +311,14 @@ fn create_window(
     monitor: usize,
     rect: Rect,
     factory: &ID2D1Factory,
-    shared: &Rc<Shared>,
+    session: &Rc<SharedSession>,
 ) -> windows::core::Result<HWND> {
     let too_large = || Error::new(E_FAIL, "the monitor is too large for a window");
     let width = i32::try_from(rect.width).map_err(|_| too_large())?;
     let height = i32::try_from(rect.height).map_err(|_| too_large())?;
     let mut slot: Slot = Some(Box::new(Window {
         monitor,
-        shared: Rc::clone(shared),
+        session: Rc::clone(session),
         factory: factory.clone(),
         drawing: RefCell::new(None),
     }));
@@ -371,8 +371,8 @@ extern "system" fn window_proc(
         _ => {}
     }
     let handled = with_state(hwnd, |window| {
-        let input = |input: Input| {
-            window.shared.input(input);
+        let deliver = |input: Input| {
+            window.session.input(input);
             Some(LRESULT(0))
         };
         match message {
@@ -382,29 +382,28 @@ extern "system" fn window_proc(
                 Some(LRESULT(0))
             }
             WM_SETCURSOR if low_word(lparam) == HTCLIENT => {
-                window.shared.show_cursor();
+                window.session.show_cursor();
                 Some(LRESULT(1))
             }
-            WM_MOUSEMOVE => input(Input::Move),
-            WM_LBUTTONDOWN => input(Input::Press),
-            WM_LBUTTONUP => input(Input::Release),
-            WM_MOUSEWHEEL => input(Input::Wheel(event::wheel(wparam))),
-            WM_KEYDOWN => event::key(wparam).and_then(|key| input(Input::KeyDown(key))),
-            WM_KEYUP => event::key(wparam).and_then(|key| input(Input::KeyUp(key))),
-            // Alt, and keys pressed with it, come as system keys. Windows handles them afterwards as before, so
-            // Alt+F4 still turns into WM_CLOSE.
-            WM_SYSKEYDOWN | WM_SYSKEYUP => {
-                if let Some(key) = event::key(wparam) {
-                    window.shared.input(if message == WM_SYSKEYDOWN {
+            WM_MOUSEMOVE => deliver(Input::Move),
+            WM_LBUTTONDOWN => deliver(Input::Press),
+            WM_LBUTTONUP => deliver(Input::Release),
+            WM_MOUSEWHEEL => deliver(Input::Wheel(event::wheel(wparam))),
+            WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP => {
+                let key = event::key(wparam)?;
+                window
+                    .session
+                    .input(if matches!(message, WM_KEYDOWN | WM_SYSKEYDOWN) {
                         Input::KeyDown(key)
                     } else {
                         Input::KeyUp(key)
                     });
-                }
-                None
+                // Alt, and keys pressed with it, come as system keys. Windows handles them afterwards as before, so
+                // Alt+F4 still turns into WM_CLOSE.
+                matches!(message, WM_KEYDOWN | WM_KEYUP).then_some(LRESULT(0))
             }
             // Alt+F4: the core closes the tools as a whole, never one monitor's window alone.
-            WM_CLOSE => input(Input::CloseAsked),
+            WM_CLOSE => deliver(Input::CloseAsked),
             _ => None,
         }
     });
@@ -518,25 +517,14 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
 impl Drawing {
     /// Puts the window's photo, from the scene, on the graphics card.
     fn new(hwnd: HWND, window: &Window) -> windows::core::Result<Drawing> {
-        let session = window
-            .shared
-            .session
-            .try_borrow()
-            .map_err(|_| Error::new(E_FAIL, "drawing started while an event was handled"))?;
-        let scene = session.scene();
-        let image = &scene
-            .frozen_screen
-            .get(window.monitor)
-            .ok_or_else(|| Error::new(E_FAIL, "the scene has no photo for this window"))?
-            .image;
-        let pitch = image
-            .width()
-            .checked_mul(4)
-            .ok_or_else(|| Error::new(E_FAIL, "the photo is too wide"))?;
-        let size = D2D_SIZE_U {
+        let size = window.with_photo(|image| D2D_SIZE_U {
             width: image.width(),
             height: image.height(),
-        };
+        })?;
+        let pitch = size
+            .width
+            .checked_mul(4)
+            .ok_or_else(|| Error::new(E_FAIL, "the photo is too wide"))?;
         let format = D2D1_PIXEL_FORMAT {
             format: DXGI_FORMAT_B8G8R8A8_UNORM,
             alphaMode: D2D1_ALPHA_MODE_IGNORE,
@@ -567,15 +555,34 @@ impl Drawing {
             dpiX: 96.0,
             dpiY: 96.0,
         };
-        // SAFETY: an Image holds exactly `height` rows of `pitch` bytes, and outlives the call, which copies them.
-        let bitmap = unsafe {
-            target.CreateBitmap(
-                size,
-                Some(image.bgra().as_ptr().cast()),
-                pitch,
-                &bitmap_properties,
-            )
-        }?;
+        let bitmap = window.with_photo(|image| {
+            // SAFETY: an Image holds exactly `height` rows of `pitch` bytes, and outlives the call, which copies them.
+            unsafe {
+                target.CreateBitmap(
+                    size,
+                    Some(image.bgra().as_ptr().cast()),
+                    pitch,
+                    &bitmap_properties,
+                )
+            }
+        })??;
         Ok(Drawing { target, bitmap })
+    }
+}
+
+impl Window {
+    /// Runs `f` with the window's photo, borrowed from the session only meanwhile.
+    fn with_photo<R>(&self, f: impl FnOnce(&Image) -> R) -> windows::core::Result<R> {
+        let session = self
+            .session
+            .core
+            .try_borrow()
+            .map_err(|_| Error::new(E_FAIL, "drawing started while an event was handled"))?;
+        let photo = session
+            .scene()
+            .frozen_screen
+            .get(self.monitor)
+            .ok_or_else(|| Error::new(E_FAIL, "the scene has no photo for this window"))?;
+        Ok(f(&photo.image))
     }
 }

@@ -59,6 +59,9 @@ pub struct Session {
 
 impl Session {
     pub fn open(opening: Opening) -> Result<Session, Refused> {
+        // No rule reads the options or the remembered state yet; the tools that do will keep them (the default
+        // tolerance with WPC-309, the last tool with WPC-310), and the remembered state goes back to the Windows layer
+        // only when one of them changes it.
         let Opening { frozen_screen, .. } = opening;
         if frozen_screen.is_empty() {
             return Err(Refused::NoMonitor);

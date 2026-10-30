@@ -19,5 +19,8 @@ pub fn low_word(lparam: LPARAM) -> u32 {
 /// read them: a monitor left of or above the main one has negative coordinates. Keeping 16 bits of each is the point,
 /// so the truncating casts are intended.
 pub fn signed_words(packed: usize) -> (i16, i16) {
-    (packed as u16 as i16, (packed >> 16) as u16 as i16)
+    (
+        (packed as u16).cast_signed(),
+        ((packed >> 16) as u16).cast_signed(),
+    )
 }

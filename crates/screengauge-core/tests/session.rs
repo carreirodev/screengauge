@@ -41,13 +41,17 @@ fn owners_monitors() -> Vec<Photo> {
     vec![photo(AOC, 168, 1), photo(ARZOPA, 120, 2)]
 }
 
-fn open(frozen_screen: Vec<Photo>) -> Session {
-    Session::open(Opening {
+/// Opening with `frozen_screen`, the default options and nothing remembered yet.
+fn opening(frozen_screen: Vec<Photo>) -> Opening {
+    Opening {
         frozen_screen,
         options: Options::default(),
         remembered: Remembered::default(),
-    })
-    .expect("a frozen screen the session takes")
+    }
+}
+
+fn open(frozen_screen: Vec<Photo>) -> Session {
+    Session::open(opening(frozen_screen)).expect("a frozen screen the session takes")
 }
 
 #[test]
@@ -73,26 +77,24 @@ fn opening_shows_every_monitor_its_own_photo_in_its_place() {
     );
 }
 
-fn try_open(frozen_screen: Vec<Photo>) -> Result<Session, Refused> {
-    Session::open(Opening {
-        frozen_screen,
-        options: Options::default(),
-        remembered: Remembered::default(),
-    })
-}
-
 #[test]
 fn opening_refuses_a_photo_that_isnt_its_monitors_size() {
     let mut frozen_screen = owners_monitors();
     // The Full HD monitor's photo, one row short.
     frozen_screen[1].image =
         Image::new(1920, 1079, vec![0; 1920 * 1079 * 4]).expect("a whole image");
-    assert_eq!(try_open(frozen_screen).err(), Some(Refused::PhotoSize(1)));
+    assert_eq!(
+        Session::open(opening(frozen_screen)).err(),
+        Some(Refused::PhotoSize(1))
+    );
 }
 
 #[test]
 fn opening_refuses_a_frozen_screen_without_monitors() {
-    assert_eq!(try_open(Vec::new()).err(), Some(Refused::NoMonitor));
+    assert_eq!(
+        Session::open(opening(Vec::new())).err(),
+        Some(Refused::NoMonitor)
+    );
 }
 
 #[test]
@@ -128,12 +130,11 @@ fn event(input: Input) -> Event {
 fn esc_closes_the_tools_whichever_tool_was_last_used() {
     for last_tool in [Tool::Dimensions, Tool::Bounds, Tool::Inspect, Tool::Snip] {
         let mut session = Session::open(Opening {
-            frozen_screen: owners_monitors(),
-            options: Options::default(),
             remembered: Remembered {
                 last_tool,
                 ..Remembered::default()
             },
+            ..opening(owners_monitors())
         })
         .expect("a frozen screen the session takes");
         // Closing, and nothing else: nothing copied or saved, and nothing remembered changed, so nothing to write.
@@ -178,7 +179,7 @@ fn nothing_happens_once_the_tools_closed() {
 }
 
 #[test]
-fn the_tools_stay_open_through_everything_else() {
+fn moving_clicking_turning_the_wheel_and_other_keys_leave_the_tools_open() {
     let mut session = open(owners_monitors());
     let keys = [
         Key::H,

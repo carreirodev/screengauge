@@ -29,14 +29,16 @@ const CLASS_NAME: PCWSTR = w!("ScreenGauge.Resident");
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 
 thread_local! {
-    /// The frozen screen, with its session, while the tools are open. Only the resident window's procedure touches it,
-    /// and never while it holds the borrow: opening and closing take it out first.
+    /// The frozen screen, with its session, while the tools are open. Only the resident window's procedure touches it.
+    /// Opening and closing set it and take it out, never while it is borrowed, because they show and destroy windows;
+    /// what runs while it is borrowed dispatches no message.
     static FROZEN_SCREEN: RefCell<Option<FrozenScreen>> = const { RefCell::new(None) };
-    /// What the settings file holds, and the file when it could be opened. Set once, as the process starts.
-    static SETTINGS: RefCell<Option<Settings>> = const { RefCell::new(None) };
+    /// What the settings file holds, and the file to save it to. Set once, as the process starts.
+    static SETTINGS_FILE: RefCell<Option<LoadedSettingsFile>> = const { RefCell::new(None) };
 }
 
-struct Settings {
+/// The settings file as ScreenGauge read it at startup, kept up to date as it saves.
+struct LoadedSettingsFile {
     /// `None` when the file couldn't be opened: ScreenGauge then runs with the defaults and saves nothing.
     file: Option<SettingsFile>,
     stored: Stored,
@@ -45,7 +47,7 @@ struct Settings {
 /// Runs until the user exits from the tray icon, with what the settings file holds and the file to save it to.
 pub fn run(file: Option<SettingsFile>, stored: Stored) -> windows::core::Result<()> {
     let shortcut = stored.options.global_shortcut;
-    SETTINGS.set(Some(Settings { file, stored }));
+    SETTINGS_FILE.set(Some(LoadedSettingsFile { file, stored }));
     // SAFETY: registers a constant message name.
     let taskbar_created = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
     if taskbar_created == 0 {
@@ -130,7 +132,7 @@ extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_HOTKEY if global_shortcut::is_global_shortcut(wparam) => {
-            open_or_tell(hwnd);
+            on_global_shortcut(hwnd);
             LRESULT(0)
         }
         frozen_screen::EFFECTS_READY => {
@@ -167,7 +169,7 @@ extern "system" fn window_proc(
 }
 
 /// The global shortcut opens the tools, or, when they are open, goes to the session core, which closes them.
-fn open_or_tell(resident: HWND) {
+fn on_global_shortcut(resident: HWND) {
     let told = FROZEN_SCREEN.with_borrow(|open| {
         open.as_ref()
             .map(|frozen| frozen.handle(event::of_message(Input::GlobalShortcut)))
@@ -189,12 +191,9 @@ fn open(resident: HWND) -> windows::core::Result<FrozenScreen> {
     let Stored {
         options,
         remembered,
-    } = SETTINGS.with_borrow(|settings| {
-        settings
-            .as_ref()
-            .map(|settings| settings.stored.clone())
-            .unwrap_or_default()
-    });
+    } = SETTINGS_FILE
+        .with_borrow(|loaded| loaded.as_ref().map(|loaded| loaded.stored.clone()))
+        .ok_or_else(|| Error::new(E_FAIL, "the settings file wasn't read at startup"))?;
     let session = Session::open(Opening {
         frozen_screen,
         options,
@@ -235,13 +234,17 @@ fn close() {
 
 /// Keeps `remembered` for the next call, and in the settings file when there is one.
 fn save_remembered(remembered: Remembered) {
-    SETTINGS.with_borrow_mut(|settings| {
-        let Some(settings) = settings else {
+    SETTINGS_FILE.with_borrow_mut(|loaded| {
+        let Some(loaded) = loaded else {
+            log::failure(
+                "settings: saving the remembered state",
+                &"the settings file wasn't read at startup",
+            );
             return;
         };
-        settings.stored.remembered = remembered;
-        if let Some(file) = &settings.file
-            && let Err(e) = file.save(&settings.stored)
+        loaded.stored.remembered = remembered;
+        if let Some(file) = &loaded.file
+            && let Err(e) = file.save(&loaded.stored)
         {
             log::failure("settings: saving the remembered state", &e);
         }
