@@ -1,7 +1,8 @@
 //! The frozen screen on screen: one window over each monitor, at its exact place and size in physical pixels, drawing
 //! the session core's scene. Each window draws its monitor's photo pixel for pixel with Direct2D, shows the cursor the
-//! scene names, and hands the core what the user does over it. The windows share the session; destroying them when the
-//! tools close, by dropping [`FrozenScreen`], drops the session and erases the photos with it.
+//! scene names, and hands the core what the user does over it and what Windows tells it: another program came to the
+//! front, or the monitors changed. The windows share the session; destroying them when the tools close, by dropping
+//! [`FrozenScreen`], drops the session and erases the photos with it.
 
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -32,15 +33,15 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos,
     GetWindowLongPtrW, HTCLIENT, IDC_CROSS, LoadCursorW, PostMessageW, RegisterClassExW, SW_SHOWNA,
-    SetCursor, SetForegroundWindow, SetWindowLongPtrW, ShowWindow, WM_APP, WM_CLOSE, WM_ERASEBKGND,
-    WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
-    WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDCLASSEXW,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    SetCursor, SetForegroundWindow, SetWindowLongPtrW, ShowWindow, WM_APP, WM_CLOSE,
+    WM_DISPLAYCHANGE, WM_ERASEBKGND, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SYSKEYDOWN,
+    WM_SYSKEYUP, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{Error, PCWSTR, w};
 
 use crate::win32::{low_word, struct_size};
-use crate::{event, log};
+use crate::{event, foreground, log};
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.FrozenScreen");
 
@@ -95,6 +96,9 @@ pub fn release_factory() {
 pub struct FrozenScreen {
     windows: Vec<HWND>,
     session: Rc<SharedSession>,
+    /// Tells the first window when another program comes to the front, from the moment the frozen screen took the
+    /// keyboard. `None` before, and when Windows refused it.
+    watch: Option<foreground::Watch>,
 }
 
 /// The session, as the windows and the resident window share it.
@@ -129,6 +133,7 @@ impl FrozenScreen {
                 effects: RefCell::new(Vec::new()),
                 resident,
             }),
+            watch: None,
         };
         for (monitor, &rect) in rects.iter().enumerate() {
             let window = create_window(instance, monitor, rect, &factory, &frozen.session)?;
@@ -144,6 +149,7 @@ impl FrozenScreen {
             })?;
         }
         frozen.take_keyboard(&rects);
+        frozen.watch_the_front();
         Ok(frozen)
     }
 
@@ -197,10 +203,25 @@ impl FrozenScreen {
         // The cursor shows at once, without waiting for the mouse to move.
         self.session.show_cursor();
     }
+
+    /// From here on, another program coming to the front closes the tools. Watched only once the frozen screen took
+    /// the keyboard, so nothing on the way here counts, such as the Start menu closing or the click on the tray icon.
+    /// Should Windows refuse, the tools still close with Esc and the global shortcut, so the call goes on.
+    fn watch_the_front(&mut self) {
+        let Some(&window) = self.windows.first() else {
+            return;
+        };
+        match foreground::Watch::start(window) {
+            Ok(watch) => self.watch = Some(watch),
+            Err(e) => log::failure("frozen screen: watching for another program in front", &e),
+        }
+    }
 }
 
 impl Drop for FrozenScreen {
     fn drop(&mut self) {
+        // The watch goes first: closing the window in front hands the front to another program, which is no news.
+        self.watch = None;
         for window in self.windows.drain(..) {
             destroy(window);
         }
@@ -405,6 +426,12 @@ extern "system" fn window_proc(
             }
             // Alt+F4: the core closes the tools as a whole, never one monitor's window alone.
             WM_CLOSE => deliver(Input::CloseAsked),
+            foreground::OTHER_PROGRAM_IN_FRONT => deliver(Input::OtherProgramInFront),
+            // Windows sends this to every top-level window for any change of monitors: one connected or disconnected,
+            // a scale, resolution or arrangement changed, HDR turned on or off (seen in WPC-281 and WPC-289). Each
+            // window passes it on; the first closes the tools, and the core takes nothing after. Moving the SDR content
+            // brightness sends nothing.
+            WM_DISPLAYCHANGE => deliver(Input::MonitorsChanged),
             _ => None,
         }
     });

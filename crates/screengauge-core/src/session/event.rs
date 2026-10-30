@@ -63,7 +63,8 @@ pub enum Input {
     Called,
     /// Windows asked the tools to close, as with Alt+F4.
     CloseAsked,
-    /// Another program came to the front, as with Alt+Tab or the Windows key.
+    /// Another program came to the front, as with Alt+Tab or the Windows key. ScreenGauge's own windows, such as Save
+    /// As, never count.
     OtherProgramInFront,
     /// Windows said the monitors changed: one connected or disconnected, or a scale, resolution, arrangement or HDR
     /// change.

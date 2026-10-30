@@ -9,6 +9,7 @@ compile_error!("ScreenGauge v1 is built for 64-bit Windows (x64) only.");
 
 mod capture;
 mod event;
+mod foreground;
 mod frozen_screen;
 mod global_shortcut;
 mod log;

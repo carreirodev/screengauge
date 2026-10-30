@@ -198,6 +198,41 @@ fn alt_f4_closes_the_tools_as_a_whole() {
     assert_eq!(session.handle(event(Input::CloseAsked)), [Effect::Close]);
 }
 
+/// What `input` makes happen to tools just opened on the owner's monitors, next to what Esc makes happen to the same
+/// tools. The two are the same when `input` closes the tools as Esc does: the mouse goes back to the programs, and
+/// nothing copied or saved is undone.
+fn input_and_esc(input: Input) -> (Vec<Effect>, Vec<Effect>) {
+    let mut session = open(owners_monitors());
+    let mut twin = open(owners_monitors());
+    (
+        session.handle(event(input)),
+        twin.handle(event(Input::KeyDown(Key::Esc))),
+    )
+}
+
+#[test]
+fn another_program_coming_to_the_front_closes_the_tools_as_esc_does() {
+    // Alt+Tab, the Windows key or a notification that opens a program: the Windows layer tells them apart from
+    // ScreenGauge's own windows, which never reach the session as another program.
+    let (effects, esc) = input_and_esc(Input::OtherProgramInFront);
+    assert!(effects.contains(&Effect::Close), "{effects:?}");
+    assert_eq!(effects, esc);
+}
+
+#[test]
+fn changing_a_monitors_scale_with_the_tools_open_closes_them_as_esc_does() {
+    // The 4K monitor going from 175% to 150% while the tools are open: the photos and the arrangement the session
+    // opened with no longer match the screen, so it measures nothing more with them. Connecting or disconnecting a
+    // monitor, and changing a resolution, the arrangement or HDR, reach the session the same way.
+    let mut session = open(owners_monitors());
+    let effects = session.handle(event(Input::MonitorsChanged));
+    assert!(effects.contains(&Effect::Close), "{effects:?}");
+    assert_eq!(effects, input_and_esc(Input::MonitorsChanged).1);
+    for input in [Input::Move, Input::Press, Input::MonitorsChanged] {
+        assert_eq!(session.handle(event(input.clone())), [], "{input:?}");
+    }
+}
+
 #[test]
 fn nothing_happens_once_the_tools_closed() {
     let mut session = open(owners_monitors());
@@ -205,11 +240,14 @@ fn nothing_happens_once_the_tools_closed() {
         session.handle(event(Input::KeyDown(Key::Esc))),
         [Effect::Close]
     );
-    // Esc repeating while held, then the global shortcut and Alt+F4 before the Windows layer closed the windows.
+    // Esc repeating while held, then the global shortcut, Alt+F4, another program in front and a monitor change before
+    // the Windows layer closed the windows.
     for input in [
         Input::KeyDown(Key::Esc),
         Input::GlobalShortcut,
         Input::CloseAsked,
+        Input::OtherProgramInFront,
+        Input::MonitorsChanged,
     ] {
         assert_eq!(session.handle(event(input.clone())), [], "{input:?}");
     }
