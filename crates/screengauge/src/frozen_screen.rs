@@ -3,7 +3,7 @@
 //! word), and the cursor over it is the thin cross. Each window owns its photo, so destroying the windows when the
 //! tools close, by dropping [`FrozenScreen`], erases the photos with them.
 
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::ffi::c_void;
 
 use windows::Win32::Foundation::{
@@ -66,6 +66,26 @@ pub fn register_class(instance: HINSTANCE) -> windows::core::Result<()> {
     Ok(())
 }
 
+thread_local! {
+    /// Made at the first call and kept until ScreenGauge exits, so nothing exists before the first call. The factory
+    /// keeps the graphics device its windows draw with, and with it the graphics card's driver. On the owner's
+    /// computer, a factory made for each call made every call about 350 ms slower, past the 250 ms target (WPC-286);
+    /// kept, ScreenGauge at rest after four calls used 47 MB in Task Manager, under the 80 MB target.
+    static FACTORY: OnceCell<ID2D1Factory> = const { OnceCell::new() };
+}
+
+fn factory() -> windows::core::Result<ID2D1Factory> {
+    FACTORY.with(|kept| {
+        if let Some(factory) = kept.get() {
+            return Ok(factory.clone());
+        }
+        // SAFETY: a single-threaded factory with default options, used only on this thread.
+        let factory: ID2D1Factory =
+            unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None) }?;
+        Ok(kept.get_or_init(|| factory).clone())
+    })
+}
+
 /// The frozen screen's windows, one per monitor, while the tools are open.
 pub struct FrozenScreen {
     windows: Vec<HWND>,
@@ -77,10 +97,7 @@ impl FrozenScreen {
     pub fn show(photos: Vec<Photo>, resident: HWND) -> windows::core::Result<FrozenScreen> {
         // SAFETY: no module name, so this is the handle of ScreenGauge.exe itself.
         let instance: HINSTANCE = unsafe { GetModuleHandleW(None) }?.into();
-        // Created for each call and released with the windows: nothing is kept between calls.
-        // SAFETY: a single-threaded factory with default options, used only on this thread.
-        let factory: ID2D1Factory =
-            unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None) }?;
+        let factory = factory()?;
         let rects: Vec<RECT> = photos.iter().map(|photo| photo.rect).collect();
         // Should a window fail, dropping `frozen` destroys the ones already made.
         let mut frozen = FrozenScreen {
