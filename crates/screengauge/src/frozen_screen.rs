@@ -171,7 +171,8 @@ impl FrozenScreen {
 
     /// Brings the window under the cursor to the front, so the keyboard goes to it, and shows the scene's cursor. The
     /// photo is already on screen and closes with the global shortcut, so a failure here is logged and the call goes
-    /// on. The global shortcut grants ScreenGauge the right to come to the front; should Windows refuse anyway, Esc
+    /// on. Each call grants ScreenGauge the right to come to the front: the global shortcut and the tray icon's click
+    /// through Windows, and opening ScreenGauge through the program just opened; should Windows refuse anyway, Esc
     /// won't reach the frozen screen until it is clicked.
     fn take_keyboard(&self, rects: &[Rect]) {
         let mut cursor = POINT::default();

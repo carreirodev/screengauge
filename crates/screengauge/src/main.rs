@@ -36,8 +36,8 @@ fn main() -> ExitCode {
 fn run() -> windows::core::Result<()> {
     let _instance = match single_instance::claim(single_instance::NAME)? {
         Instance::First(guard) => guard,
-        // Another copy is running, so this one exits. Calling that copy instead comes with WPC-301.
-        Instance::AlreadyRunning => return Ok(()),
+        // Opening ScreenGauge while a copy runs calls that copy, and this one exits.
+        Instance::AlreadyRunning => return resident::call_running_copy(),
     };
     // Only the copy that runs touches the settings file. The global shortcut, the options and the remembered state the
     // tools open with come from it, and the remembered state goes back to it; Settings will save to it too.
