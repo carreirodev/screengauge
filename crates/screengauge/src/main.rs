@@ -7,6 +7,9 @@
 #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
 compile_error!("ScreenGauge v1 is built for 64-bit Windows (x64) only.");
 
+mod capture;
+mod frozen_screen;
+mod global_shortcut;
 mod log;
 mod resident;
 mod settings_file;
@@ -35,8 +38,8 @@ fn run() -> windows::core::Result<()> {
         // Another copy is running, so this one exits. Calling that copy instead comes with WPC-301.
         Instance::AlreadyRunning => return Ok(()),
     };
-    // Only the copy that runs touches the settings file. The global shortcut, the tools and Settings will read and
-    // save it as they are built.
-    let _settings = settings_file::open_at_startup();
-    resident::run()
+    // Only the copy that runs touches the settings file. The tools and Settings will read and save it as they are
+    // built; the global shortcut already comes from it.
+    let (_file, stored) = settings_file::open_at_startup();
+    resident::run(stored.options.global_shortcut)
 }
