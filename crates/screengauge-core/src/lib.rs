@@ -5,3 +5,5 @@
 //! file live. The Windows layer (`screengauge`) feeds them and carries out what they decide.
 
 #![forbid(unsafe_code)]
+
+pub mod settings;

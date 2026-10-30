@@ -80,6 +80,10 @@ _Avoid_: overflow, tray flyout, hidden icon menu (the Windows setting that turns
 The window, separate from the tools, where the user changes ScreenGauge's options.
 _Avoid_: preferences, options, Settings tool
 
+**Remembered state**:
+What ScreenGauge keeps between calls without showing it in Settings, such as the last tool used and the toolbar's place; it lives in the settings file and goes back to its defaults with it.
+_Avoid_: history, session state, last session
+
 **Frozen screen**:
 The still image of every monitor, taken all at once when ScreenGauge is called, that stays on screen in place of the live screen until the tools close; it is what the tools measure and capture.
 _Avoid_: snapshot, screenshot (the Snip's image is a different thing), still
