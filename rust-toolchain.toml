@@ -1,0 +1,6 @@
+# The Rust release used on every machine and in CI, so a new release never changes a build silently.
+# Moving to a newer release is a commit of its own.
+[toolchain]
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

@@ -1,0 +1,44 @@
+# Test layers 1 and 2 of the v1 spec (WPC-296) and the 5 MB limit on every push. Layers 3 and 4 need a real
+# monitor and graphics card, so they run on the owner's computer before each release, never here.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # RUSTFLAGS stays unset: setting it would override the crt-static flag in .cargo/config.toml.
+
+jobs:
+  test:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # One command per step: a pwsh step fails only on the exit code of its last command.
+      - name: Install the pinned Rust release
+        run: rustup toolchain install
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Test the release build, the exe users download
+        run: cargo test --workspace --release

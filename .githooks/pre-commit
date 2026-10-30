@@ -1,0 +1,8 @@
+#!/bin/sh
+# Test layers 1 and 2 of the v1 spec (WPC-296) before every commit; a failure stops the commit.
+# CI (.github/workflows/ci.yml) repeats these checks on every push and adds the release build.
+# Enabled once per clone with: git config core.hooksPath .githooks
+set -e
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --quiet -- -D warnings
+cargo test --workspace --quiet

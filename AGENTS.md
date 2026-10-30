@@ -20,7 +20,11 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 ## Ticket worktrees
 
-Every Linear ticket is built in its own git worktree at `.claude/worktrees/<issue-id-lowercase>` (for example `wpc-297`), on the branch Linear names for the issue (its `gitBranchName`), cut from the current `main`. Tickets run in parallel sessions, and one folder per ticket keeps their changes apart. Tickets reach `main` one at a time, each after the owner approves its merge, and a ticket counts as done only once merged, so every ticket it unblocks starts from a `main` that already holds its code. Remove the worktree after the merge.
+Every Linear ticket is built in its own git worktree at `.claude/worktrees/<issue-id-lowercase>` (for example `wpc-297`), on the branch Linear names for the issue (its `gitBranchName`), cut from the current `main`. Tickets run in parallel sessions, and one folder per ticket keeps their changes apart. Tickets reach `main` one at a time, each after the owner approves its merge, and a ticket counts as done only once merged, so every ticket it unblocks starts from a `main` that already holds its code. Before asking for that approval, push the ticket branch to GitHub and wait for its CI run to go green (owner's call in WPC-305). Remove the worktree after the merge.
+
+## Checks
+
+`.githooks/pre-commit` runs formatting, clippy and the tests before every commit. Git uses it only after `git config core.hooksPath .githooks`, run once per clone; worktrees share that setting. When the hook refuses a commit, fix the cause and commit again. CI (`.github/workflows/ci.yml`) repeats the checks on every push and adds the release build, the exe users download.
 
 ## Owner labels
 

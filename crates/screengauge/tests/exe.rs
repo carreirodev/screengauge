@@ -1,5 +1,6 @@
 //! What the built ScreenGauge.exe must be (v1 spec WPC-296, Platform): x64, Per-Monitor V2 from its embedded manifest,
-//! and importing only DLLs that come with Windows, so users install nothing but ScreenGauge.
+//! and importing only DLLs that come with Windows, so users install nothing but ScreenGauge. The release build must
+//! also fit the 5 MB download limit.
 
 use std::path::{Path, PathBuf};
 
@@ -22,6 +23,9 @@ const REDISTRIBUTABLE_PREFIXES: [&str; 6] = [
     "concrt",
     "vccorlib",
 ];
+
+/// Each download is at most 5 MB (v1 spec WPC-296), read as decimal megabytes, the stricter reading.
+const SIZE_LIMIT_BYTES: u64 = 5_000_000;
 
 #[test]
 fn exe_is_x64() {
@@ -71,6 +75,21 @@ fn imports_only_windows_dlls() {
             "{dll} doesn't come with Windows; imports: {dlls:?}"
         );
     }
+}
+
+#[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "the limit applies to the release build; run cargo test --release"
+)]
+fn release_exe_fits_the_download_limit() {
+    let size = std::fs::metadata(EXE)
+        .unwrap_or_else(|e| panic!("reading {EXE}: {e}"))
+        .len();
+    assert!(
+        size <= SIZE_LIMIT_BYTES,
+        "{EXE} is {size} bytes, over the {SIZE_LIMIT_BYTES}-byte limit"
+    );
 }
 
 fn read_exe() -> Vec<u8> {
