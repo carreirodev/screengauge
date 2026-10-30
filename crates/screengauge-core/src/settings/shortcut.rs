@@ -1,5 +1,5 @@
-//! The global shortcut as a value: which combinations are allowed (v1 spec WPC-296, Settings, "Gravador do global
-//! shortcut"). The settings file keeps it as text, and the shortcut recorder checks a new combination with
+//! The global shortcut as a value: which combinations are allowed (v1 spec WPC-296, Settings, the global shortcut
+//! recorder). The settings file keeps it as text, and the shortcut recorder checks a new combination with
 //! [`Shortcut::new`].
 
 use std::fmt;

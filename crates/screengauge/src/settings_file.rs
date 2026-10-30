@@ -1,9 +1,9 @@
-//! The settings file on disk (v1 spec WPC-296, "Arquivo de configurações e estado lembrado"): opened when ScreenGauge
-//! starts, created with the defaults the first time so there is a file to edit, and replaced in one step whenever it
-//! is saved. What the file holds and how its text reads belongs to the core (`screengauge_core::settings`).
+//! The settings file on disk (v1 spec WPC-296, Settings file and remembered state): opened when ScreenGauge starts,
+//! created with the defaults the first time so there is a file to edit, and replaced in one step whenever it is saved.
+//! What the file holds and how its text reads belongs to the core (`screengauge_core::settings`).
 
 use std::ffi::OsString;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{self, Write};
 use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
@@ -32,8 +32,9 @@ pub fn installer_copy_folder() -> windows::core::Result<PathBuf> {
 }
 
 /// Opens the settings file as ScreenGauge starts. Until Windows notifications exist (WPC-303), a damaged file or a
-/// value that went back to its default reaches only the debugger output. When the file can't be opened, ScreenGauge
-/// runs with the defaults and has no file to save to, so it never writes over a file it couldn't read.
+/// value that went back to its default reaches only the debugger output, which never shows a folder's path: it
+/// holds the Windows user name. When the file can't be opened, ScreenGauge runs with the defaults and has no file to
+/// save to, so it never writes over a file it couldn't read or move aside.
 pub fn open_at_startup() -> (Option<SettingsFile>, Stored) {
     let folder = match installer_copy_folder() {
         Ok(folder) => folder,
@@ -53,22 +54,36 @@ pub fn open_at_startup() -> (Option<SettingsFile>, Stored) {
                 }
                 Opened::Damaged { damage, copy } => log::failure(
                     &format!(
-                        "settings: back to the defaults, damaged file kept at {}",
-                        copy.display()
+                        "settings: back to the defaults, the damaged file kept as {}",
+                        copy.file_name().unwrap_or_default().to_string_lossy()
                     ),
                     &damage,
                 ),
             }
             (Some(file), stored)
         }
-        Err(e) => {
-            log::failure("settings: opening the file", &e);
+        Err(OpenError {
+            damage: Some(damage),
+            error,
+        }) => {
+            log::failure(
+                &format!("settings: back to the defaults ({damage}), but the file wasn't replaced"),
+                &error,
+            );
+            (None, Stored::default())
+        }
+        Err(OpenError {
+            damage: None,
+            error,
+        }) => {
+            log::failure("settings: opening the file", &error);
             (None, Stored::default())
         }
     }
 }
 
 /// A settings file that was opened, so saving may replace it.
+#[derive(Debug)]
 pub struct SettingsFile {
     folder: PathBuf,
 }
@@ -80,14 +95,31 @@ pub enum Opened {
     New,
     /// The file was read. Each reset is a value that was wrong and went back to its default.
     Read(Vec<Reset>),
-    /// The file was damaged. It was kept at `copy`, and a file with the defaults took its place: the remembered state
+    /// The file was damaged. It was moved to `copy`, and a file with the defaults took its place: the remembered state
     /// went back to its defaults too.
     Damaged { damage: Damaged, copy: PathBuf },
 }
 
+/// Opening failed, so ScreenGauge runs with the defaults and without a file to save to.
+#[derive(Debug)]
+pub struct OpenError {
+    /// The file was damaged: ScreenGauge went back to the defaults all the same, and the user must hear of it.
+    pub damage: Option<Damaged>,
+    pub error: io::Error,
+}
+
+impl From<io::Error> for OpenError {
+    fn from(error: io::Error) -> OpenError {
+        OpenError {
+            damage: None,
+            error,
+        }
+    }
+}
+
 impl SettingsFile {
-    /// Opens `settings.ini` in `folder`. An error leaves the folder as it was.
-    pub fn open(folder: PathBuf) -> io::Result<(SettingsFile, Stored, Opened)> {
+    /// Opens `settings.ini` in `folder`. An error loses nothing: the file is where it was, or moved aside whole.
+    pub fn open(folder: PathBuf) -> Result<(SettingsFile, Stored, Opened), OpenError> {
         let file = SettingsFile { folder };
         let bytes = match fs::read(file.path()) {
             Ok(bytes) => bytes,
@@ -96,15 +128,19 @@ impl SettingsFile {
                 file.save(&stored)?;
                 return Ok((file, stored, Opened::New));
             }
-            Err(e) => return Err(e),
+            Err(e) => return Err(e.into()),
         };
         match settings::read(&bytes) {
-            Ok(read) => Ok((file, read.stored, Opened::Read(read.resets))),
+            Ok(loaded) => Ok((file, loaded.stored, Opened::Read(loaded.resets))),
             Err(damage) => {
-                // Kept before anything is written, so a failure leaves the damaged file where it was.
-                let copy = file.keep_damaged(&bytes)?;
                 let stored = Stored::default();
-                file.save(&stored)?;
+                let copy = file
+                    .move_damaged_aside()
+                    .and_then(|copy| file.save(&stored).map(|()| copy))
+                    .map_err(|error| OpenError {
+                        damage: Some(damage),
+                        error,
+                    })?;
                 Ok((file, stored, Opened::Damaged { damage, copy }))
             }
         }
@@ -115,34 +151,44 @@ impl SettingsFile {
     pub fn save(&self, stored: &Stored) -> io::Result<()> {
         fs::create_dir_all(&self.folder)?;
         let temporary = self.folder.join(TEMPORARY_NAME);
-        let mut file = File::create(&temporary)?;
-        file.write_all(settings::write(stored).as_bytes())?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&temporary, self.path())
+        let replaced = File::create(&temporary)
+            .and_then(|mut file| {
+                file.write_all(settings::write(stored).as_bytes())?;
+                file.sync_all()
+            })
+            .and_then(|()| fs::rename(&temporary, self.path()));
+        let Err(e) = replaced else {
+            return Ok(());
+        };
+        // A failed save leaves no temporary file behind.
+        match fs::remove_file(&temporary) {
+            Ok(()) => Err(e),
+            Err(cleanup) if cleanup.kind() == io::ErrorKind::NotFound => Err(e),
+            Err(cleanup) => Err(io::Error::new(
+                e.kind(),
+                format!("{e}; removing {TEMPORARY_NAME} failed too: {cleanup}"),
+            )),
+        }
     }
 
     fn path(&self) -> PathBuf {
         self.folder.join(FILE_NAME)
     }
 
-    /// Writes a damaged file's bytes next to it, as `settings.damaged.ini`, or `settings.damaged-2.ini` and so on
-    /// when an earlier copy is there, so no copy is ever replaced.
-    fn keep_damaged(&self, bytes: &[u8]) -> io::Result<PathBuf> {
+    /// Moves a damaged file to `settings.damaged.ini`, or to `settings.damaged-2.ini` and so on when an earlier copy
+    /// is there, so no copy is ever replaced. A move keeps the bytes as they were and works on a read-only file too.
+    fn move_damaged_aside(&self) -> io::Result<PathBuf> {
         for number in 1..=u32::MAX {
             let name = match number {
                 1 => String::from("settings.damaged.ini"),
                 _ => format!("settings.damaged-{number}.ini"),
             };
             let copy = self.folder.join(name);
-            match OpenOptions::new().write(true).create_new(true).open(&copy) {
-                Ok(mut file) => {
-                    file.write_all(bytes)?;
-                    file.sync_all()?;
-                    return Ok(copy);
-                }
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(e) => return Err(e),
+            // Only the running copy of ScreenGauge writes in this folder, so nothing takes the name between this check
+            // and the move.
+            if !copy.try_exists()? {
+                fs::rename(self.path(), &copy)?;
+                return Ok(copy);
             }
         }
         Err(io::Error::new(
@@ -154,6 +200,8 @@ impl SettingsFile {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::OpenOptions;
+    use std::os::windows::fs::OpenOptionsExt;
     use std::path::Path;
 
     use screengauge_core::settings::{self as core, Theme, Tool};
@@ -169,6 +217,14 @@ mod tests {
                 .join(format!("ScreenGauge.Test.{}.{test}", std::process::id()));
             remove(&path);
             TestFolder(path)
+        }
+
+        /// The folder already there, holding a settings file with `bytes`.
+        fn with_settings(test: &str, bytes: &[u8]) -> TestFolder {
+            let folder = TestFolder::new(test);
+            fs::create_dir_all(&folder.0).expect("the folder is created");
+            fs::write(folder.file("settings.ini"), bytes).expect("the settings file is written");
+            folder
         }
 
         fn file(&self, name: &str) -> PathBuf {
@@ -207,6 +263,12 @@ mod tests {
         }
     }
 
+    fn make_read_only(path: &Path) {
+        let mut permissions = fs::metadata(path).expect("the file exists").permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(path, permissions).expect("the file is made read-only");
+    }
+
     fn open(folder: &TestFolder) -> (SettingsFile, Stored, Opened) {
         SettingsFile::open(folder.0.clone()).expect("the settings file opens")
     }
@@ -220,7 +282,7 @@ mod tests {
 
         let written = fs::read(folder.file("settings.ini")).expect("the file was written");
         assert_eq!(
-            core::read(&written).map(|read| read.stored),
+            core::read(&written).map(|loaded| loaded.stored),
             Ok(Stored::default())
         );
     }
@@ -249,11 +311,26 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_save_leaves_the_file_whole_and_no_temporary_file() {
+        let folder = TestFolder::new("failed-save");
+        let (file, _, _) = open(&folder);
+        let before = fs::read(folder.file("settings.ini")).expect("the file was written");
+        make_read_only(&folder.file("settings.ini"));
+
+        let mut changed = Stored::default();
+        changed.options.theme = Theme::Dark;
+        assert!(file.save(&changed).is_err());
+        assert_eq!(
+            fs::read(folder.file("settings.ini")).expect("the file is there"),
+            before
+        );
+        assert_eq!(folder.names(), ["settings.ini"]);
+    }
+
+    #[test]
     fn a_damaged_file_is_kept_and_the_defaults_take_its_place() {
-        let folder = TestFolder::new("damaged");
         let damaged = b"last_tool = Snip\nwarned_about_other_copy = true\nnot a setting\n";
-        fs::create_dir_all(&folder.0).expect("the folder is created");
-        fs::write(folder.file("settings.ini"), damaged).expect("the damaged file is written");
+        let folder = TestFolder::with_settings("damaged", damaged);
 
         let (_, stored, opened) = open(&folder);
         let Opened::Damaged { damage, copy } = opened else {
@@ -274,13 +351,25 @@ mod tests {
     }
 
     #[test]
+    fn a_read_only_damaged_file_is_kept_and_replaced_too() {
+        let folder = TestFolder::with_settings("damaged-read-only", &[0xFF, 0x01]);
+        make_read_only(&folder.file("settings.ini"));
+
+        let (_, _, opened) = open(&folder);
+        assert!(matches!(opened, Opened::Damaged { .. }), "{opened:?}");
+        assert_eq!(
+            fs::read(folder.file("settings.damaged.ini")).expect("the copy"),
+            [0xFF, 0x01]
+        );
+        assert_eq!(folder.names(), ["settings.damaged.ini", "settings.ini"]);
+    }
+
+    #[test]
     fn a_second_damaged_file_keeps_the_first_copy() {
-        let folder = TestFolder::new("damaged-twice");
-        fs::create_dir_all(&folder.0).expect("the folder is created");
-        let settings = folder.file("settings.ini");
-        fs::write(&settings, [0xFF, 0x01]).expect("the first damaged file is written");
+        let folder = TestFolder::with_settings("damaged-twice", &[0xFF, 0x01]);
         open(&folder);
-        fs::write(&settings, [0xFF, 0x02]).expect("the second damaged file is written");
+        fs::write(folder.file("settings.ini"), [0xFF, 0x02])
+            .expect("the second damaged file is written");
 
         let (_, _, opened) = open(&folder);
         assert!(
@@ -298,12 +387,44 @@ mod tests {
     }
 
     #[test]
+    fn a_damaged_file_that_cant_be_moved_is_left_as_it_was_and_still_reported() {
+        let folder = TestFolder::with_settings("damaged-locked", &[0xFF, 0x01]);
+        // Another program holds the file open for reading only (FILE_SHARE_READ), so it can't be moved.
+        let _held = OpenOptions::new()
+            .read(true)
+            .share_mode(0x1)
+            .open(folder.file("settings.ini"))
+            .expect("the file is held open");
+
+        let result = SettingsFile::open(folder.0.clone());
+        assert!(
+            matches!(
+                &result,
+                Err(OpenError {
+                    damage: Some(Damaged::NotUtf8),
+                    ..
+                })
+            ),
+            "{result:?}"
+        );
+        assert_eq!(
+            fs::read(folder.file("settings.ini")).expect("the file is there"),
+            [0xFF, 0x01]
+        );
+        assert_eq!(folder.names(), ["settings.ini"]);
+    }
+
+    #[test]
     fn a_file_that_cant_be_read_is_never_written_over() {
         let folder = TestFolder::new("unreadable");
         // A folder where the file should be: reading it fails, but not because it is missing.
         fs::create_dir_all(folder.file("settings.ini")).expect("the folder is created");
 
-        assert!(SettingsFile::open(folder.0.clone()).is_err());
+        let result = SettingsFile::open(folder.0.clone());
+        assert!(
+            matches!(&result, Err(OpenError { damage: None, .. })),
+            "{result:?}"
+        );
         assert!(folder.file("settings.ini").is_dir());
         assert_eq!(folder.names(), ["settings.ini"]);
     }

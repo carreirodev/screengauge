@@ -45,7 +45,7 @@ fn changed_everywhere() -> Stored {
 }
 
 /// Reads a file that must not be damaged.
-fn read(text: &str) -> settings::Read {
+fn read(text: &str) -> settings::Loaded {
     settings::read(text.as_bytes()).expect("the file isn't damaged")
 }
 
@@ -195,7 +195,7 @@ fn a_file_that_isnt_utf8_text_is_damaged() {
 
 #[test]
 fn a_line_that_isnt_name_value_damages_the_whole_file() {
-    let text = "theme = Dark\n\n# a note\nlast_tool Inspect\nmagnification = 4\n";
+    let text = "theme = Dark\n\n# a note\n\u{1}\u{2}garbage\nmagnification = 4\n";
     assert_eq!(
         settings::read(text.as_bytes()),
         Err(Damaged::NotNameValue { line: 4 })
@@ -203,6 +203,31 @@ fn a_line_that_isnt_name_value_damages_the_whole_file() {
     assert_eq!(
         settings::read(b"theme = Dark\n= Light"),
         Err(Damaged::NotNameValue { line: 2 })
+    );
+    assert_eq!(
+        settings::read(b"theme = Dark\nlast_tol Inspect"),
+        Err(Damaged::NotNameValue { line: 2 })
+    );
+}
+
+#[test]
+fn a_known_name_missing_its_equals_sign_goes_back_to_its_default_alone() {
+    let read = read("theme = Dark\nmagnification 32\nLAST_TOOL");
+    let mut expected = Stored::default();
+    expected.options.theme = Theme::Dark;
+    assert_eq!(read.stored, expected);
+    assert_eq!(
+        read.resets,
+        [
+            Reset {
+                key: "last_tool",
+                problem: Problem::MissingEquals
+            },
+            Reset {
+                key: "magnification",
+                problem: Problem::MissingEquals
+            },
+        ]
     );
 }
 
