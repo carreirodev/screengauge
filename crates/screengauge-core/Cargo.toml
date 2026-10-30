@@ -1,0 +1,14 @@
+[package]
+name = "screengauge-core"
+description = "The parts of ScreenGauge that make no Windows call: the session core, the HDR conversion and the settings."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# No windows crate here, ever: tests/no_windows.rs fails if one enters the dependency tree.
+[dependencies]

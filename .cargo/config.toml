@@ -1,0 +1,4 @@
+# Static C runtime, so ScreenGauge.exe needs no Visual C++ Redistributable (ADR 0001).
+# A RUSTFLAGS environment variable replaces these flags; the exe test catches the runtime DLL that would follow.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

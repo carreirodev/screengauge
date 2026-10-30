@@ -6,3 +6,6 @@ tasks.md
 
 # Page snapshots and console logs the Playwright MCP writes while browsing
 .playwright-mcp/
+
+# Cargo build output
+target/

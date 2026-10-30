@@ -1,0 +1,24 @@
+[workspace]
+resolver = "3"
+members = ["crates/screengauge", "crates/screengauge-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+repository = "https://github.com/carreirodev/screengauge"
+
+[workspace.dependencies]
+# Pinned exactly: the windows crates are below 1.0 and change often, so they are upgraded on purpose (ADR 0001).
+# Approved by the owner in WPC-297.
+windows = "=0.62.2"
+
+[workspace.lints.clippy]
+# Every unsafe block says why it is sound, in a SAFETY comment.
+undocumented_unsafe_blocks = "warn"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
