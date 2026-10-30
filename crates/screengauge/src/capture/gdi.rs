@@ -49,11 +49,11 @@ pub fn image(rect: RECT) -> windows::core::Result<Image> {
     if !unsafe { GdiFlush() }.as_bool() {
         return Err(Error::new(E_FAIL, "GdiFlush returned FALSE"));
     }
-    let row_length = columns * 4;
-    // SAFETY: the bitmap is alive and still selected, and its bits are `rows` rows of `columns` 4-byte pixels with no
-    // gap, since a 32-bit row is always a whole number of 4-byte units; the slice is dropped before the bitmap.
-    let pixels = unsafe { std::slice::from_raw_parts(bitmap.bits.cast::<u8>(), row_length * rows) };
-    let bgra = tight_rows(pixels, row_length, columns, rows)
+    // A 32-bit row is always a whole number of 4-byte units, so the rows have no gap.
+    let pitch = columns
+        .checked_mul(4)
+        .ok_or_else(|| Error::new(E_FAIL, "the monitor is too wide to address"))?;
+    let bgra = tight_rows(bitmap.pixels(), pitch, columns, rows)
         .ok_or_else(|| Error::new(E_FAIL, "the bitmap holds fewer rows than the image has"))?;
     drop(selected);
     let (width, height) = (width.cast_unsigned(), height.cast_unsigned());
@@ -143,10 +143,17 @@ impl Drop for Selected<'_> {
 struct Bitmap {
     handle: HBITMAP,
     bits: *mut core::ffi::c_void,
+    /// How many bytes `bits` holds: 4 per pixel.
+    length: usize,
 }
 
 impl Bitmap {
     fn top_down(screen: &ScreenDc, width: i32, height: i32) -> windows::core::Result<Bitmap> {
+        let length = usize::try_from(width)
+            .ok()
+            .zip(usize::try_from(height).ok())
+            .and_then(|(columns, rows)| columns.checked_mul(rows)?.checked_mul(4))
+            .ok_or_else(|| Error::new(E_FAIL, "the bitmap is too large to address"))?;
         let info = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: const { struct_size::<BITMAPINFOHEADER>() },
@@ -164,11 +171,22 @@ impl Bitmap {
         // SAFETY: a valid description of a 32-bit bitmap; `bits` is a local that receives the bitmap's memory.
         let handle =
             unsafe { CreateDIBSection(Some(screen.0), &info, DIB_RGB_COLORS, &mut bits, None, 0) }?;
-        let bitmap = Bitmap { handle, bits };
+        let bitmap = Bitmap {
+            handle,
+            bits,
+            length,
+        };
         if bitmap.bits.is_null() {
             return Err(Error::new(E_FAIL, "CreateDIBSection returned no bits"));
         }
         Ok(bitmap)
+    }
+
+    /// The bitmap's pixels, as GDI last drew them: read them after GdiFlush.
+    fn pixels(&self) -> &[u8] {
+        // SAFETY: CreateDIBSection gave `bits` for a `length`-byte bitmap, which lives as long as `self` is borrowed;
+        // nothing draws into it while the slice is read, since GDI drawing happens only before GdiFlush.
+        unsafe { std::slice::from_raw_parts(self.bits.cast::<u8>(), self.length) }
     }
 }
 

@@ -167,7 +167,7 @@ extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_DESTROY => {
-            close();
+            close(hwnd);
             frozen_screen::release_factory();
             if let Err(e) = global_shortcut::unregister(hwnd) {
                 log::failure("exit: unregistering the global shortcut", &e);
@@ -239,14 +239,12 @@ fn open(resident: HWND) -> windows::core::Result<FrozenScreen> {
     FrozenScreen::show(session, resident)
 }
 
-/// Does what the session core asked, in its order. `resident` shows the notifications that waited for the tools to
-/// close.
+/// Does what the session core asked, in its order, for the resident window `resident`.
 fn carry_out(resident: HWND, effects: Vec<Effect>) {
     for effect in effects {
         let not_built = match effect {
             Effect::Close => {
-                close();
-                notification::tools_closed(resident);
+                close(resident);
                 continue;
             }
             Effect::SaveRemembered(remembered) => {
@@ -265,9 +263,12 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
     }
 }
 
-/// Dropping the frozen screen closes its windows, drops the session and erases the photos.
-fn close() {
+/// Dropping the frozen screen closes its windows, drops the session and erases the photos. The notifications that
+/// waited for the tools to close then show on the resident window's tray icon. Every way of closing the tools comes
+/// here, so none leaves them waiting.
+fn close(resident: HWND) {
     drop(FROZEN_SCREEN.with_borrow_mut(Option::take));
+    notification::tools_closed(resident);
 }
 
 /// Keeps `remembered` for the next call, and in the settings file when there is one.

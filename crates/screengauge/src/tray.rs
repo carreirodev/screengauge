@@ -28,8 +28,8 @@ pub fn add(hwnd: HWND) -> windows::core::Result<()> {
     data.uCallbackMessage = CALLBACK_MESSAGE;
     // SAFETY: loads a shared system icon, which is never freed.
     data.hIcon = unsafe { LoadIconW(None, IDI_APPLICATION) }?;
-    for (slot, unit) in data.szTip.iter_mut().zip("ScreenGauge".encode_utf16()) {
-        *slot = unit;
+    if !fill(&mut data.szTip, "ScreenGauge") {
+        return Err(Error::new(E_FAIL, "the tooltip is too long"));
     }
     notify(NIM_ADD, &data, "NIM_ADD")?;
     data.Anonymous.uVersion = NOTIFYICON_VERSION_4;

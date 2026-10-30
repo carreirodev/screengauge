@@ -458,8 +458,9 @@ fn one_per_monitor(
                 .iter()
                 .position(|grab| grab.device == monitor.device)
                 .map(|index| grabs.swap_remove(index));
-            // Whether HDR is on comes from DXGI's description of the monitor. Without one, HDR counts as off: the
-            // Approximate color notice says "HDR on", and GDI's 8-bit photo measured exact with HDR on too (WPC-289).
+            // Whether HDR is on comes from DXGI's description of the monitor. Without one, HDR counts as off, since the
+            // Approximate color notice says "HDR on". With HDR on, GDI's photo still measured exact (WPC-289); the spec
+            // marks it approximate only because nothing promises that, so a missed mark is unlikely to hide a wrong color.
             let hdr = grab.as_ref().is_some_and(|grab| grab.hdr);
             let dxgi_image = match grab {
                 Some(grab) => grab.image.and_then(|image| fits(monitor, image)),

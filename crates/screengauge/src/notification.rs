@@ -47,7 +47,8 @@ impl Notification {
 }
 
 thread_local! {
-    /// Only the resident window's thread shows notifications and receives their events.
+    /// Only the resident window's thread shows notifications and receives their events. It is the main thread, which
+    /// also opens the settings file before the resident window exists, so what that queues is here for the window.
     static STATE: RefCell<State> = RefCell::new(State::default());
 }
 
