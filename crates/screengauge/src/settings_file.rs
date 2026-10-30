@@ -13,6 +13,7 @@ use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{FOLDERID_LocalAppData, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 
 use crate::log;
+use crate::notification::{self, Notification};
 
 const FILE_NAME: &str = "settings.ini";
 /// What a save writes before it replaces the file.
@@ -31,10 +32,11 @@ pub fn installer_copy_folder() -> windows::core::Result<PathBuf> {
     Ok(local_app_data.join("ScreenGauge"))
 }
 
-/// Opens the settings file as ScreenGauge starts. Until Windows notifications exist (WPC-303), a damaged file or a
-/// value that went back to its default reaches only the debugger output, which never shows a folder's path: it
-/// holds the Windows user name. When the file can't be opened, ScreenGauge runs with the defaults and has no file to
-/// save to, so it never writes over a file it couldn't read or move aside.
+/// Opens the settings file as ScreenGauge starts. A damaged file means a Windows notification, which waits for the
+/// startup call's photo, so ScreenGauge never goes back to the defaults in silence; a value that went back to its
+/// default reaches only the debugger output. That output never shows a folder's path: it holds the Windows user name.
+/// When the file can't be opened, ScreenGauge runs with the defaults and has no file to save to, so it never writes
+/// over a file it couldn't read or move aside.
 pub fn open_at_startup() -> (Option<SettingsFile>, Stored) {
     let folder = match installer_copy_folder() {
         Ok(folder) => folder,
@@ -52,13 +54,16 @@ pub fn open_at_startup() -> (Option<SettingsFile>, Stored) {
                         log::failure("settings", reset);
                     }
                 }
-                Opened::Damaged { damage, copy } => log::failure(
-                    &format!(
-                        "settings: back to the defaults, the damaged file kept as {}",
-                        copy.file_name().unwrap_or_default().to_string_lossy()
-                    ),
-                    &damage,
-                ),
+                Opened::Damaged { damage, copy } => {
+                    log::failure(
+                        &format!(
+                            "settings: back to the defaults, the damaged file kept as {}",
+                            copy.file_name().unwrap_or_default().to_string_lossy()
+                        ),
+                        &damage,
+                    );
+                    notification::wait(Notification::SettingsReset);
+                }
             }
             (Some(file), stored)
         }
@@ -70,6 +75,8 @@ pub fn open_at_startup() -> (Option<SettingsFile>, Stored) {
                 &format!("settings: back to the defaults ({damage}), but the file wasn't replaced"),
                 &error,
             );
+            // The damaged file stays where it was, untouched, so a copy is kept all the same.
+            notification::wait(Notification::SettingsReset);
             (None, Stored::default())
         }
         Err(OpenError {

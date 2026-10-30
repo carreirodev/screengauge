@@ -1,7 +1,9 @@
 //! The capture behind the frozen screen: every monitor through DXGI Desktop Duplication, in 8 bits and without the
-//! mouse pointer, one right after the other (v1 spec WPC-296, Frozen screen), with the place, scale and HDR state the
-//! session core receives with each photo. Everything DXGI and Direct3D create for it is released before
-//! [`every_monitor`] returns, so the capture exists only during the call.
+//! mouse pointer, one right after the other, and through GDI on a monitor where DXGI fails (v1 spec WPC-296, Frozen
+//! screen), with the place, scale and HDR state the session core receives with each photo. Everything DXGI, Direct3D
+//! and GDI create for it is released before [`every_monitor`] returns, so the capture exists only during the call.
+
+mod gdi;
 
 use std::time::{Duration, Instant};
 
@@ -28,6 +30,7 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::core::{BOOL, Error, Interface};
 
+use crate::log;
 use crate::win32::struct_size;
 
 /// How long a new duplication may take to deliver its first desktop image.
@@ -35,12 +38,55 @@ const FIRST_IMAGE_BUDGET: Duration = Duration::from_millis(500);
 /// How long each wait for that image lasts, in milliseconds.
 const WAIT_MS: u32 = 100;
 
-/// Takes the photo of every monitor, or none: a monitor DXGI can't photograph fails the whole call. Taking it
-/// through GDI instead, and telling the user when both fail, comes with WPC-303.
-pub fn every_monitor() -> windows::core::Result<Vec<Photo>> {
+/// Takes the photo of every monitor, in the order Windows lists them: through DXGI, then through GDI for each monitor
+/// DXGI couldn't photograph. A monitor neither path photographs comes back as `None`, so the session core keeps the
+/// tools closed (all or nothing), and both failures go to the log. Only failing to list the monitors fails the call.
+pub fn every_monitor() -> windows::core::Result<Vec<Option<Photo>>> {
     let monitors = monitors()?;
-    let grabs = grab_every_output()?;
-    one_per_monitor(&monitors, grabs)
+    let shots = one_per_monitor(&monitors, grab_every_output(), |monitor| {
+        gdi::image(monitor.rect)
+    });
+    Ok(monitors
+        .iter()
+        .zip(shots)
+        .map(|(monitor, shot)| shot.into_photo(&monitor.device))
+        .collect())
+}
+
+/// One monitor's photo and the path that took it, or why neither path could.
+#[derive(Debug)]
+enum Shot {
+    Dxgi(Photo),
+    /// DXGI failed with `dxgi`, and GDI took the photo.
+    Gdi {
+        photo: Photo,
+        dxgi: Error,
+    },
+    Failed {
+        dxgi: Error,
+        gdi: Error,
+    },
+}
+
+impl Shot {
+    /// The photo, when there is one. How the paths failed goes to the log, which names the monitor by its device.
+    fn into_photo(self, device: &str) -> Option<Photo> {
+        match self {
+            Shot::Dxgi(photo) => Some(photo),
+            Shot::Gdi { photo, dxgi } => {
+                log::failure(
+                    &format!("capture: {device} went through GDI, since DXGI failed"),
+                    &dxgi,
+                );
+                Some(photo)
+            }
+            Shot::Failed { dxgi, gdi } => {
+                log::failure(&format!("capture: {device} through DXGI"), &dxgi);
+                log::failure(&format!("capture: {device} through GDI"), &gdi);
+                None
+            }
+        }
+    }
 }
 
 /// A monitor as Windows arranges it: the list every photo must match.
@@ -175,7 +221,8 @@ fn duplicate_every_output() -> windows::core::Result<Vec<Output>> {
     Ok(duplications)
 }
 
-/// A rotated monitor's desktop image comes in the monitor's native orientation; turning it upright isn't built.
+/// A rotated monitor's desktop image comes in the monitor's native orientation, so that monitor goes to GDI, whose
+/// photo is upright; turning DXGI's image upright is WPC-344.
 fn is_upright(rotation: windows::Win32::Graphics::Dxgi::Common::DXGI_MODE_ROTATION) -> bool {
     rotation == DXGI_MODE_ROTATION_IDENTITY || rotation == DXGI_MODE_ROTATION_UNSPECIFIED
 }
@@ -392,53 +439,100 @@ fn tight_rows(mapped: &[u8], pitch: usize, columns: usize, rows: usize) -> Optio
     Some(bgra)
 }
 
-/// Pairs every monitor with its output's image, in the monitors' order. All or nothing: a monitor without an image of
-/// its exact size fails the whole frozen screen.
+/// Pairs every monitor with its photo, in the monitors' order: DXGI's image when it has the monitor's exact size, and
+/// otherwise `gdi`'s, which is asked only for those monitors. `dxgi` is an error when DXGI failed for every monitor at
+/// once. A monitor neither path photographs gets [`Shot::Failed`], and the others still get their photos.
 fn one_per_monitor(
     monitors: &[Monitor],
-    mut grabs: Vec<Grab>,
-) -> windows::core::Result<Vec<Photo>> {
-    let mut photos = Vec::with_capacity(monitors.len());
-    for monitor in monitors {
-        let failed = |message: String| Error::new(E_FAIL, format!("{}: {message}", monitor.device));
-        let grab = grabs
-            .iter()
-            .position(|grab| grab.device == monitor.device)
-            .map(|index| grabs.swap_remove(index))
-            .ok_or_else(|| failed(String::from("DXGI has no image of this monitor")))?;
-        let image = grab
-            .image
-            .map_err(|e| Error::new(e.code(), format!("{}: {}", monitor.device, e.message())))?;
-        let size = (
-            u32::try_from(monitor.rect.right - monitor.rect.left),
-            u32::try_from(monitor.rect.bottom - monitor.rect.top),
-        );
-        if size != (Ok(image.width()), Ok(image.height())) {
-            return Err(failed(format!(
+    dxgi: windows::core::Result<Vec<Grab>>,
+    mut gdi: impl FnMut(&Monitor) -> windows::core::Result<Image>,
+) -> Vec<Shot> {
+    let (mut grabs, dxgi_failure) = match dxgi {
+        Ok(grabs) => (grabs, None),
+        Err(e) => (Vec::new(), Some(e)),
+    };
+    monitors
+        .iter()
+        .map(|monitor| {
+            let grab = grabs
+                .iter()
+                .position(|grab| grab.device == monitor.device)
+                .map(|index| grabs.swap_remove(index));
+            // Whether HDR is on comes from DXGI's description of the monitor. Without one, HDR counts as off: the
+            // Approximate color notice says "HDR on", and GDI's 8-bit photo measured exact with HDR on too (WPC-289).
+            let hdr = grab.as_ref().is_some_and(|grab| grab.hdr);
+            let dxgi_image = match grab {
+                Some(grab) => grab.image.and_then(|image| fits(monitor, image)),
+                None => Err(dxgi_failure
+                    .clone()
+                    .unwrap_or_else(|| Error::new(E_FAIL, "DXGI has no image of this monitor"))),
+            };
+            match dxgi_image {
+                Ok(image) => Shot::Dxgi(photo(monitor, image, dxgi_colors(hdr))),
+                Err(dxgi) => match gdi(monitor).and_then(|image| fits(monitor, image)) {
+                    Ok(image) => Shot::Gdi {
+                        photo: photo(monitor, image, gdi_colors(hdr)),
+                        dxgi,
+                    },
+                    Err(gdi) => Shot::Failed { dxgi, gdi },
+                },
+            }
+        })
+        .collect()
+}
+
+/// `image`, when it has the monitor's exact size.
+fn fits(monitor: &Monitor, image: Image) -> windows::core::Result<Image> {
+    let size = (
+        u32::try_from(monitor.rect.right - monitor.rect.left),
+        u32::try_from(monitor.rect.bottom - monitor.rect.top),
+    );
+    if size == (Ok(image.width()), Ok(image.height())) {
+        Ok(image)
+    } else {
+        Err(Error::new(
+            E_FAIL,
+            format!(
                 "the image is {}x{}, and the monitor is {:?}",
                 image.width(),
                 image.height(),
                 monitor.rect
-            )));
-        }
-        photos.push(Photo {
-            rect: Rect {
-                left: monitor.rect.left,
-                top: monitor.rect.top,
-                width: image.width(),
-                height: image.height(),
-            },
-            scale: monitor.scale,
-            // With HDR on, the 8-bit photo has Windows' brightening in it (WPC-289); undoing it comes with WPC-327.
-            colors: if grab.hdr {
-                Colors::Approximate
-            } else {
-                Colors::Exact
-            },
-            image,
-        });
+            ),
+        ))
     }
-    Ok(photos)
+}
+
+fn photo(monitor: &Monitor, image: Image, colors: Colors) -> Photo {
+    Photo {
+        rect: Rect {
+            left: monitor.rect.left,
+            top: monitor.rect.top,
+            width: image.width(),
+            height: image.height(),
+        },
+        scale: monitor.scale,
+        colors,
+        image,
+    }
+}
+
+/// With HDR on, DXGI's 8-bit photo has Windows' brightening in it (WPC-289); undoing it comes with WPC-327.
+fn dxgi_colors(hdr: bool) -> Colors {
+    if hdr {
+        Colors::Approximate
+    } else {
+        Colors::Exact
+    }
+}
+
+/// GDI's photo is never the exact HDR path (v1 spec WPC-296, Colors and HDR): with HDR on, its colors are approximate,
+/// even once DXGI's are exact.
+fn gdi_colors(hdr: bool) -> Colors {
+    if hdr {
+        Colors::Approximate
+    } else {
+        Colors::Exact
+    }
 }
 
 #[cfg(test)]
@@ -477,6 +571,9 @@ mod tests {
         assert_eq!(tight_rows(&mapped, 8, 1, 2), None);
     }
 
+    const DISPLAY1: &str = r"\\.\DISPLAY1";
+    const DISPLAY2: &str = r"\\.\DISPLAY2";
+    const DISPLAY3: &str = r"\\.\DISPLAY3";
     const LEFT: RECT = RECT {
         left: -1920,
         top: 0,
@@ -489,6 +586,12 @@ mod tests {
         right: 3840,
         bottom: 2160,
     };
+    const BELOW: RECT = RECT {
+        left: 0,
+        top: 2160,
+        right: 1920,
+        bottom: 3240,
+    };
 
     fn monitor(device: &str, rect: RECT, dpi: u32) -> Monitor {
         Monitor {
@@ -498,15 +601,49 @@ mod tests {
         }
     }
 
+    /// The owner's 4K at 175% as DISPLAY1 and Full HD at 125% as DISPLAY2.
+    fn owners_monitors() -> [Monitor; 2] {
+        [monitor(DISPLAY1, RIGHT, 168), monitor(DISPLAY2, LEFT, 120)]
+    }
+
     /// An image whose first byte tells it apart.
-    fn grab(device: &str, width: u32, height: u32, mark: u8) -> Grab {
+    fn marked(width: u32, height: u32, mark: u8) -> Image {
         let mut bgra = vec![0; usize::try_from(width * height * 4).expect("a small image")];
         bgra[0] = mark;
+        Image::new(width, height, bgra).expect("a whole image")
+    }
+
+    /// What DXGI gave for `device`: an image marked `mark`, with HDR off.
+    fn grab(device: &str, width: u32, height: u32, mark: u8) -> Grab {
         Grab {
             device: device.to_owned(),
             hdr: false,
-            image: Ok(Image::new(width, height, bgra).expect("a whole image")),
+            image: Ok(marked(width, height, mark)),
         }
+    }
+
+    /// DXGI described `device` but couldn't give its image.
+    fn failed_grab(device: &str, hdr: bool) -> Grab {
+        Grab {
+            device: device.to_owned(),
+            hdr,
+            image: Err(Error::new(DXGI_ERROR_ACCESS_LOST, "lost")),
+        }
+    }
+
+    /// GDI's photo of a monitor, marked 9.
+    fn gdi_image(monitor: &Monitor) -> windows::core::Result<Image> {
+        let width = u32::try_from(monitor.rect.right - monitor.rect.left).expect("a width");
+        let height = u32::try_from(monitor.rect.bottom - monitor.rect.top).expect("a height");
+        Ok(marked(width, height, 9))
+    }
+
+    /// GDI for a test where DXGI photographs every monitor, so GDI must never be asked.
+    fn no_gdi(monitor: &Monitor) -> windows::core::Result<Image> {
+        panic!(
+            "GDI was asked for {}, which DXGI photographed",
+            monitor.device
+        )
     }
 
     fn rect(rect: RECT) -> Rect {
@@ -518,79 +655,207 @@ mod tests {
         }
     }
 
-    #[test]
-    fn every_monitor_gets_its_own_image_in_the_monitors_order() {
-        let monitors = [
-            monitor(r"\\.\DISPLAY1", RIGHT, 168),
-            monitor(r"\\.\DISPLAY2", LEFT, 120),
-        ];
-        let grabs = vec![
-            grab(r"\\.\DISPLAY2", 1920, 1080, 2),
-            grab(r"\\.\DISPLAY1", 3840, 2160, 1),
-        ];
-        let photos = one_per_monitor(&monitors, grabs).expect("a photo per monitor");
-        let seen: Vec<_> = photos
+    /// Each shot as the path that photographed it, the photo's place, mark and colors, and DXGI's failure, if any.
+    fn seen(shots: &[Shot]) -> Vec<(&'static str, Rect, u8, Colors, Option<String>)> {
+        shots
             .iter()
-            .map(|photo| (photo.rect, photo.scale.dpi(), photo.image.bgra()[0]))
-            .collect();
-        assert_eq!(seen, [(rect(RIGHT), 168, 1), (rect(LEFT), 120, 2)]);
+            .map(|shot| {
+                let (path, photo, dxgi) = match shot {
+                    Shot::Dxgi(photo) => ("DXGI", photo, None),
+                    Shot::Gdi { photo, dxgi } => ("GDI", photo, Some(dxgi.message())),
+                    Shot::Failed { .. } => panic!("no photo: {shot:?}"),
+                };
+                (path, photo.rect, photo.image.bgra()[0], photo.colors, dxgi)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_monitor_gets_its_own_dxgi_image_in_the_monitors_order() {
+        let grabs = vec![grab(DISPLAY2, 1920, 1080, 2), grab(DISPLAY1, 3840, 2160, 1)];
+        let shots = one_per_monitor(&owners_monitors(), Ok(grabs), no_gdi);
+        assert_eq!(
+            seen(&shots),
+            [
+                ("DXGI", rect(RIGHT), 1, Colors::Exact, None),
+                ("DXGI", rect(LEFT), 2, Colors::Exact, None),
+            ]
+        );
+        let Shot::Dxgi(photo) = &shots[1] else {
+            panic!("{:?}", shots[1]);
+        };
+        assert_eq!(photo.scale.dpi(), 120);
     }
 
     #[test]
     fn a_monitor_with_hdr_on_gets_approximate_colors() {
-        let monitors = [
-            monitor(r"\\.\DISPLAY1", RIGHT, 168),
-            monitor(r"\\.\DISPLAY2", LEFT, 120),
-        ];
-        let mut hdr_on = grab(r"\\.\DISPLAY2", 1920, 1080, 2);
+        let mut hdr_on = grab(DISPLAY2, 1920, 1080, 2);
         hdr_on.hdr = true;
-        let grabs = vec![grab(r"\\.\DISPLAY1", 3840, 2160, 1), hdr_on];
-        let photos = one_per_monitor(&monitors, grabs).expect("a photo per monitor");
-        let colors: Vec<_> = photos.iter().map(|photo| photo.colors).collect();
+        let grabs = vec![grab(DISPLAY1, 3840, 2160, 1), hdr_on];
+        let shots = one_per_monitor(&owners_monitors(), Ok(grabs), no_gdi);
+        let colors: Vec<_> = seen(&shots).into_iter().map(|shot| shot.3).collect();
         assert_eq!(colors, [Colors::Exact, Colors::Approximate]);
     }
 
     #[test]
     fn an_output_without_a_monitor_is_left_out() {
-        let monitors = [monitor(r"\\.\DISPLAY1", RIGHT, 168)];
+        let monitors = [monitor(DISPLAY1, RIGHT, 168)];
         let grabs = vec![
-            grab(r"\\.\DISPLAY1", 3840, 2160, 1),
+            grab(DISPLAY1, 3840, 2160, 1),
             grab(r"\\.\DISPLAY7", 1920, 1080, 7),
         ];
-        let photos = one_per_monitor(&monitors, grabs).expect("a photo per monitor");
-        assert_eq!(photos.len(), 1);
-        assert_eq!(photos[0].image.bgra()[0], 1);
+        let shots = one_per_monitor(&monitors, Ok(grabs), no_gdi);
+        assert_eq!(
+            seen(&shots),
+            [("DXGI", rect(RIGHT), 1, Colors::Exact, None)]
+        );
     }
 
     #[test]
-    fn a_monitor_without_an_image_fails_them_all() {
+    fn gdi_photographs_only_the_monitor_dxgi_failed() {
+        let grabs = vec![grab(DISPLAY1, 3840, 2160, 1), failed_grab(DISPLAY2, false)];
+        let mut asked = Vec::new();
+        let shots = one_per_monitor(&owners_monitors(), Ok(grabs), |monitor| {
+            asked.push(monitor.device.clone());
+            gdi_image(monitor)
+        });
+        assert_eq!(asked, [DISPLAY2]);
+        assert_eq!(
+            seen(&shots),
+            [
+                ("DXGI", rect(RIGHT), 1, Colors::Exact, None),
+                (
+                    "GDI",
+                    rect(LEFT),
+                    9,
+                    Colors::Exact,
+                    Some(String::from("lost"))
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_monitor_dxgi_has_no_image_of_goes_to_gdi() {
+        let grabs = vec![grab(DISPLAY1, 3840, 2160, 1)];
+        let shots = one_per_monitor(&owners_monitors(), Ok(grabs), gdi_image);
+        let paths: Vec<_> = seen(&shots).into_iter().map(|shot| shot.0).collect();
+        assert_eq!(paths, ["DXGI", "GDI"]);
+    }
+
+    #[test]
+    fn a_dxgi_image_of_another_size_goes_to_gdi() {
+        let grabs = vec![grab(DISPLAY1, 1920, 1080, 1), grab(DISPLAY2, 1920, 1080, 2)];
+        let shots = one_per_monitor(&owners_monitors(), Ok(grabs), gdi_image);
+        let first = seen(&shots).remove(0);
+        assert_eq!((first.0, first.2), ("GDI", 9));
+        let dxgi = first.4.expect("DXGI's failure is kept");
+        assert!(dxgi.contains("1920x1080"), "{dxgi}");
+    }
+
+    #[test]
+    fn when_dxgi_fails_as_a_whole_gdi_photographs_every_monitor() {
+        let mut asked = Vec::new();
+        let shots = one_per_monitor(
+            &owners_monitors(),
+            Err(Error::new(E_FAIL, "no DXGI factory")),
+            |monitor| {
+                asked.push(monitor.device.clone());
+                gdi_image(monitor)
+            },
+        );
+        assert_eq!(asked, [DISPLAY1, DISPLAY2]);
+        let failures: Vec<_> = seen(&shots).into_iter().map(|shot| shot.4).collect();
+        let failure = Some(String::from("no DXGI factory"));
+        assert_eq!(failures, [failure.clone(), failure]);
+    }
+
+    #[test]
+    fn a_gdi_photo_is_approximate_only_where_dxgi_saw_hdr_on() {
+        // GDI's photo is never the exact HDR path. Whether HDR is on comes from DXGI's description of the monitor, so
+        // a monitor DXGI never described counts as HDR off.
         let monitors = [
-            monitor(r"\\.\DISPLAY1", RIGHT, 168),
-            monitor(r"\\.\DISPLAY2", LEFT, 120),
+            monitor(DISPLAY1, RIGHT, 168),
+            monitor(DISPLAY2, LEFT, 120),
+            monitor(DISPLAY3, BELOW, 96),
         ];
-        let grabs = vec![grab(r"\\.\DISPLAY1", 3840, 2160, 1)];
-        let error = one_per_monitor(&monitors, grabs).expect_err("no frozen screen");
-        assert!(error.message().contains(r"\\.\DISPLAY2"), "{error}");
+        let grabs = vec![failed_grab(DISPLAY1, false), failed_grab(DISPLAY2, true)];
+        let shots = one_per_monitor(&monitors, Ok(grabs), gdi_image);
+        let marks: Vec<_> = seen(&shots)
+            .into_iter()
+            .map(|shot| (shot.0, shot.3))
+            .collect();
+        assert_eq!(
+            marks,
+            [
+                ("GDI", Colors::Exact),
+                ("GDI", Colors::Approximate),
+                ("GDI", Colors::Exact),
+            ]
+        );
     }
 
     #[test]
-    fn an_image_of_another_size_fails_them_all() {
-        let monitors = [monitor(r"\\.\DISPLAY1", RIGHT, 168)];
-        let grabs = vec![grab(r"\\.\DISPLAY1", 1920, 1080, 1)];
-        let error = one_per_monitor(&monitors, grabs).expect_err("no frozen screen");
-        assert!(error.message().contains("1920x1080"), "{error}");
+    fn a_monitor_neither_path_photographs_keeps_both_causes_and_the_others_keep_their_photos() {
+        // All or nothing is the session core's rule: the capture still photographs every other monitor.
+        let grabs = vec![failed_grab(DISPLAY1, false), grab(DISPLAY2, 1920, 1080, 2)];
+        let shots = one_per_monitor(&owners_monitors(), Ok(grabs), |_| {
+            Err(Error::new(E_FAIL, "BitBlt failed"))
+        });
+        let Shot::Failed { dxgi, gdi } = &shots[0] else {
+            panic!("{:?}", shots[0]);
+        };
+        assert_eq!(
+            (dxgi.code(), gdi.message()),
+            (DXGI_ERROR_ACCESS_LOST, String::from("BitBlt failed"))
+        );
+        assert_eq!(
+            seen(&shots[1..]),
+            [("DXGI", rect(LEFT), 2, Colors::Exact, None)]
+        );
     }
 
     #[test]
-    fn a_failed_image_fails_them_all_and_keeps_its_cause() {
-        let monitors = [monitor(r"\\.\DISPLAY1", RIGHT, 168)];
-        let grabs = vec![Grab {
-            device: r"\\.\DISPLAY1".to_owned(),
-            hdr: false,
-            image: Err(Error::new(DXGI_ERROR_ACCESS_LOST, "lost")),
-        }];
-        let error = one_per_monitor(&monitors, grabs).expect_err("no frozen screen");
-        assert_eq!(error.code(), DXGI_ERROR_ACCESS_LOST);
-        assert!(error.message().contains(r"\\.\DISPLAY1"), "{error}");
+    #[ignore = "photographs the real screen, so it runs on the owner's computer, never in CI"]
+    fn gdi_photographs_every_real_monitor_as_dxgi_does() {
+        let monitors = monitors().expect("the monitors");
+        let grabs = grab_every_output().expect("DXGI");
+        for monitor in &monitors {
+            let gdi = gdi::image(monitor.rect).expect("GDI's photo");
+            let dxgi = grabs
+                .iter()
+                .find(|grab| grab.device == monitor.device)
+                .and_then(|grab| grab.image.as_ref().ok())
+                .expect("DXGI's photo");
+            assert_eq!(
+                (gdi.width(), gdi.height()),
+                (dxgi.width(), dxgi.height()),
+                "{}",
+                monitor.device
+            );
+            // The two photos are taken a moment apart, so whatever animates on screen (a clock, a spinner) may differ.
+            let pixels = gdi.bgra().len() / 4;
+            let differing = gdi
+                .bgra()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(dxgi.bgra().as_chunks::<4>().0)
+                .filter(|(gdi, dxgi)| gdi != dxgi)
+                .count();
+            println!("{}: {differing} of {pixels} pixels differ", monitor.device);
+            assert!(differing * 100 < pixels, "{}", monitor.device);
+        }
+    }
+
+    #[test]
+    fn a_gdi_image_of_another_size_counts_as_gdi_failing() {
+        let grabs = vec![failed_grab(DISPLAY1, false)];
+        let monitors = [monitor(DISPLAY1, RIGHT, 168)];
+        let shots = one_per_monitor(&monitors, Ok(grabs), |_| Ok(marked(1920, 1080, 9)));
+        let Shot::Failed { gdi, .. } = &shots[0] else {
+            panic!("{:?}", shots[0]);
+        };
+        assert!(gdi.message().contains("1920x1080"), "{gdi}");
     }
 }

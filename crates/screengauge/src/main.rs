@@ -12,6 +12,7 @@ mod event;
 mod frozen_screen;
 mod global_shortcut;
 mod log;
+mod notification;
 mod resident;
 mod settings_file;
 mod single_instance;
@@ -26,7 +27,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            // Until Windows notifications exist (WPC-303), a failed start reaches only the debugger output.
+            // A failed start reaches only the debugger output: without the tray icon, no Windows notification can show.
             log::failure("stopped", &e);
             ExitCode::FAILURE
         }

@@ -20,8 +20,9 @@ use crate::settings::{Options, Remembered};
 /// What the session opens with.
 #[derive(Debug, Clone)]
 pub struct Opening {
-    /// The frozen screen: every monitor's photo, in the order the Windows layer shows them.
-    pub frozen_screen: Vec<Photo>,
+    /// The frozen screen: every monitor's photo, in the order the Windows layer shows them, or `None` for a monitor
+    /// that neither capture path could photograph.
+    pub frozen_screen: Vec<Option<Photo>>,
     /// The options in Settings as the tools open; changing Settings meanwhile doesn't reach this session.
     pub options: Options,
     pub remembered: Remembered,
@@ -32,6 +33,8 @@ pub struct Opening {
 pub enum Refused {
     /// No photo at all: there is always a monitor.
     NoMonitor,
+    /// The monitor at this index has no photo. All or nothing: the tools never open on part of the screen.
+    NotCaptured(usize),
     /// The photo of the monitor at this index isn't the monitor's size.
     PhotoSize(usize),
 }
@@ -40,6 +43,7 @@ impl fmt::Display for Refused {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Refused::NoMonitor => write!(f, "the frozen screen has no monitor"),
+            Refused::NotCaptured(monitor) => write!(f, "monitor {monitor} has no photo"),
             Refused::PhotoSize(monitor) => {
                 write!(f, "the photo of monitor {monitor} isn't the monitor's size")
             }
@@ -66,6 +70,11 @@ impl Session {
         if frozen_screen.is_empty() {
             return Err(Refused::NoMonitor);
         }
+        let frozen_screen = frozen_screen
+            .into_iter()
+            .enumerate()
+            .map(|(monitor, photo)| photo.ok_or(Refused::NotCaptured(monitor)))
+            .collect::<Result<Vec<Photo>, Refused>>()?;
         if let Some(monitor) = frozen_screen.iter().position(|photo| {
             (photo.image.width(), photo.image.height()) != (photo.rect.width, photo.rect.height)
         }) {

@@ -41,10 +41,10 @@ fn owners_monitors() -> Vec<Photo> {
     vec![photo(AOC, 168, 1), photo(ARZOPA, 120, 2)]
 }
 
-/// Opening with `frozen_screen`, the default options and nothing remembered yet.
+/// Opening with `frozen_screen`, every monitor's photo taken, the default options and nothing remembered yet.
 fn opening(frozen_screen: Vec<Photo>) -> Opening {
     Opening {
-        frozen_screen,
+        frozen_screen: frozen_screen.into_iter().map(Some).collect(),
         options: Options::default(),
         remembered: Remembered::default(),
     }
@@ -95,6 +95,27 @@ fn opening_refuses_a_frozen_screen_without_monitors() {
         Session::open(opening(Vec::new())).err(),
         Some(Refused::NoMonitor)
     );
+}
+
+#[test]
+fn a_monitor_left_without_a_photo_keeps_the_tools_closed() {
+    // All or nothing (v1 spec WPC-296, Frozen screen): one monitor that neither capture path could photograph is
+    // enough, whichever it is, even when the other monitor's photo came through.
+    let cases = [
+        (vec![Some(photo(AOC, 168, 1)), None], 1),
+        (vec![None, Some(photo(ARZOPA, 120, 2))], 0),
+        (vec![None, None], 0),
+    ];
+    for (frozen_screen, monitor) in cases {
+        let opening = Opening {
+            frozen_screen,
+            ..opening(Vec::new())
+        };
+        assert_eq!(
+            Session::open(opening).err(),
+            Some(Refused::NotCaptured(monitor))
+        );
+    }
 }
 
 #[test]

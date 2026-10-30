@@ -21,6 +21,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{Error, PCWSTR, w};
 
 use crate::frozen_screen::{self, FrozenScreen};
+use crate::notification::{self, Notification};
 use crate::settings_file::SettingsFile;
 use crate::win32::{low_word, struct_size};
 use crate::{capture, event, global_shortcut, log, tray};
@@ -103,6 +104,8 @@ pub fn run(file: Option<SettingsFile>, stored: Stored) -> windows::core::Result<
         log::failure(&format!("global shortcut: registering {shortcut}"), &e);
     }
     post_call(hwnd);
+    // After the call, so a notification from startup, such as the damaged settings file, never lands in its photo.
+    notification::post_show_waiting(hwnd);
 
     let mut message = MSG::default();
     loop {
@@ -135,6 +138,7 @@ extern "system" fn window_proc(
             if tray::is_call(lparam) {
                 post_call(hwnd);
             }
+            notification::on_tray_event(low_word(lparam));
             // Provisional exit, until the tray icon's menu exists (WPC-325).
             if low_word(lparam) == WM_CONTEXTMENU {
                 // SAFETY: our own window, on the thread that created it.
@@ -157,6 +161,10 @@ extern "system" fn window_proc(
             carry_out(effects);
             LRESULT(0)
         }
+        notification::SHOW_WAITING => {
+            notification::show_waiting(hwnd);
+            LRESULT(0)
+        }
         WM_DESTROY => {
             close();
             frozen_screen::release_factory();
@@ -171,8 +179,10 @@ extern "system" fn window_proc(
             LRESULT(0)
         }
         _ if message == TASKBAR_CREATED.load(Ordering::Relaxed) => {
-            if let Err(e) = tray::add(hwnd) {
-                log::failure("tray icon: adding it when the taskbar was created", &e);
+            match tray::add(hwnd) {
+                // The notifications waiting for the icon can show now.
+                Ok(()) => notification::show_waiting(hwnd),
+                Err(e) => log::failure("tray icon: adding it when the taskbar was created", &e),
             }
             LRESULT(0)
         }
@@ -196,8 +206,12 @@ fn on_call(resident: HWND, input: Input) {
         Some(effects) => carry_out(effects),
         None => match open(resident) {
             Ok(frozen) => FROZEN_SCREEN.set(Some(frozen)),
-            // Until Windows notifications exist (WPC-303), a failed call reaches only the debugger output.
-            Err(e) => log::failure("frozen screen: opening it", &e),
+            // Whatever kept the tools closed, the user hears of it, never a failure in silence (v1 spec WPC-296,
+            // Frozen screen). Most often it is a monitor neither capture path could photograph.
+            Err(e) => {
+                log::failure("frozen screen: opening it", &e);
+                notification::show(resident, Notification::CaptureFailed);
+            }
         },
     }
 }
