@@ -22,7 +22,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             // Until Windows notifications exist (WPC-303), a failed start reaches only the debugger output.
-            log::line(&format!("stopped: {e}"));
+            log::failure("stopped", &e);
             ExitCode::FAILURE
         }
     }

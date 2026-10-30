@@ -1,4 +1,4 @@
-//! The core makes no Windows call (spec, Modules): no Windows bindings crate may enter its dependency
+//! The core makes no Windows call (v1 spec WPC-296, Modules): no Windows bindings crate may enter its dependency
 //! tree, directly or through another crate, on any target. Dev-dependencies don't count: they never ship.
 
 use std::process::Command;

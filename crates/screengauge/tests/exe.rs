@@ -1,4 +1,4 @@
-//! What the built ScreenGauge.exe must be (spec, Platform): x64, Per-Monitor V2 from its embedded manifest,
+//! What the built ScreenGauge.exe must be (v1 spec WPC-296, Platform): x64, Per-Monitor V2 from its embedded manifest,
 //! and importing only DLLs that come with Windows, so users install nothing but ScreenGauge.
 
 use std::path::{Path, PathBuf};
@@ -91,9 +91,13 @@ fn embedded_manifest() -> String {
     .expect("LoadLibraryExW");
     // SAFETY: MAKEINTRESOURCE(1), the process manifest's ID, in a module that stays loaded until FreeLibrary.
     let manifest = unsafe {
-        let resource = FindResourceW(Some(module), PCWSTR(1 as _), RT_MANIFEST);
+        let resource = FindResourceW(
+            Some(module),
+            PCWSTR(std::ptr::without_provenance(1)),
+            RT_MANIFEST,
+        );
         assert!(!resource.is_invalid(), "no RT_MANIFEST resource with ID 1");
-        let size = SizeofResource(Some(module), resource) as usize;
+        let size = widen(SizeofResource(Some(module), resource));
         let data = LockResource(LoadResource(Some(module), resource).expect("LoadResource"));
         assert!(!data.is_null(), "LockResource returned null");
         String::from_utf8_lossy(std::slice::from_raw_parts(data.cast::<u8>(), size)).into_owned()
@@ -121,7 +125,7 @@ fn imported_dlls(image: &[u8]) -> Vec<String> {
                 let size = u32_at(image, section + 8).max(u32_at(image, section + 16));
                 (start..start + size)
                     .contains(&rva)
-                    .then(|| (rva - start + u32_at(image, section + 20)) as usize)
+                    .then(|| widen(rva - start + u32_at(image, section + 20)))
             })
             .unwrap_or_else(|| panic!("RVA {rva:#x} is in no section"))
     };
@@ -158,9 +162,14 @@ fn imported_dlls(image: &[u8]) -> Vec<String> {
 
 /// The offset of the "PE\0\0" signature, which the DOS header points to at 0x3C.
 fn pe_header(image: &[u8]) -> usize {
-    let offset = u32_at(image, 0x3C) as usize;
+    let offset = widen(u32_at(image, 0x3C));
     assert_eq!(&image[offset..offset + 4], b"PE\0\0", "not a PE image");
     offset
+}
+
+/// PE fields are u32; a usize holds every u32 on x64.
+fn widen(value: u32) -> usize {
+    usize::try_from(value).expect("a u32 fits in a usize on x64")
 }
 
 fn u16_at(image: &[u8], offset: usize) -> u16 {

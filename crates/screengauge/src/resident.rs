@@ -18,7 +18,8 @@ use crate::{log, tray};
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.Resident");
 
-/// Explorer broadcasts this message when it restarts and has dropped every tray icon.
+/// Explorer broadcasts this message when the taskbar is created: at sign-in, and when Explorer restarts
+/// and has dropped every tray icon.
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 
 /// Runs until the user exits from the tray icon.
@@ -60,7 +61,11 @@ pub fn run() -> windows::core::Result<()> {
             None,
         )
     }?;
-    tray::add(hwnd)?;
+    // At sign-in the taskbar may not exist yet; the icon then comes with TaskbarCreated, so a failure
+    // here leaves ScreenGauge running.
+    if let Err(e) = tray::add(hwnd) {
+        log::failure("tray icon: adding it at startup", &e);
+    }
 
     let mut message = MSG::default();
     loop {
@@ -92,14 +97,14 @@ extern "system" fn window_proc(
             if low_word(lparam) == WM_CONTEXTMENU {
                 // SAFETY: our own window, on the thread that created it.
                 if let Err(e) = unsafe { DestroyWindow(hwnd) } {
-                    log::line(&format!("exit: DestroyWindow: {e}"));
+                    log::failure("exit: DestroyWindow", &e);
                 }
             }
             LRESULT(0)
         }
         WM_DESTROY => {
             if let Err(e) = tray::remove(hwnd) {
-                log::line(&format!("exit: removing the tray icon: {e}"));
+                log::failure("exit: removing the tray icon", &e);
             }
             // SAFETY: ends this thread's message loop.
             unsafe { PostQuitMessage(0) };
@@ -107,9 +112,7 @@ extern "system" fn window_proc(
         }
         _ if message == TASKBAR_CREATED.load(Ordering::Relaxed) => {
             if let Err(e) = tray::add(hwnd) {
-                log::line(&format!(
-                    "tray icon: adding it again after Explorer restarted: {e}"
-                ));
+                log::failure("tray icon: adding it when the taskbar was created", &e);
             }
             LRESULT(0)
         }
