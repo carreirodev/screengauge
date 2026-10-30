@@ -50,8 +50,9 @@ const CLASS_NAME: PCWSTR = w!("ScreenGauge.FrozenScreen");
 /// window procedures.
 pub const EFFECTS_READY: u32 = WM_APP + 2;
 
-/// What a frozen screen window posts to itself when Windows says the monitors changed.
-const MONITORS_CHANGED: u32 = WM_APP + 4;
+/// What a frozen screen window posts to itself when Windows says the monitors changed. WM_APP + 4 is taken by the
+/// notifications waiting to show (`notification::SHOW_WAITING`).
+const MONITORS_CHANGED: u32 = WM_APP + 5;
 
 /// Registered once at startup. The class has no cursor: the session core's scene names it.
 pub fn register_class(instance: HINSTANCE) -> windows::core::Result<()> {
