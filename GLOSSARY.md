@@ -92,6 +92,10 @@ _Avoid_: snapshot, screenshot (the Snip's image is a different thing), still
 A short message ScreenGauge draws on screen itself, next to the cursor or in the magnified view, such as Copied, No content found or Approximate color.
 _Avoid_: toast, popup, alert, notification (a Windows notification is the system's message in the corner of the screen, a different thing)
 
+**Windows notification**:
+The system's message in the corner of the screen, which ScreenGauge uses for what goes wrong outside the tools, such as a screen it couldn't capture or a damaged settings file.
+_Avoid_: toast, balloon (the Windows mechanism behind it, ADR 0003), notice (ScreenGauge's own message, a different thing)
+
 ## Tools
 
 **Dimensions**:
