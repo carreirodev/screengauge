@@ -1,14 +1,17 @@
 //! The frozen screen on screen: one window over each monitor, at its exact place and size in physical pixels, drawing
 //! the session core's scene. Each window draws its monitor's photo pixel for pixel with Direct2D, shows the cursor the
 //! scene names, and hands the core what the user does over it and what Windows tells it: another program came to the
-//! front, or the monitors changed. The windows share the session; destroying them when the tools close, by dropping
-//! [`FrozenScreen`], drops the session and erases the photos with it.
+//! front, or the monitors changed. Over the photo of the monitor it is on, each window draws what Dimensions measures
+//! right now, and is drawn again whenever that changes. The windows share the session; destroying them when the tools
+//! close, by dropping [`FrozenScreen`], drops the session and erases the photos with it.
 
-use std::cell::RefCell;
+mod overlay;
+
+use std::cell::{OnceCell, RefCell};
 use std::ffi::c_void;
 use std::rc::Rc;
 
-use screengauge_core::session::{Cursor, Effect, Event, Image, Input, Rect, Session};
+use screengauge_core::session::{Cursor, Effect, Event, Input, Measurement, Photo, Rect, Session};
 use windows::Win32::Foundation::{
     D2DERR_RECREATE_TARGET, E_FAIL, ERROR_SUCCESS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT,
     POINT, SetLastError, WPARAM,
@@ -42,6 +45,7 @@ use windows::core::{Error, PCWSTR, w};
 
 use crate::win32::{low_word, struct_size};
 use crate::{event, foreground, log};
+use overlay::Overlay;
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.FrozenScreen");
 
@@ -90,10 +94,12 @@ fn factory() -> windows::core::Result<ID2D1Factory> {
     })
 }
 
-/// Releases the kept factory, and the graphics device with it, as ScreenGauge exits. Left to the end of the process,
-/// the release happened while Windows was already taking it down: the exit took 3 seconds and failed.
+/// Releases the kept factory, and the graphics device with it, as ScreenGauge exits, and DirectWrite's factory too.
+/// Left to the end of the process, the release happened while Windows was already taking it down: the exit took 3
+/// seconds and failed.
 pub fn release_factory() {
     drop(FACTORY.with_borrow_mut(Option::take));
+    overlay::release_fonts();
 }
 
 /// The frozen screen's windows, one per monitor, and the session they show, while the tools are open.
@@ -112,6 +118,9 @@ struct SharedSession {
     core: RefCell<Session>,
     /// What the core returned while handling the windows' events, for the resident window to carry out.
     effects: RefCell<Vec<Effect>>,
+    /// The windows, in the monitors' order, so one can be drawn again when what it shows changes. Set once, when they
+    /// are all made; an event that comes before that changes nothing a window has drawn yet.
+    windows: OnceCell<Vec<HWND>>,
     /// Receives [`EFFECTS_READY`].
     resident: HWND,
 }
@@ -135,6 +144,7 @@ impl FrozenScreen {
             session: Rc::new(SharedSession {
                 core: RefCell::new(session),
                 effects: RefCell::new(Vec::new()),
+                windows: OnceCell::new(),
                 resident,
             }),
             watch: None,
@@ -142,6 +152,10 @@ impl FrozenScreen {
         for (monitor, &rect) in rects.iter().enumerate() {
             let window = create_window(instance, monitor, rect, &factory, &frozen.session)?;
             frozen.windows.push(window);
+        }
+        if frozen.session.windows.set(frozen.windows.clone()).is_err() {
+            // Can't happen: this is the only place that sets it, once per session.
+            log::failure("frozen screen", &"the windows were registered twice");
         }
         for &window in &frozen.windows {
             // SAFETY: our own window. ShowWindow returns whether it was visible before, not an error.
@@ -237,8 +251,11 @@ impl Drop for FrozenScreen {
 }
 
 impl SharedSession {
+    /// Hands `event` to the session core, and draws again the windows whose measurement it changed. Here rather than in
+    /// `input`, so an event that comes from the resident window redraws too.
     fn handle(&self, event: Event) -> Vec<Effect> {
-        match self.core.try_borrow_mut() {
+        let before = self.live();
+        let effects = match self.core.try_borrow_mut() {
             Ok(mut session) => session.handle(event),
             // Can't happen: the core calls no Windows function, so no event arrives while it handles one.
             Err(_) => {
@@ -247,6 +264,52 @@ impl SharedSession {
                     &"an event came while the session core was handling another, and was dropped",
                 );
                 Vec::new()
+            }
+        };
+        let after = self.live();
+        // Moving along the same row often measures the same span: nothing to draw again.
+        if before != after {
+            self.redraw(before.as_ref(), after.as_ref());
+        }
+        effects
+    }
+
+    /// What Dimensions measures right now, as a copy to compare with a later one. `None` while no tool measures.
+    fn live(&self) -> Option<Measurement> {
+        match self.core.try_borrow() {
+            Ok(session) => session.scene().live.cloned(),
+            // Can't happen: this is read outside the moment the core handles an event.
+            Err(_) => {
+                log::failure(
+                    "frozen screen",
+                    &"the measurement was asked for while an event was handled",
+                );
+                None
+            }
+        }
+    }
+
+    /// Marks for drawing the windows the measurement was on and is on now, which differ when it moved to another
+    /// monitor: the one it left must lose its line.
+    fn redraw(&self, before: Option<&Measurement>, after: Option<&Measurement>) {
+        let Some(windows) = self.windows.get() else {
+            return;
+        };
+        for monitor in monitors_to_draw_again(before, after) {
+            let Some(&window) = windows.get(monitor) else {
+                // Can't happen: the core measures on a monitor of the frozen screen.
+                log::failure(
+                    "frozen screen",
+                    &"a measurement is on a monitor with no window",
+                );
+                continue;
+            };
+            // SAFETY: our own window. WM_ERASEBKGND is handled, so nothing is erased first.
+            if !unsafe { InvalidateRect(Some(window), None, false) }.as_bool() {
+                log::failure(
+                    "frozen screen: drawing a measurement",
+                    &"InvalidateRect returned FALSE",
+                );
             }
         }
     }
@@ -300,6 +363,18 @@ impl SharedSession {
     }
 }
 
+/// The monitors whose windows show something different once the measurement goes from `before` to `after`: the one it
+/// was on, which must lose its line, and the one it is on now. One monitor, once, when they are the same.
+fn monitors_to_draw_again(before: Option<&Measurement>, after: Option<&Measurement>) -> Vec<usize> {
+    let before = before.map(|measurement| measurement.monitor);
+    let after = after.map(|measurement| measurement.monitor);
+    let mut monitors: Vec<usize> = before.into_iter().collect();
+    if after != before {
+        monitors.extend(after);
+    }
+    monitors
+}
+
 /// Whether `point`, in physical pixels of the virtual screen, is in `rect`.
 fn contains(rect: Rect, point: POINT) -> bool {
     let (x, y) = (i64::from(point.x), i64::from(point.y));
@@ -326,10 +401,12 @@ struct Window {
     drawing: RefCell<Option<Drawing>>,
 }
 
-/// The photo on the graphics card, ready to draw.
+/// The photo on the graphics card, ready to draw, with what draws the measurement over it. They belong to the render
+/// target, so they are made again together when it is lost.
 struct Drawing {
     target: ID2D1HwndRenderTarget,
     bitmap: ID2D1Bitmap,
+    overlay: Overlay,
 }
 
 /// What CreateWindowExW hands to WM_NCCREATE. Should WM_NCCREATE never come, the window state stays here and drops
@@ -512,14 +589,18 @@ fn paint(hwnd: HWND, window: &Window) {
     // SAFETY: WM_PAINT on our own window, ended below. Direct2D draws without the device context it returns.
     unsafe { BeginPaint(hwnd, &mut paint) };
     if let Err(e) = draw(hwnd, window) {
-        log::failure("frozen screen: drawing the photo", &e);
+        log::failure("frozen screen: drawing a window", &e);
     }
     // SAFETY: ends the BeginPaint above. EndPaint always returns TRUE.
     let _ = unsafe { EndPaint(hwnd, &paint) };
 }
 
-/// Draws the window's part of the scene: its monitor's photo, with nothing over it yet.
+/// Draws the window's part of the scene: its monitor's photo, and over it what Dimensions measures when that is on this
+/// monitor.
 fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
+    // A copy, taken before drawing so the core isn't borrowed across Direct2D calls, which can wait on other threads
+    // while a message such as the monitors changing arrives.
+    let live = window.live()?;
     let mut drawing = window
         .drawing
         .try_borrow_mut()
@@ -540,11 +621,17 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
             None,
         );
     }
+    // A label that can't be laid out leaves the photo and the line as they are; the failure is returned once the frame
+    // is finished.
+    let overlaid = match &live {
+        Some(measurement) => ready.overlay.draw(&ready.target, measurement),
+        None => Ok(()),
+    };
     // SAFETY: ends the BeginDraw above.
     match unsafe { ready.target.EndDraw(None, None) } {
         Ok(()) => {
             *drawing = Some(ready);
-            Ok(())
+            overlaid
         }
         // The graphics device was lost, as after a driver update: the next paint makes everything again.
         Err(e) if e.code() == D2DERR_RECREATE_TARGET => {
@@ -562,11 +649,14 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
 }
 
 impl Drawing {
-    /// Puts the window's photo, from the scene, on the graphics card.
+    /// Puts the window's photo, from the scene, on the graphics card, and makes what draws the measurement over it.
     fn new(hwnd: HWND, window: &Window) -> windows::core::Result<Drawing> {
-        let size = window.with_photo(|image| D2D_SIZE_U {
-            width: image.width(),
-            height: image.height(),
+        let (size, rect, scale) = window.with_photo(|photo| {
+            let size = D2D_SIZE_U {
+                width: photo.image.width(),
+                height: photo.image.height(),
+            };
+            (size, photo.rect, photo.scale)
         })?;
         let pitch = size
             .width
@@ -588,7 +678,9 @@ impl Drawing {
         let window_properties = D2D1_HWND_RENDER_TARGET_PROPERTIES {
             hwnd,
             pixelSize: size,
-            // The photo never moves, so there is no frame to wait for.
+            // Kept IMMEDIATELY now that the measurement moves with the mouse: each frame must not wait for the next
+            // refresh, or the message loop, and the mouse moves queued behind it, would slow to the display's pace.
+            // A window is composed by the desktop, which shows whole frames, so presenting at once doesn't tear.
             presentOptions: D2D1_PRESENT_OPTIONS_IMMEDIATELY,
         };
         // SAFETY: both property structs outlive the call.
@@ -602,24 +694,29 @@ impl Drawing {
             dpiX: 96.0,
             dpiY: 96.0,
         };
-        let bitmap = window.with_photo(|image| {
+        let bitmap = window.with_photo(|photo| {
             // SAFETY: an Image holds exactly `height` rows of `pitch` bytes, and outlives the call, which copies them.
             unsafe {
                 target.CreateBitmap(
                     size,
-                    Some(image.bgra().as_ptr().cast()),
+                    Some(photo.image.bgra().as_ptr().cast()),
                     pitch,
                     &bitmap_properties,
                 )
             }
         })??;
-        Ok(Drawing { target, bitmap })
+        let overlay = Overlay::new(&target, &overlay::fonts()?, rect, scale)?;
+        Ok(Drawing {
+            target,
+            bitmap,
+            overlay,
+        })
     }
 }
 
 impl Window {
     /// Runs `f` with the window's photo, borrowed from the session only meanwhile.
-    fn with_photo<R>(&self, f: impl FnOnce(&Image) -> R) -> windows::core::Result<R> {
+    fn with_photo<R>(&self, f: impl FnOnce(&Photo) -> R) -> windows::core::Result<R> {
         let session = self
             .session
             .core
@@ -630,6 +727,56 @@ impl Window {
             .frozen_screen
             .get(self.monitor)
             .ok_or_else(|| Error::new(E_FAIL, "the scene has no photo for this window"))?;
-        Ok(f(&photo.image))
+        Ok(f(photo))
+    }
+
+    /// A copy of the measurement to draw over this window's photo: `None` while no tool measures, and when it is on
+    /// another monitor. A copy, so the session isn't borrowed while drawing.
+    fn live(&self) -> windows::core::Result<Option<Measurement>> {
+        let session = self
+            .session
+            .core
+            .try_borrow()
+            .map_err(|_| Error::new(E_FAIL, "drawing started while an event was handled"))?;
+        Ok(session
+            .scene()
+            .live
+            .filter(|measurement| measurement.monitor == self.monitor)
+            .cloned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn on(monitor: usize) -> Measurement {
+        Measurement {
+            monitor,
+            horizontal: None,
+            vertical: None,
+            label: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_measurement_that_appears_or_goes_redraws_its_monitor() {
+        assert_eq!(monitors_to_draw_again(None, Some(&on(1))), [1]);
+        assert_eq!(monitors_to_draw_again(Some(&on(1)), None), [1]);
+    }
+
+    #[test]
+    fn a_measurement_that_changes_on_one_monitor_redraws_it_once() {
+        assert_eq!(monitors_to_draw_again(Some(&on(0)), Some(&on(0))), [0]);
+    }
+
+    #[test]
+    fn a_measurement_that_moves_to_another_monitor_redraws_both() {
+        assert_eq!(monitors_to_draw_again(Some(&on(0)), Some(&on(2))), [0, 2]);
+    }
+
+    #[test]
+    fn no_measurement_before_or_after_redraws_nothing() {
+        assert_eq!(monitors_to_draw_again(None, None), Vec::<usize>::new());
     }
 }

@@ -25,6 +25,7 @@ features = [
     "Win32_Graphics_Direct2D_Common",
     "Win32_Graphics_Direct3D",
     "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_DirectWrite",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
@@ -43,7 +44,7 @@ features = [
     "Win32_UI_WindowsAndMessaging",
 ]
 
-# Only the exe tests read the version resource back.
+# Only the exe tests read the version resource back, and the overlay tests render on a WIC bitmap.
 [dev-dependencies.windows]
 workspace = true
-features = ["Win32_Storage_FileSystem"]
+features = ["Win32_Graphics_Imaging", "Win32_Storage_FileSystem"]
