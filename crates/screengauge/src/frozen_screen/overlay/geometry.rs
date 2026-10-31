@@ -23,6 +23,12 @@ const PAD_Y: u32 = 5;
 /// The pill's corner radius, and how far its shadow falls.
 pub const RADIUS: u32 = 7;
 pub const SHADOW_DROP: u32 = 2;
+/// Between the physical and the logical part of a label: a gap, a bar, and a gap again. The bar is this wide and tall,
+/// and its bottom side hangs this far below the text's baseline (CSS `vertical-align: -1px` on an empty box).
+const BAR_GAP: u32 = 7;
+const BAR_WIDTH: u32 = 1;
+const BAR_HEIGHT: u32 = 11;
+const BAR_DROP: u32 = 1;
 
 /// `logical` pixels on a monitor of `dpi` (96 is 100%), in whole physical pixels, halves up.
 pub fn scaled(logical: u32, dpi: u32) -> i32 {
@@ -188,6 +194,44 @@ pub fn pill_size(text_width: i32, dpi: u32) -> Size {
     Size {
         width: text_width + 2 * scaled(PAD_X, dpi),
         height: scaled(TEXT, dpi) + 2 * scaled(PAD_Y, dpi),
+    }
+}
+
+/// Where the parts of a label that has a logical part go along its text, in pixels from the text's left side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Columns {
+    /// The bar's left side.
+    pub bar: i32,
+    /// The logical text's left side.
+    pub logical: i32,
+    /// The whole text: the physical part, the bar between its two gaps, and the logical part. This is what
+    /// `pill_size` takes for such a label.
+    pub width: i32,
+}
+
+/// The columns of a label whose physical text is `physical` pixels wide and logical text `logical` pixels wide. Both
+/// widths are whole pixels, and so is every gap and the bar, so the bar and the logical text start on whole pixels.
+pub fn columns(physical: i32, logical: i32, dpi: u32) -> Columns {
+    let gap = scaled(BAR_GAP, dpi);
+    let bar = physical + gap;
+    let text = bar + scaled(BAR_WIDTH, dpi) + gap;
+    Columns {
+        bar,
+        logical: text,
+        width: text + logical,
+    }
+}
+
+/// The bar between a label's two parts: its left side is at `left`, and the text's baseline is on row `baseline`, the
+/// first row under the digits. The bar's bottom side is `BAR_DROP` below the baseline and it rises `BAR_HEIGHT` from
+/// there. Whole pixels, in whatever space `left` and `baseline` are in.
+pub fn bar(left: i32, baseline: i32, dpi: u32) -> RECT {
+    let bottom = baseline + scaled(BAR_DROP, dpi);
+    RECT {
+        left,
+        top: bottom - scaled(BAR_HEIGHT, dpi),
+        right: left + scaled(BAR_WIDTH, dpi),
+        bottom,
     }
 }
 
@@ -545,6 +589,73 @@ mod tests {
                 height: 39
             }
         );
+    }
+
+    #[test]
+    fn the_bars_sizes_scale_with_the_monitor() {
+        // The gap of 7, the bar's width of 1 and its height of 11, at 100%, 125%, 150% and 175%. A width of 1 rounds up
+        // to 2 from 150%, where it is 1.5.
+        assert_eq!(
+            [96, 120, 144, 168].map(|dpi| scaled(BAR_GAP, dpi)),
+            [7, 9, 11, 12]
+        );
+        assert_eq!(
+            [96, 120, 144, 168].map(|dpi| scaled(BAR_WIDTH, dpi)),
+            [1, 1, 2, 2]
+        );
+        assert_eq!(
+            [96, 120, 144, 168].map(|dpi| scaled(BAR_HEIGHT, dpi)),
+            [11, 14, 17, 19]
+        );
+        assert_eq!(
+            [96, 120, 144, 168].map(|dpi| scaled(BAR_DROP, dpi)),
+            [1, 1, 2, 2]
+        );
+    }
+
+    #[test]
+    fn the_bar_hangs_below_the_baseline_and_rises_its_height() {
+        // Baseline on row 100: the digits' last row is 99. At 100% the bar covers rows 90 to 100, one below the digits.
+        assert_eq!(bar(50, 100, 96), rect(50, 90, 51, 101));
+        // 125%: 14 tall, 1 below, 1 wide.
+        assert_eq!(bar(50, 100, 120), rect(50, 87, 51, 101));
+        // 150%: 17 tall, 2 below, 2 wide.
+        assert_eq!(bar(50, 100, 144), rect(50, 85, 52, 102));
+        // 175%: 19 tall, 2 below, 2 wide.
+        assert_eq!(bar(50, 100, 168), rect(50, 83, 52, 102));
+    }
+
+    #[test]
+    fn the_logical_part_follows_the_physical_one_after_a_gap_a_bar_and_a_gap() {
+        // 30 px of physical text and 20 of logical at 100%: the bar after 7, the logical text after 7 + 1 + 7 more.
+        assert_eq!(
+            columns(30, 20, 96),
+            Columns {
+                bar: 37,
+                logical: 45,
+                width: 65
+            }
+        );
+        // 150%: the gaps are 11 and the bar 2.
+        assert_eq!(
+            columns(30, 20, 144),
+            Columns {
+                bar: 41,
+                logical: 54,
+                width: 74
+            }
+        );
+    }
+
+    #[test]
+    fn a_label_with_a_logical_part_is_wider_and_not_taller() {
+        for dpi in [96, 120, 144, 168] {
+            let physical = pill_size(30, dpi);
+            let both = pill_size(columns(30, 20, dpi).width, dpi);
+            let added = 2 * scaled(BAR_GAP, dpi) + scaled(BAR_WIDTH, dpi) + 20;
+            assert_eq!(both.width, physical.width + added, "at {dpi} DPI");
+            assert_eq!(both.height, physical.height, "at {dpi} DPI");
+        }
     }
 
     #[test]

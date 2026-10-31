@@ -16,10 +16,10 @@ use windows::Win32::Graphics::Direct2D::{
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_FEATURE, DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES,
-    DWRITE_FONT_METRICS, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-    DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_LINE_METRICS, DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE,
-    DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat,
-    IDWriteTextLayout, IDWriteTypography,
+    DWRITE_FONT_METRICS, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
+    DWRITE_FONT_WEIGHT_MEDIUM, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_LINE_METRICS,
+    DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE, DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory,
+    IDWriteFactory, IDWriteFontFamily, IDWriteTextFormat, IDWriteTextLayout, IDWriteTypography,
 };
 use windows::core::{BOOL, Error, PCWSTR, w};
 
@@ -31,6 +31,16 @@ const FAMILY: PCWSTR = w!("Segoe UI");
 
 /// How much of the outline's black shows over the photo.
 const OUTLINE_OPACITY: f32 = 0.28;
+
+/// How much of the label's ink shows in the bar before the logical part, and in the logical part itself (CSS opacity
+/// .4 and .62): fainter than the physical part, which is in full ink.
+const BAR_OPACITY: f32 = 0.4;
+const LOGICAL_OPACITY: f32 = 0.62;
+
+/// The logical part's weight (CSS 500), a step lighter than the physical part's semibold. Segoe UI has no face at 500,
+/// so DirectWrite takes the nearest, and on Windows 11 that is the semibold itself: the logical part is fainter by its
+/// opacity alone. `DWRITE_FONT_WEIGHT_REGULAR` here would make it lighter in weight too.
+const LOGICAL_WEIGHT: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT_MEDIUM;
 
 /// The pill's shadow, approximating CSS `0 2px 7px rgba(0,0,0,.35)`: black rounded rectangles that grow by this many
 /// logical pixels and show this much, laid over each other, so the shadow fades outward from the pill.
@@ -49,19 +59,7 @@ impl Fonts {
     fn new() -> windows::core::Result<Fonts> {
         // SAFETY: no pointers; the factory comes back as an owned interface.
         let factory: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }?;
-        let mut collection = None;
-        // SAFETY: fills `collection` with the installed fonts; the cached list is good enough.
-        unsafe { factory.GetSystemFontCollection(&mut collection, false) }?;
-        let collection = collection
-            .ok_or_else(|| Error::new(E_FAIL, "DirectWrite returned no collection of fonts"))?;
-        let (mut index, mut exists) = (0, BOOL::default());
-        // SAFETY: both outputs are locals, and the name is a static string.
-        unsafe { collection.FindFamilyName(FAMILY, &mut index, &mut exists) }?;
-        if !exists.as_bool() {
-            return Err(Error::new(E_FAIL, "Segoe UI is not installed"));
-        }
-        // SAFETY: `index` came from FindFamilyName just above.
-        let family = unsafe { collection.GetFontFamily(index) }?;
+        let family = font_family(&factory)?;
         // SAFETY: plain values.
         let font = unsafe {
             family.GetFirstMatchingFont(
@@ -81,6 +79,47 @@ impl Fonts {
             cap_height: f32::from(metrics.capHeight) / f32::from(metrics.designUnitsPerEm),
         })
     }
+}
+
+/// The installed family of the label's font.
+fn font_family(factory: &IDWriteFactory) -> windows::core::Result<IDWriteFontFamily> {
+    let mut collection = None;
+    // SAFETY: fills `collection` with the installed fonts; the cached list is good enough.
+    unsafe { factory.GetSystemFontCollection(&mut collection, false) }?;
+    let collection = collection
+        .ok_or_else(|| Error::new(E_FAIL, "DirectWrite returned no collection of fonts"))?;
+    let (mut index, mut exists) = (0, BOOL::default());
+    // SAFETY: both outputs are locals, and the name is a static string.
+    unsafe { collection.FindFamilyName(FAMILY, &mut index, &mut exists) }?;
+    if !exists.as_bool() {
+        return Err(Error::new(E_FAIL, "Segoe UI is not installed"));
+    }
+    // SAFETY: `index` came from FindFamilyName just above.
+    unsafe { collection.GetFontFamily(index) }
+}
+
+/// The label's text size in `weight`, in a window of `dpi`.
+fn text_format(
+    fonts: &Fonts,
+    weight: DWRITE_FONT_WEIGHT,
+    dpi: u32,
+) -> windows::core::Result<IDWriteTextFormat> {
+    // SAFETY: plain values and static strings. A size that is a whole number of pixels keeps the digits crisp.
+    let format = unsafe {
+        fonts.factory.CreateTextFormat(
+            FAMILY,
+            None,
+            weight,
+            DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL,
+            px(scaled(geometry::TEXT, dpi)),
+            w!("en-US"),
+        )
+    }?;
+    // The label is one line, so the window's width is never the reason to break it.
+    // SAFETY: plain value.
+    unsafe { format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP) }?;
+    Ok(format)
 }
 
 thread_local! {
@@ -109,8 +148,13 @@ pub struct Overlay {
     cyan: ID2D1SolidColorBrush,
     /// Black. Each fill sets its opacity first: the outline's, then each layer of the shadow's.
     shade: ID2D1SolidColorBrush,
+    /// The label's ink. Each use sets its opacity first, because the brush outlives a frame: full for the physical
+    /// text, then the bar's and the logical text's.
     ink: ID2D1SolidColorBrush,
+    /// The physical text's: Segoe UI semibold.
     format: IDWriteTextFormat,
+    /// The logical text's: the same family, size and wrapping, asked for the medium weight.
+    logical_format: IDWriteTextFormat,
     /// Asks for tabular figures; applied to each label's text.
     figures: IDWriteTypography,
     fonts: Fonts,
@@ -120,13 +164,37 @@ pub struct Overlay {
 }
 
 /// A label ready to draw.
-struct Label {
+struct PlacedLabel {
     /// The pill's place in the virtual screen.
     pill: RECT,
+    physical: PlacedText,
+    /// The bar and the logical text after the physical one. `None` when the measurement has no logical part, and then
+    /// the label is the physical text alone.
+    logical: Option<PlacedLogical>,
+}
+
+/// A line of text with the place it is drawn at.
+struct PlacedText {
     layout: IDWriteTextLayout,
     /// Where the text's layout starts, in the window's own pixels. Its baseline is on a whole pixel.
-    text_left: f32,
-    text_top: f32,
+    left: f32,
+    top: f32,
+}
+
+/// What a label draws after its physical text when it has a logical part.
+struct PlacedLogical {
+    /// The bar between the two parts, in the window's own pixels.
+    bar: D2D_RECT_F,
+    text: PlacedText,
+}
+
+/// A text laid out, with what the label needs to place it.
+struct Measured {
+    layout: IDWriteTextLayout,
+    /// The text's width, in whole pixels.
+    width: i32,
+    /// The distance from the layout's top to its baseline.
+    baseline: f32,
 }
 
 impl Overlay {
@@ -148,21 +216,6 @@ impl Overlay {
             // SAFETY: `color` outlives the call, which keeps nothing of it.
             unsafe { target.CreateSolidColorBrush(&color, None) }
         };
-        // SAFETY: plain values and static strings. A size that is a whole number of pixels keeps the digits crisp.
-        let format = unsafe {
-            fonts.factory.CreateTextFormat(
-                FAMILY,
-                None,
-                DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                DWRITE_FONT_STYLE_NORMAL,
-                DWRITE_FONT_STRETCH_NORMAL,
-                px(scaled(geometry::TEXT, dpi)),
-                w!("en-US"),
-            )
-        }?;
-        // The label is one line, so the window's width is never the reason to break it.
-        // SAFETY: plain value.
-        unsafe { format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP) }?;
         // SAFETY: no arguments.
         let figures = unsafe { fonts.factory.CreateTypography() }?;
         // SAFETY: plain values.
@@ -178,7 +231,8 @@ impl Overlay {
             shade: brush([0, 0, 0])?,
             // #04161b
             ink: brush([0x04, 0x16, 0x1b])?,
-            format,
+            format: text_format(fonts, DWRITE_FONT_WEIGHT_SEMI_BOLD, dpi)?,
+            logical_format: text_format(fonts, LOGICAL_WEIGHT, dpi)?,
             figures,
             fonts: fonts.clone(),
             monitor: geometry::bounds(monitor)?,
@@ -230,18 +284,26 @@ impl Overlay {
 
     /// The label's size and place, and where its text goes. `None` when the measurement has no span, so there is
     /// nothing to label.
-    fn label(&self, measurement: &Measurement) -> windows::core::Result<Option<Label>> {
-        let layout = self.layout(&measurement.label.physical)?;
-        let mut metrics = DWRITE_TEXT_METRICS::default();
-        // SAFETY: fills a local.
-        unsafe { layout.GetMetrics(&mut metrics) }?;
-        let mut line = [DWRITE_LINE_METRICS::default()];
-        let mut lines = 0;
-        // SAFETY: fills a one-line buffer, and fails should the label need more.
-        unsafe { layout.GetLineMetrics(Some(&mut line), &mut lines) }?;
-        let [line] = line;
+    fn label(&self, measurement: &Measurement) -> windows::core::Result<Option<PlacedLabel>> {
+        let label = &measurement.label;
+        let physical = self.measure(&label.physical, &self.format)?;
+        // The logical part, if the label has one, with where the bar and the text start.
+        let logical = label
+            .logical
+            .as_deref()
+            .map(|text| self.measure(text, &self.logical_format))
+            .transpose()?
+            .map(|measured| {
+                (
+                    geometry::columns(physical.width, measured.width, self.dpi),
+                    measured,
+                )
+            });
 
-        let size = geometry::pill_size(whole_up(metrics.width), self.dpi);
+        let text_width = logical
+            .as_ref()
+            .map_or(physical.width, |(columns, _)| columns.width);
+        let size = geometry::pill_size(text_width, self.dpi);
         let Some(pill) = geometry::place_label(measurement, size, self.monitor, self.dpi) else {
             return Ok(None);
         };
@@ -251,13 +313,50 @@ impl Overlay {
         let font = px(scaled(geometry::TEXT, self.dpi));
         let window = self.in_window(&pill);
         let middle = (window.top + window.bottom) / 2.0;
-        let baseline = (middle + self.fonts.cap_height * font / 2.0).round();
-        Ok(Some(Label {
+        let baseline = whole((middle + self.fonts.cap_height * font / 2.0).round());
+        let text_left = window.left + px(scaled(geometry::PAD_X, self.dpi));
+        let logical = logical.map(|(columns, logical)| {
+            // The bar is placed in the virtual screen like the pill and then moved into the window. Its bottom side is
+            // measured from the baseline, which is the same one for both parts.
+            let left = pill.left + scaled(geometry::PAD_X, self.dpi) + columns.bar;
+            let bar = geometry::bar(left, baseline + self.monitor.top, self.dpi);
+            PlacedLogical {
+                bar: self.in_window(&bar),
+                text: PlacedText {
+                    left: text_left + px(columns.logical),
+                    // Its own distance to the baseline: another face may have another ascent.
+                    top: px(baseline) - logical.baseline,
+                    layout: logical.layout,
+                },
+            }
+        });
+        Ok(Some(PlacedLabel {
             pill,
-            layout,
-            text_left: window.left + px(scaled(geometry::PAD_X, self.dpi)),
-            text_top: baseline - line.baseline,
+            physical: PlacedText {
+                layout: physical.layout,
+                left: text_left,
+                top: px(baseline) - physical.baseline,
+            },
+            logical,
         }))
+    }
+
+    /// `text` laid out in `format`, and how wide it is and how far down its baseline is.
+    fn measure(&self, text: &str, format: &IDWriteTextFormat) -> windows::core::Result<Measured> {
+        let layout = self.layout(text, format)?;
+        let mut metrics = DWRITE_TEXT_METRICS::default();
+        // SAFETY: fills a local.
+        unsafe { layout.GetMetrics(&mut metrics) }?;
+        let mut line = [DWRITE_LINE_METRICS::default()];
+        let mut lines = 0;
+        // SAFETY: fills a one-line buffer, and fails should the label need more.
+        unsafe { layout.GetLineMetrics(Some(&mut line), &mut lines) }?;
+        let [line] = line;
+        Ok(Measured {
+            layout,
+            width: whole_up(metrics.width),
+            baseline: line.baseline,
+        })
     }
 
     /// The pill's shadow, which the line is drawn over.
@@ -276,13 +375,17 @@ impl Overlay {
         }
     }
 
-    /// The pill and the text on it.
-    fn draw_pill(&self, target: &ID2D1RenderTarget, label: &Label) {
+    /// The pill and the text on it: the physical part in full ink, then, when the label has one, the bar and the
+    /// logical part fainter.
+    fn draw_pill(&self, target: &ID2D1RenderTarget, label: &PlacedLabel) {
         // DrawTextLayout takes a Vector2, which windows 0.62 takes from the windows-numerics crate without
         // re-exporting it, and this program may not add the crate. Direct2D's ellipse holds one.
-        let mut origin = D2D1_ELLIPSE::default().point;
-        origin.X = label.text_left;
-        origin.Y = label.text_top;
+        let origin = |text: &PlacedText| {
+            let mut origin = D2D1_ELLIPSE::default().point;
+            origin.X = text.left;
+            origin.Y = text.top;
+            origin
+        };
         // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
         // Direct2D only fails the frame at EndDraw.
         unsafe {
@@ -290,17 +393,38 @@ impl Overlay {
             target.FillRoundedRectangle(&self.rounded(&label.pill, 0, 0), &self.cyan);
             // Grayscale, not ClearType: color fringes would show on the cyan.
             target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+            // The brush keeps the opacity of the last label's logical part, so the physical text sets it back.
+            self.ink.SetOpacity(1.0);
             target.DrawTextLayout(
-                origin,
-                &label.layout,
+                origin(&label.physical),
+                &label.physical.layout,
                 &self.ink,
                 D2D1_DRAW_TEXT_OPTIONS_NONE,
             );
+            if let Some(logical) = &label.logical {
+                // The bar is a fill of whole pixels, so it is exactly its width however the scale rounds; then the
+                // default comes back.
+                target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+                self.ink.SetOpacity(BAR_OPACITY);
+                target.FillRectangle(&logical.bar, &self.ink);
+                target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+                self.ink.SetOpacity(LOGICAL_OPACITY);
+                target.DrawTextLayout(
+                    origin(&logical.text),
+                    &logical.text.layout,
+                    &self.ink,
+                    D2D1_DRAW_TEXT_OPTIONS_NONE,
+                );
+            }
         }
     }
 
-    /// `label` laid out on one line in the label's font, with tabular figures.
-    fn layout(&self, label: &str) -> windows::core::Result<IDWriteTextLayout> {
+    /// `label` laid out on one line in `format`, with tabular figures.
+    fn layout(
+        &self,
+        label: &str,
+        format: &IDWriteTextFormat,
+    ) -> windows::core::Result<IDWriteTextLayout> {
         let text: Vec<u16> = label.encode_utf16().collect();
         let length = u32::try_from(text.len())
             .map_err(|_| Error::new(E_FAIL, "the label is too long to lay out"))?;
@@ -309,7 +433,7 @@ impl Overlay {
         let layout = unsafe {
             self.fonts
                 .factory
-                .CreateTextLayout(&text, &self.format, 4096.0, 4096.0)
+                .CreateTextLayout(&text, format, 4096.0, 4096.0)
         }?;
         // SAFETY: the range is the whole text.
         unsafe {
@@ -364,6 +488,16 @@ fn whole_up(width: f32) -> i32 {
     width.ceil() as i32
 }
 
+/// A position that is already a whole number of pixels, as the integer geometry takes it. Positions are far below
+/// 2^24, so the conversion keeps every digit.
+fn whole(position: f32) -> i32 {
+    debug_assert!(
+        position.fract() == 0.0 && position.abs() < 1e6,
+        "{position}"
+    );
+    position as i32
+}
+
 #[cfg(test)]
 mod tests {
     use std::ptr;
@@ -376,6 +510,7 @@ mod tests {
         D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_SOFTWARE,
         D2D1_RENDER_TARGET_USAGE_NONE, D2D1CreateFactory, ID2D1Factory,
     };
+    use windows::Win32::Graphics::DirectWrite::DWRITE_FONT_SIMULATIONS_NONE;
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
     use windows::Win32::Graphics::Imaging::{
         CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICBitmap, IWICImagingFactory,
@@ -946,7 +1081,9 @@ mod tests {
         let widths: Vec<f32> = "0123456789"
             .chars()
             .map(|digit| {
-                let layout = overlay.layout(&digit.to_string()).expect("a layout");
+                let layout = overlay
+                    .layout(&digit.to_string(), &overlay.format)
+                    .expect("a layout");
                 let mut metrics = DWRITE_TEXT_METRICS::default();
                 // SAFETY: fills a local.
                 unsafe { layout.GetMetrics(&mut metrics) }.expect("metrics");
@@ -1013,14 +1150,412 @@ mod tests {
     #[test]
     fn the_label_and_its_shadow_never_darken_a_cyan_pixel() {
         // Short spans put the ticks under the label's shadow, which reaches 2 + 6 pixels below the pill.
+        // The labels with a logical part are wider, so the pill and its shadow reach further along the line.
         let canvas = Canvas::new(480, 320);
-        for dpi in [96, 120, 168] {
-            for (last, label) in [(-400, "1"), (-391, "10"), (-377, "24")] {
-                check_cyan_after_the_label(&canvas, &horizontal(-400, last, 350, label), dpi);
-                check_cyan_after_the_label(&canvas, &vertical(300, last + 700, -300, label), dpi);
-                let cross = cross((-400, last), (300, last + 700), -400, 350, label);
+        let labels = [
+            (-400, "1", None),
+            (-391, "10", None),
+            (-377, "24", None),
+            (-400, "1", Some("1.1")),
+            (-377, "24", Some("13.7")),
+            (-377, "240 \u{d7} 180", Some("137.1 \u{d7} 102.9")),
+        ];
+        for dpi in [96, 120, 144, 168] {
+            for (last, label, logical) in labels {
+                let with = |m: Measurement| match logical {
+                    Some(logical) => with_logical(m, logical),
+                    None => m,
+                };
+                let horizontal = with(horizontal(-400, last, 350, label));
+                check_cyan_after_the_label(&canvas, &horizontal, dpi);
+                let vertical = with(vertical(300, last + 700, -300, label));
+                check_cyan_after_the_label(&canvas, &vertical, dpi);
+                let cross = with(cross((-400, last), (300, last + 700), -400, 350, label));
                 check_cyan_after_the_label(&canvas, &cross, dpi);
             }
         }
+    }
+
+    const INK: [u8; 3] = [0x04, 0x16, 0x1b];
+
+    const SCALES: [u32; 4] = [96, 120, 144, 168];
+
+    /// `m` with `logical` as the logical part of its label.
+    fn with_logical(mut m: Measurement, logical: &str) -> Measurement {
+        m.label.logical = Some(logical.to_owned());
+        m
+    }
+
+    /// The ink at `opacity` over the pill's cyan: what the bar and the logical text's solid pixels are. Direct2D
+    /// blends each byte of the target, so rounding the same way lands within a level of it.
+    fn ink_over_cyan(opacity: f32) -> [u8; 3] {
+        std::array::from_fn(|i| {
+            (f32::from(INK[i]) * opacity + f32::from(CYAN[i]) * (1.0 - opacity)).round() as u8
+        })
+    }
+
+    /// The width of `text` laid out in `format`, in whole pixels, as the label counts it.
+    fn text_width(overlay: &Overlay, text: &str, format: &IDWriteTextFormat) -> i32 {
+        let layout = overlay.layout(text, format).expect("a layout");
+        let mut metrics = DWRITE_TEXT_METRICS::default();
+        // SAFETY: fills a local.
+        unsafe { layout.GetMetrics(&mut metrics) }.expect("metrics");
+        whole_up(metrics.width)
+    }
+
+    /// One label drawn alone, with what the tests know about it from outside the drawing code: the widths of its two
+    /// texts, laid out again on their own, and the scale.
+    struct Drawn {
+        picture: Picture,
+        pill: RECT,
+        dpi: u32,
+        physical_width: i32,
+        /// 0 for a label without a logical part.
+        logical_width: i32,
+    }
+
+    impl Drawn {
+        /// A pixel, by its place in the virtual screen.
+        fn at(&self, x: i32, y: i32) -> [u8; 3] {
+            self.picture
+                .at((x - MONITOR.left) as usize, (y - MONITOR.top) as usize)
+        }
+
+        /// The physical text's first column: the pill's padding in.
+        fn text_left(&self) -> i32 {
+            self.pill.left + scaled(8, self.dpi)
+        }
+
+        /// The bar's first column, after the physical text and a gap.
+        fn bar_left(&self) -> i32 {
+            self.text_left() + self.physical_width + scaled(7, self.dpi)
+        }
+
+        /// The logical text's first column, after the bar and another gap.
+        fn logical_left(&self) -> i32 {
+            self.bar_left() + scaled(1, self.dpi) + scaled(7, self.dpi)
+        }
+
+        /// The pill's rows, over the columns `left` to `right`.
+        fn rows(&self, left: i32, right: i32) -> RECT {
+            RECT {
+                left,
+                top: self.pill.top,
+                right,
+                bottom: self.pill.bottom,
+            }
+        }
+
+        /// The darkest green in the columns `left` to `right` of the pill's rows. The ink is the only dark green on
+        /// the cyan, whose green is 211.
+        fn darkest_green(&self, left: i32, right: i32) -> u8 {
+            let area = self.rows(left, right);
+            (area.top..area.bottom)
+                .flat_map(|y| (area.left..area.right).map(move |x| (x, y)))
+                .map(|(x, y)| self.at(x, y)[1])
+                .min()
+                .expect("columns")
+        }
+
+        /// The columns of the pill with a run of at least `rows` pixels near `color` from top to bottom. A glyph's
+        /// partly covered pixels can have a bar's color, but no glyph is as tall as the bar.
+        fn columns_with_run(&self, color: [u8; 3], rows: i32) -> Vec<i32> {
+            (self.pill.left..self.pill.right)
+                .filter(|&x| {
+                    let mut run = 0;
+                    (self.pill.top..self.pill.bottom).any(|y| {
+                        run = if near(self.at(x, y), color, 2) {
+                            run + 1
+                        } else {
+                            0
+                        };
+                        run >= rows
+                    })
+                })
+                .collect()
+        }
+    }
+
+    fn draw_alone(canvas: &Canvas, m: &Measurement, dpi: u32) -> Drawn {
+        let mut found = None;
+        let picture = canvas.render(MONITOR, dpi, |overlay, target| {
+            let pill = draw_label(overlay, target, m).expect("a pill");
+            let physical = text_width(overlay, &m.label.physical, &overlay.format);
+            let logical = m
+                .label
+                .logical
+                .as_deref()
+                .map_or(0, |text| text_width(overlay, text, &overlay.logical_format));
+            found = Some((pill, physical, logical));
+        });
+        let (pill, physical_width, logical_width) = found.expect("the label was drawn");
+        Drawn {
+            picture,
+            pill,
+            dpi,
+            physical_width,
+            logical_width,
+        }
+    }
+
+    #[test]
+    fn a_label_without_a_logical_part_is_its_text_in_its_pill_with_no_bar() {
+        let canvas = Canvas::new(480, 320);
+        for dpi in SCALES {
+            let d = draw_alone(&canvas, &horizontal(-400, -301, 350, "24"), dpi);
+            let size = geometry::pill_size(d.physical_width, dpi);
+            assert_eq!(
+                (d.pill.right - d.pill.left, d.pill.bottom - d.pill.top),
+                (size.width, size.height),
+                "at {dpi} DPI"
+            );
+            let bar = ink_over_cyan(0.4);
+            assert_eq!(
+                d.columns_with_run(bar, scaled(11, dpi)),
+                Vec::<i32>::new(),
+                "at {dpi} DPI"
+            );
+        }
+    }
+
+    #[test]
+    fn a_logical_part_widens_the_pill_by_the_gaps_the_bar_and_its_text_and_not_its_height() {
+        let canvas = Canvas::new(480, 320);
+        for dpi in SCALES {
+            let alone = draw_alone(&canvas, &horizontal(-400, -301, 350, "24"), dpi);
+            let both = draw_alone(
+                &canvas,
+                &with_logical(horizontal(-400, -301, 350, "24"), "13.7"),
+                dpi,
+            );
+            let height = |d: &Drawn| d.pill.bottom - d.pill.top;
+            let width = |d: &Drawn| d.pill.right - d.pill.left;
+            assert_eq!(height(&both), height(&alone), "at {dpi} DPI");
+            assert!(both.logical_width > 10, "{}", both.logical_width);
+            assert_eq!(
+                width(&both) - width(&alone),
+                scaled(7, dpi) + scaled(1, dpi) + scaled(7, dpi) + both.logical_width,
+                "at {dpi} DPI"
+            );
+        }
+    }
+
+    #[test]
+    fn the_bar_is_ink_at_40_percent_scaled_wide_and_tall_between_two_gaps_of_cyan() {
+        let canvas = Canvas::new(480, 320);
+        let bar = ink_over_cyan(0.4);
+        for dpi in SCALES {
+            let m = with_logical(horizontal(-400, -301, 350, "24"), "13.7");
+            let d = draw_alone(&canvas, &m, dpi);
+            let (gap, width, height) = (scaled(7, dpi), scaled(1, dpi), scaled(11, dpi));
+
+            // Where the columns of the bar are, found from the pixels: after the physical text and a gap.
+            let left = d.bar_left();
+            assert_eq!(
+                d.columns_with_run(bar, height),
+                (left..left + width).collect::<Vec<_>>(),
+                "the bar's columns at {dpi} DPI"
+            );
+
+            // The digits stand on the baseline, so the first row under them is it, and the bar's bottom side hangs a
+            // pixel (scaled) below it. The rows of the digits are read from the physical text's columns alone.
+            let ((_, last_digit_row), _) = ink(
+                &d.picture,
+                &d.rows(d.text_left(), d.text_left() + d.physical_width),
+            );
+            let bottom = last_digit_row + 1 + scaled(1, dpi);
+            let bar_rows = bottom - height..bottom;
+            for x in left - gap..left + width + gap {
+                let in_bar = (left..left + width).contains(&x);
+                for y in d.pill.top..d.pill.bottom {
+                    if in_bar && bar_rows.contains(&y) {
+                        assert!(
+                            near(d.at(x, y), bar, 2),
+                            "bar pixel ({x}, {y}) is {:?}, wanted {bar:?}, at {dpi} DPI",
+                            d.at(x, y)
+                        );
+                    } else {
+                        assert_eq!(
+                            d.at(x, y),
+                            CYAN,
+                            "({x}, {y}) is next to the bar at {dpi} DPI, so it is cyan"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_logical_text_is_fainter_than_the_physical_text() {
+        let canvas = Canvas::new(480, 320);
+        // The ink's solid pixels at 62% over the cyan have this green; a glyph's edge pixels only come lighter.
+        let faint = i32::from(ink_over_cyan(0.62)[1]);
+        for dpi in SCALES {
+            let m = with_logical(horizontal(-400, -301, 350, "24"), "13.7");
+            let d = draw_alone(&canvas, &m, dpi);
+            let physical =
+                i32::from(d.darkest_green(d.text_left(), d.text_left() + d.physical_width));
+            let logical =
+                i32::from(d.darkest_green(d.logical_left(), d.logical_left() + d.logical_width));
+            assert!(
+                (i32::from(INK[1])..=i32::from(INK[1]) + 2).contains(&physical),
+                "the physical text is full ink: green {physical} at {dpi} DPI"
+            );
+            // Some pixel of the logical text is solid, and a solid pixel is 62% of the ink, no more and no less.
+            assert!(
+                logical.abs_diff(faint) <= 2,
+                "the logical text's darkest green is {logical}, 62% of the ink is {faint}, at {dpi} DPI"
+            );
+            assert!(
+                logical > physical + 50,
+                "{logical} against {physical} at {dpi} DPI"
+            );
+        }
+    }
+
+    #[test]
+    fn the_logical_text_sits_on_the_physical_texts_baseline() {
+        let canvas = Canvas::new(480, 320);
+        for dpi in SCALES {
+            // Both parts say 24, whose 2 stands on a flat base.
+            let m = with_logical(horizontal(-400, -301, 350, "24"), "24");
+            let d = draw_alone(&canvas, &m, dpi);
+            let last_row = |left: i32, right: i32| {
+                (d.pill.top..d.pill.bottom)
+                    .rev()
+                    .find(|&y| (left..right).any(|x| d.at(x, y)[1] < 125))
+                    .expect("a dark row")
+            };
+            assert_eq!(
+                last_row(d.logical_left(), d.logical_left() + d.logical_width),
+                last_row(d.text_left(), d.text_left() + d.physical_width),
+                "at {dpi} DPI"
+            );
+        }
+    }
+
+    #[test]
+    fn a_label_drawn_after_one_with_a_logical_part_still_has_full_ink() {
+        // The ink brush keeps the opacity of the last thing drawn with it, and the overlay is used for every frame.
+        let canvas = Canvas::new(480, 320);
+        for dpi in [96, 168] {
+            let first = with_logical(horizontal(-400, -301, 350, "24"), "13.7");
+            let second = horizontal(-400, -301, 250, "24");
+            let mut pills = Vec::new();
+            let picture = canvas.render(MONITOR, dpi, |overlay, target| {
+                pills.extend(draw_label(overlay, target, &first));
+                pills.extend(draw_label(overlay, target, &second));
+            });
+            let [_, pill] = pills[..] else {
+                panic!("two pills, got {pills:?}");
+            };
+            let darkest = (pill.top..pill.bottom)
+                .flat_map(|y| (pill.left + 8..pill.right - 8).map(move |x| (x, y)))
+                .map(|(x, y)| {
+                    picture.at((x - MONITOR.left) as usize, (y - MONITOR.top) as usize)[1]
+                })
+                .min()
+                .expect("pixels");
+            assert!(
+                darkest <= INK[1] + 8,
+                "the second label's darkest green is {darkest} at {dpi} DPI"
+            );
+        }
+    }
+
+    #[test]
+    fn a_long_logical_part_keeps_the_label_inside_the_window_at_the_monitors_limit() {
+        let canvas = Canvas::new(480, 320);
+        // A short span in the top left corner, as in the test of the plain label, then the Cross in the bottom right
+        // corner, whose label mirrors up and to the left.
+        let corner = with_logical(horizontal(-480, -478, 202, "3"), "1234567.8");
+        let cross = with_logical(
+            cross((-120, -1), (400, 519), -1, 519, "240 \u{d7} 180"),
+            "137.1 \u{d7} 102.9",
+        );
+        for dpi in SCALES {
+            for m in [&corner, &cross] {
+                let d = draw_alone(&canvas, m, dpi);
+                let pill = d.pill;
+                assert!(
+                    pill.left >= MONITOR.left && pill.top >= MONITOR.top,
+                    "{pill:?}"
+                );
+                assert!(
+                    pill.right <= MONITOR.left + 480 && pill.bottom <= MONITOR.top + 320,
+                    "{pill:?} at {dpi} DPI for {m:?}"
+                );
+                // The logical text ends inside the pill's padding: the pill was made for it.
+                assert!(
+                    d.logical_left() + d.logical_width <= pill.right - scaled(8, dpi),
+                    "{pill:?} at {dpi} DPI for {m:?}"
+                );
+                let (_, (_, right)) = ink(&d.picture, &pill);
+                assert!(
+                    right < pill.right - scaled(8, dpi) + 2,
+                    "{right} in {pill:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_logical_part_asks_for_a_face_that_is_not_bolder_than_the_physical_one() {
+        // Segoe UI has no face at weight 500; DirectWrite takes the nearest, and the label only needs it not to be
+        // bolder than the physical text's semibold, nor made bold by simulation. On Windows 11 it is the semibold.
+        let fonts = Fonts::new().expect("the fonts");
+        let family = font_family(&fonts.factory).expect("the family");
+        let face = |weight| {
+            // SAFETY: plain values.
+            unsafe {
+                family.GetFirstMatchingFont(
+                    weight,
+                    DWRITE_FONT_STRETCH_NORMAL,
+                    DWRITE_FONT_STYLE_NORMAL,
+                )
+            }
+            .expect("a face")
+        };
+        let (logical, physical) = (face(LOGICAL_WEIGHT), face(DWRITE_FONT_WEIGHT_SEMI_BOLD));
+        // SAFETY: plain getters.
+        let (logical_weight, physical_weight, simulations) = unsafe {
+            (
+                logical.GetWeight().0,
+                physical.GetWeight().0,
+                logical.GetSimulations(),
+            )
+        };
+        assert!(logical_weight <= physical_weight, "{logical_weight}");
+        assert_eq!(simulations, DWRITE_FONT_SIMULATIONS_NONE);
+    }
+
+    #[test]
+    fn the_logical_labels_digits_are_as_wide_as_each_other() {
+        // The same as for the physical text: the pill must not jump as the logical number changes.
+        let canvas = Canvas::new(8, 8);
+        let overlay = Overlay::new(
+            &canvas.target,
+            &canvas.fonts,
+            MONITOR,
+            Scale::from_dpi(96).expect("a scale"),
+        )
+        .expect("the overlay");
+        let widths: Vec<f32> = "0123456789"
+            .chars()
+            .map(|digit| {
+                let layout = overlay
+                    .layout(&digit.to_string(), &overlay.logical_format)
+                    .expect("a layout");
+                let mut metrics = DWRITE_TEXT_METRICS::default();
+                // SAFETY: fills a local.
+                unsafe { layout.GetMetrics(&mut metrics) }.expect("metrics");
+                metrics.width
+            })
+            .collect();
+        let widest = widths.iter().copied().fold(f32::MIN, f32::max);
+        let narrowest = widths.iter().copied().fold(f32::MAX, f32::min);
+        assert!(widest - narrowest < 0.3, "{widths:?}");
+        assert!(narrowest > 6.0, "{widths:?}");
     }
 }
