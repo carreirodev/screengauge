@@ -1,9 +1,13 @@
 //! The tray icon next to the clock, drawn with the app icon. The notification area draws an icon at one size, the
 //! taskbar's small-icon size at the taskbar's DPI (16 pixels at 100% scale, 28 at 175%), and scales any other. The
 //! app icon has an image for each of those sizes, so ScreenGauge loads the one the taskbar draws, and Windows shows its
-//! pixels as they are. When the scale changes, `refresh` swaps the icon for the new size.
+//! pixels as they are. When the scale changes, the icon follows the taskbar to the new size (`follow_scale`).
+//!
+//! Measured on Windows 11 in WPC-304: after a change of scale while ScreenGauge runs, Explorer may go on drawing the
+//! icon it already holds at the old size, enlarged or shrunk, even when given the new size's picture; an icon it adds
+//! afresh once the taskbar has settled is drawn pixel for pixel. So a new size means adding the icon again.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -14,7 +18,8 @@ use windows::Win32::UI::Shell::{
     NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DestroyIcon, FindWindowW, HICON, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, SM_CXSMICON, WM_APP,
+    DestroyIcon, FindWindowW, HICON, IMAGE_ICON, KillTimer, LR_DEFAULTCOLOR, LoadImageW,
+    SM_CXSMICON, SetTimer, WM_APP,
 };
 use windows::core::{Error, PCWSTR, w};
 
@@ -34,11 +39,23 @@ const NIN_KEYSELECT: u32 = NIN_SELECT | NINF_KEY;
 /// The ID of the exe's icon group, which build.rs writes.
 const APP_ICON_ID: usize = 1;
 
+/// The resident window's timer that follows the taskbar after a change of scale (`follow_scale`). It runs only then:
+/// at rest ScreenGauge has no timer.
+pub const SCALE_TIMER: usize = 1;
+/// How often the icon checks the taskbar's size while following it, and how many times at most: eight seconds.
+const SCALE_CHECK_MS: u32 = 200;
+const SCALE_CHECKS: u32 = 40;
+/// How many checks in a row must see the new size before the icon is added again: one second, for Explorer to finish
+/// taking the new scale.
+const SETTLE_CHECKS: u32 = 5;
+
 thread_local! {
     /// The icon Windows shows, kept alive for as long as it shows it. Only the resident thread touches it. Nothing
     /// holds a borrow across a call to Shell_NotifyIconW, which waits for Explorer and so may let a message reach this
     /// thread.
     static ICON: RefCell<Option<AppIcon>> = const { RefCell::new(None) };
+    /// While the icon follows the taskbar, where it stands; `None` when the scale timer isn't running.
+    static FOLLOWING: Cell<Option<Following>> = const { Cell::new(None) };
 }
 
 /// An icon loaded from the exe's resources, destroyed when dropped.
@@ -93,32 +110,111 @@ pub fn add(hwnd: HWND) -> windows::core::Result<()> {
     }
     let icon = AppIcon::load(icon_size()?)?;
     data.hIcon = icon.handle;
-    // A failure drops the new icon and keeps the old one. A `refresh` before the next TaskbarCreated may then try to
-    // modify an icon Windows doesn't have: that fails too, and gets logged.
+    // A failure drops the new icon and keeps the old one, whose size then still differs from the taskbar's, so
+    // following the scale tries again.
     notify(NIM_ADD, &data, "NIM_ADD")?;
     drop(ICON.replace(Some(icon)));
     data.Anonymous.uVersion = NOTIFYICON_VERSION_4;
     notify(NIM_SETVERSION, &data, "NIM_SETVERSION")
 }
 
-/// Follows the taskbar's scale: when it draws icons at another size than the icon was loaded at, loads the icon of the
-/// new size and shows that, then frees the old one. Does nothing while the icon isn't added (it comes with the
-/// taskbar, see `add`). Cheap enough to call on every message that may announce a new scale.
-pub fn refresh(hwnd: HWND) -> windows::core::Result<()> {
-    let Some(shown) = ICON.with_borrow(|icon| icon.as_ref().map(|icon| icon.size)) else {
+/// Windows announced a change that may give the taskbar another scale. The resident window, which is never shown,
+/// hears of it through WM_SETTINGCHANGE and WM_DISPLAYCHANGE, never WM_DPICHANGED, and 400 to 500 ms before the
+/// taskbar takes the new scale (measured in WPC-304). So the icon follows the taskbar for a few seconds, every
+/// `SCALE_CHECK_MS`: once the taskbar has held a new size for `SETTLE_CHECKS` checks, the icon is added again at it.
+pub fn follow_scale(hwnd: HWND) -> windows::core::Result<()> {
+    let started = Following {
+        checks_left: SCALE_CHECKS,
+        settled: 0,
+    };
+    if FOLLOWING.replace(Some(started)).is_none() {
+        // SAFETY: our own window, on the thread that created it; with no callback, WM_TIMER comes to the window.
+        if unsafe { SetTimer(Some(hwnd), SCALE_TIMER, SCALE_CHECK_MS, None) } == 0 {
+            FOLLOWING.set(None);
+            return Err(Error::from_thread());
+        }
+    }
+    Ok(())
+}
+
+/// The scale timer fired: checks the taskbar's size, adds the icon again once a new size has settled, and stops
+/// following once it did or the checks ran out.
+pub fn on_scale_timer(hwnd: HWND) -> windows::core::Result<()> {
+    let Some(mut following) = FOLLOWING.get() else {
         return Ok(());
     };
-    let size = icon_size()?;
-    if size == shown {
+    // Without the icon there is nothing to follow: it comes back with TaskbarCreated, at the size of that moment.
+    let Some(shown) = ICON.with_borrow(|icon| icon.as_ref().map(|icon| icon.size)) else {
+        return stop_following(hwnd);
+    };
+    let taskbar = match icon_size() {
+        Ok(size) => size,
+        Err(e) => {
+            stop_following(hwnd)?;
+            return Err(e);
+        }
+    };
+    let next = following.check(shown, taskbar);
+    FOLLOWING.set(Some(following));
+    match next {
+        Next::Wait => Ok(()),
+        Next::Stop => stop_following(hwnd),
+        // A failure keeps following, so the next check tries again until the checks run out.
+        Next::AddAgain => add_again(hwnd).and_then(|()| stop_following(hwnd)),
+    }
+}
+
+/// Where following the taskbar stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Following {
+    checks_left: u32,
+    /// How many checks in a row saw the taskbar at another size than the icon's.
+    settled: u32,
+}
+
+/// What follows a check of the taskbar's size.
+#[derive(Debug, PartialEq, Eq)]
+enum Next {
+    Wait,
+    AddAgain,
+    Stop,
+}
+
+impl Following {
+    /// Counts a check that found the icon at `shown` pixels and the taskbar at `taskbar`.
+    fn check(&mut self, shown: i32, taskbar: i32) -> Next {
+        self.checks_left = self.checks_left.saturating_sub(1);
+        self.settled = if taskbar == shown {
+            0
+        } else {
+            self.settled + 1
+        };
+        if self.settled >= SETTLE_CHECKS {
+            Next::AddAgain
+        } else if self.checks_left == 0 {
+            Next::Stop
+        } else {
+            Next::Wait
+        }
+    }
+}
+
+fn stop_following(hwnd: HWND) -> windows::core::Result<()> {
+    if FOLLOWING.take().is_none() {
         return Ok(());
     }
-    let icon = AppIcon::load(size)?;
-    let mut data = icon_data(hwnd);
-    data.uFlags = NIF_ICON;
-    data.hIcon = icon.handle;
-    notify(NIM_MODIFY, &data, "NIM_MODIFY")?;
-    drop(ICON.replace(Some(icon)));
-    Ok(())
+    // SAFETY: the timer `follow_scale` set on our own window.
+    unsafe { KillTimer(Some(hwnd), SCALE_TIMER) }
+}
+
+/// Removes the icon and adds it at the taskbar's size, so Explorer draws it afresh (see the module's notes). A Windows
+/// notification showing at that moment goes with the old icon.
+fn add_again(hwnd: HWND) -> windows::core::Result<()> {
+    // When the removal fails, the icon may already be gone: adding it is what matters, and its failure is returned.
+    if let Err(e) = notify(NIM_DELETE, &icon_data(hwnd), "NIM_DELETE") {
+        log::failure("tray icon: removing it to add it again", &e);
+    }
+    add(hwnd)
 }
 
 /// Removes the icon, and frees it whether or not Windows took the removal: ScreenGauge is exiting.
@@ -277,6 +373,44 @@ mod tests {
         assert_eq!(buffer, [7; 4]);
         assert!(fill(&mut buffer, "abc"));
         assert_eq!(buffer, [97, 98, 99, 0]);
+    }
+
+    fn following() -> Following {
+        Following {
+            checks_left: SCALE_CHECKS,
+            settled: 0,
+        }
+    }
+
+    #[test]
+    fn the_icon_is_added_again_once_a_new_taskbar_size_held_for_a_second() {
+        let mut state = following();
+        // The announcement comes before the taskbar changes: the first checks still see the old size.
+        assert_eq!(state.check(20, 20), Next::Wait);
+        assert_eq!(state.check(20, 20), Next::Wait);
+        for _ in 1..SETTLE_CHECKS {
+            assert_eq!(state.check(20, 24), Next::Wait);
+        }
+        assert_eq!(state.check(20, 24), Next::AddAgain);
+    }
+
+    #[test]
+    fn a_size_that_goes_back_starts_settling_again() {
+        let mut state = following();
+        for _ in 1..SETTLE_CHECKS {
+            state.check(20, 24);
+        }
+        assert_eq!(state.check(20, 20), Next::Wait);
+        assert_eq!(state.check(20, 24), Next::Wait);
+    }
+
+    #[test]
+    fn following_stops_when_the_checks_run_out_without_a_new_size() {
+        let mut state = following();
+        for _ in 1..SCALE_CHECKS {
+            assert_eq!(state.check(28, 28), Next::Wait);
+        }
+        assert_eq!(state.check(28, 28), Next::Stop);
     }
 
     #[test]

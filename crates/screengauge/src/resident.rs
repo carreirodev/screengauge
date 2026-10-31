@@ -1,6 +1,6 @@
 //! The resident process: one window that is never shown, so ScreenGauge has no taskbar button while idle.
 //! It receives what Windows tells ScreenGauge: the global shortcut, the tray icon's clicks and the calls of a copy
-//! opened again. Nothing is prepared at startup and there is no timer: the thread sleeps in GetMessageW until
+//! opened again. Nothing is prepared at startup and there is no timer at rest: the thread sleeps in GetMessageW until
 //! Windows sends something. While the tools are open, it carries out the effects the session core returns.
 
 use std::cell::RefCell;
@@ -16,8 +16,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
     FindWindowW, GetMessageW, GetWindowThreadProcessId, MSG, PostMessageW, PostQuitMessage,
     RegisterClassExW, RegisterWindowMessageW, TranslateMessage, WINDOW_EX_STYLE, WM_CONTEXTMENU,
-    WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_HOTKEY, WM_SETTINGCHANGE, WNDCLASSEXW,
-    WS_OVERLAPPED,
+    WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_HOTKEY, WM_SETTINGCHANGE, WM_TIMER,
+    WNDCLASSEXW, WS_OVERLAPPED,
 };
 use windows::core::{Error, PCWSTR, w};
 
@@ -167,10 +167,17 @@ extern "system" fn window_proc(
             notification::show_waiting(hwnd);
             LRESULT(0)
         }
-        // The scale of the display the taskbar is on may have changed; the tray icon then needs another size. Which of
-        // these Windows sends a window that is never shown is for the hardware check to tell, so all three are handled.
+        // The scale of the display the taskbar is on may have changed, and the tray icon then needs another size.
+        // This window, never shown, gets WM_SETTINGCHANGE and WM_DISPLAYCHANGE for it (WPC-304); WM_DPICHANGED is
+        // handled the same in case a Windows build sends it.
         WM_DPICHANGED | WM_DISPLAYCHANGE | WM_SETTINGCHANGE => {
-            if let Err(e) = tray::refresh(hwnd) {
+            if let Err(e) = tray::follow_scale(hwnd) {
+                log::failure("tray icon: following the taskbar's scale", &e);
+            }
+            LRESULT(0)
+        }
+        WM_TIMER if wparam.0 == tray::SCALE_TIMER => {
+            if let Err(e) = tray::on_scale_timer(hwnd) {
                 log::failure("tray icon: following the taskbar's scale", &e);
             }
             LRESULT(0)
