@@ -7,7 +7,7 @@ use windows::Win32::Graphics::DirectWrite::DWRITE_FONT_SIMULATIONS_NONE;
 
 use super::panel_tests::{MODES, at, inside, over, pixels, rect, strongest_green, tokens};
 use super::tests::{
-    BACKGROUND, Canvas, MONITOR, Picture, SCALES, horizontal, near, point, text_width,
+    BACKGROUND, Canvas, MONITOR, Picture, SCALES, horizontal, near, point, text_width, with_logical,
 };
 use super::*;
 use super::{notice, tolerance};
@@ -571,40 +571,58 @@ fn the_public_indicator_is_the_one_that_shows_the_tolerance_at_the_cursor() {
 }
 
 #[test]
-fn the_indicators_faint_ink_does_not_leak_into_what_is_drawn_after_it() {
-    // The ink brush outlives a frame, and the bar leaves it at 22%. A pinned label and a notice drawn after the
-    // indicator, as a frame does, are in full ink all the same.
+fn the_ink_has_its_full_strength_whatever_opacity_the_brush_was_left_at_and_leaves_none_behind() {
+    // The ink brush outlives a frame. A pinned label with a logical part leaves it at 62%, and the indicator's bar
+    // leaves it at 22%. In the order of a frame the label, the indicator, another pinned label and a notice are each
+    // in full ink all the same.
     let canvas = Canvas::new(480, 320);
     for mode in MODES {
         let t = tokens(mode);
         for dpi in [96, 168] {
-            let pinned = horizontal(-400, -301, 300, "24");
-            let notice_at = point(-300, 330);
+            let first = with_logical(horizontal(-400, -301, 250, "24"), "13.7");
+            let later = horizontal(-400, -301, 300, "24");
+            let notice_at = point(-300, 340);
             let mut found = None;
             let picture = canvas.render_in(mode, MONITOR, dpi, |overlay, target| {
                 overlay
+                    .draw(target, &[&first], None)
+                    .expect("the first label");
+                overlay
                     .show_tolerance(target, CURSOR, Tolerance::MAX)
                     .expect("the indicator");
-                overlay.draw(target, &[&pinned], None).expect("the label");
+                overlay.draw(target, &[&later], None).expect("the label");
                 overlay
                     .show_notice(target, notice_at, "Copied", Sign::Ok)
                     .expect("the notice");
-                let width = text_width(overlay, "Copied", &overlay.format);
+                let word = overlay
+                    .typeset_plain("Tolerance", &overlay.indicator_format)
+                    .expect("the word")
+                    .width;
+                let number = text_width(overlay, "50", &overlay.number_format);
+                let bounds = geometry::bounds(MONITOR).expect("the monitor");
+                let copied = text_width(overlay, "Copied", &overlay.format);
                 found = Some((
-                    overlay.label(&pinned, Look::Pinned).expect("a label"),
-                    notice::place(
-                        notice_at,
-                        notice::size(width, dpi),
-                        geometry::bounds(MONITOR).expect("the monitor"),
-                        dpi,
-                    ),
+                    tolerance::place(CURSOR, tolerance::size(word, number, dpi), bounds, dpi),
+                    word,
+                    overlay.label(&later, Look::Pinned).expect("a label"),
+                    notice::place(notice_at, notice::size(copied, dpi), bounds, dpi),
                 ));
             });
-            let (label, panel) = found.expect("drawn");
+            let (indicator, word, label, notice) = found.expect("drawn");
             let label = label.expect("a label");
             let ring = scaled(1, dpi);
             let border = geometry::border(dpi);
+            let word_left = indicator.left + ring + scaled(9, dpi);
             let areas = [
+                (
+                    "the indicator",
+                    rect(
+                        word_left,
+                        indicator.top + ring,
+                        word_left + word,
+                        indicator.bottom - ring,
+                    ),
+                ),
                 (
                     "the label",
                     rect(
@@ -617,10 +635,10 @@ fn the_indicators_faint_ink_does_not_leak_into_what_is_drawn_after_it() {
                 (
                     "the notice",
                     rect(
-                        panel.left + ring + scaled(9, dpi) + scaled(13, dpi) + scaled(7, dpi),
-                        panel.top + ring,
-                        panel.right - ring - scaled(11, dpi),
-                        panel.bottom - ring,
+                        notice.left + ring + scaled(9, dpi) + scaled(13, dpi) + scaled(7, dpi),
+                        notice.top + ring,
+                        notice.right - ring - scaled(11, dpi),
+                        notice.bottom - ring,
                     ),
                 ),
             ];
