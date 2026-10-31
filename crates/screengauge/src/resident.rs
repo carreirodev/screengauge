@@ -27,7 +27,7 @@ use crate::frozen_screen::{self, FrozenScreen};
 use crate::notification::{self, Notification};
 use crate::settings_file::SettingsFile;
 use crate::win32::{low_word, struct_size};
-use crate::{capture, event, global_shortcut, log, theme, tray};
+use crate::{capture, clipboard, event, global_shortcut, log, theme, tray};
 
 /// The resident window's class, which a copy opened again looks for to call the running copy.
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.Resident");
@@ -308,6 +308,14 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
                 }
                 continue;
             }
+            // The notice "Copied" already shows: should Windows refuse the clipboard after the retries, it is logged.
+            // TODO(WPC-352): tell the user when the copy fails instead of showing "Copied" anyway.
+            Effect::CopyText(text) => {
+                if let Err(e) = clipboard::copy_text(resident, &text) {
+                    log::failure("session: copying text", &e);
+                }
+                continue;
+            }
             Effect::WakeAt(uptime) => {
                 FROZEN_SCREEN.with_borrow(|open| {
                     if let Some(frozen) = open {
@@ -316,9 +324,8 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
                 });
                 continue;
             }
-            // No rule asks for these yet: the tools that do bring them (Dimensions' copy with WPC-308, Snip with
-            // WPC-317 and WPC-318, the gear with WPC-319). The log never shows their content, which may hold a path.
-            Effect::CopyText(_) => "copying text",
+            // No rule asks for these yet: the tools that do bring them (Snip with WPC-317 and WPC-318, the gear with
+            // WPC-319). The log never shows their content, which may hold a path.
             Effect::CopyImage(_) => "copying an image",
             Effect::WritePng { .. } => "writing a PNG file",
             Effect::OpenSaveAs { .. } => "opening Save As",
