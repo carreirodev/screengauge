@@ -252,7 +252,7 @@ fn a_pinned_labels_text_is_in_the_panels_ink_with_the_bar_and_the_logical_part_f
             let context = format!("{mode:?} at {dpi} DPI");
             let logical = label.logical.as_ref().expect("a logical part");
             let window_to_screen =
-                |x: f32, y: f32| (x as i32 + MONITOR.left, y as i32 + MONITOR.top);
+                |x: f32, y: f32| (whole(x) + MONITOR.left, whole(y) + MONITOR.top);
 
             // The bar: the ink at 40% over the panel, on every pixel of it.
             let bar_color = over(t.ink, 0.4, panel);

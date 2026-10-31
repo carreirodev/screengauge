@@ -1,5 +1,5 @@
 //! The notice: a short message on a panel with a sign before its text, drawn above and to the right of where the cursor
-//! was when it appeared (the prototype's `.toast`, WPC-279). Where it goes needs no Windows, so [`size`] and [`place`]
+//! was when it appeared (the prototype's notice, WPC-279). Where it goes needs no Windows, so [`size`] and [`place`]
 //! are tested without a monitor; the rest draws it onto the overlay's render target.
 
 use screengauge_core::session::{Point, Sign};

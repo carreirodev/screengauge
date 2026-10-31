@@ -204,8 +204,8 @@ pub fn pill_size(text_width: i32, dpi: u32) -> Size {
 /// The widths of a pinned label's border, in physical pixels. Each is scaled on its own, as every other size is, so the
 /// ring is the same width on its three sides whatever the scale, and the pinned pill is `strip + ring` wider and
 /// `2 * ring` taller than the live pill around the same text. Scaling the sum in one go would give `scaled(4)` and
-/// `scaled(2)`, which differ by a pixel at some scales (at 150%, a strip of 5 and a ring of 2 are 7 wide against 6) and
-/// would make the ring uneven.
+/// `scaled(2)`, which differ by a pixel at some scales (the width at 150%, 7 against 6; the height at 125%, 2 against 3,
+/// and at 150%, 4 against 3) and would make the ring uneven.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Border {
     /// The cyan strip on the label's left side.
