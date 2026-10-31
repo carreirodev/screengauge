@@ -113,8 +113,8 @@ fn release_exe_fits_the_download_limit() {
     );
 }
 
-/// The app icon is the exe's only icon group, and the icon images in the exe are the .ico file's, byte for byte: nothing
-/// was converted or resized on the way in.
+/// The app icon is the exe's only icon group, and the icon images in the exe are the .ico file's, byte for byte:
+/// nothing was converted or resized on the way in.
 #[test]
 fn exe_embeds_the_ico_file_as_its_only_icon_group() {
     let frames = read_ico();
@@ -514,7 +514,7 @@ impl VersionInfo {
         Self { block }
     }
 
-    /// What `VerQueryValueW` finds at `sub_block`, with its length in the unit the value uses (characters for a string).
+    /// What `VerQueryValueW` finds at `sub_block`, with its length in the value's own unit (characters for a string).
     fn query(&self, sub_block: &str) -> (*const c_void, usize) {
         let sub_block = HSTRING::from(sub_block);
         let mut value = std::ptr::null_mut::<c_void>();

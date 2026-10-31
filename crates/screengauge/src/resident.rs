@@ -16,7 +16,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
     FindWindowW, GetMessageW, GetWindowThreadProcessId, MSG, PostMessageW, PostQuitMessage,
     RegisterClassExW, RegisterWindowMessageW, TranslateMessage, WINDOW_EX_STYLE, WM_CONTEXTMENU,
-    WM_DESTROY, WM_HOTKEY, WNDCLASSEXW, WS_OVERLAPPED,
+    WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_HOTKEY, WM_SETTINGCHANGE, WNDCLASSEXW,
+    WS_OVERLAPPED,
 };
 use windows::core::{Error, PCWSTR, w};
 
@@ -164,6 +165,14 @@ extern "system" fn window_proc(
         }
         notification::SHOW_WAITING => {
             notification::show_waiting(hwnd);
+            LRESULT(0)
+        }
+        // The scale of the display the taskbar is on may have changed; the tray icon then needs another size. Which of
+        // these Windows sends a window that is never shown is for the hardware check to tell, so all three are handled.
+        WM_DPICHANGED | WM_DISPLAYCHANGE | WM_SETTINGCHANGE => {
+            if let Err(e) = tray::refresh(hwnd) {
+                log::failure("tray icon: following the taskbar's scale", &e);
+            }
             LRESULT(0)
         }
         WM_DESTROY => {
