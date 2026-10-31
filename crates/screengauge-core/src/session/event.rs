@@ -1,6 +1,7 @@
 //! What the Windows layer tells the session core while the tools are open.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use super::Point;
 use crate::settings::{DimensionsMode, Tool};
@@ -15,6 +16,9 @@ pub struct Event {
     /// When it happened, by the computer's clock. The session never reads the clock itself; the Snip's file name
     /// comes from this.
     pub time: LocalTime,
+    /// How long Windows had been running when it happened, to the millisecond. Unlike the local time, it never goes
+    /// back or jumps, so it times what stays on screen only a moment, such as a notice.
+    pub uptime: Duration,
     pub input: Input,
 }
 
@@ -71,6 +75,9 @@ pub enum Input {
     MonitorsChanged,
     /// The Save As window closed, with the path the user chose, or `None` when it was cancelled.
     SaveAsClosed(Option<PathBuf>),
+    /// The moment the session asked to be woken at ([`Effect::WakeAt`](super::Effect::WakeAt)) has come. Windows' timers
+    /// may run a little early or late, so the session goes by the event's uptime, not by this coming.
+    Wake,
 }
 
 /// The keys the tools use. None of them can be changed.

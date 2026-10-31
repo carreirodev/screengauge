@@ -6,7 +6,7 @@ mod geometry;
 
 use std::cell::RefCell;
 
-use screengauge_core::session::{Measurement, Rect, Scale};
+use screengauge_core::session::{Measurement, Notice, Rect, Scale};
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{D2D_RECT_F, D2D1_COLOR_F};
 use windows::Win32::Graphics::Direct2D::{
@@ -23,6 +23,7 @@ use windows::Win32::Graphics::DirectWrite::{
 };
 use windows::core::{BOOL, Error, PCWSTR, w};
 
+use crate::theme::Mode;
 use geometry::scaled;
 
 /// The label's font. Its digits differ in width unless asked for tabular figures (a 1 is two pixels narrower than a 0
@@ -199,12 +200,15 @@ struct Typeset {
 }
 
 impl Overlay {
-    /// For a window over `monitor`, whose scale is `scale`, drawing on `target`.
+    /// For a window over `monitor`, whose scale is `scale`, drawing on `target`, with ScreenGauge's own surfaces (the
+    /// pinned measurements' labels and the notices) in the palette of `_mode`.
+    // TODO(WPC-308 builder): keep `mode` and draw the pinned labels and the notices in its palette.
     pub fn new(
         target: &ID2D1RenderTarget,
         fonts: &Fonts,
         monitor: Rect,
         scale: Scale,
+        _mode: Mode,
     ) -> windows::core::Result<Overlay> {
         let dpi = scale.dpi();
         let brush = |[r, g, b]: [u8; 3]| {
@@ -241,12 +245,43 @@ impl Overlay {
         })
     }
 
+    /// Draws the pinned measurements, oldest first, and then the live one over what `target` holds, between its
+    /// BeginDraw and EndDraw. The pinned labels are in the palette, with a cyan strip on their left; the live one is
+    /// cyan.
+    // TODO(WPC-308 builder): draw in layers across every measurement (every label's shadow, every outline, every cyan
+    // pixel, then the pills, pinned oldest first and the live one last), so nothing darkens a cyan pixel of another
+    // measurement, and give the pinned labels their palette and strip.
+    pub fn draw(
+        &self,
+        target: &ID2D1RenderTarget,
+        pinned: &[&Measurement],
+        live: Option<&Measurement>,
+    ) -> windows::core::Result<()> {
+        let mut drawn = Ok(());
+        for measurement in pinned.iter().copied().chain(live) {
+            let one = self.draw_one(target, measurement);
+            drawn = drawn.and(one);
+        }
+        drawn
+    }
+
+    /// Draws `notice` over everything else, inside the window's monitor, between BeginDraw and EndDraw: the palette's
+    /// panel with its border and shadow, the sign and the text, above and to the right of where it appeared.
+    // TODO(WPC-308 builder): draw it.
+    pub fn draw_notice(
+        &self,
+        _target: &ID2D1RenderTarget,
+        _notice: &Notice,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+
     /// Draws `measurement` over what `target` holds, between its BeginDraw and EndDraw. Order matters, and every step
     /// only draws over the one before: the label's shadow, which is faint and reaches toward the line; every outline;
     /// every cyan pixel, so nothing darkens one, whatever is under it; then the pill and its text, which never touch
     /// the line, being further from it than a tick reaches. A failure to lay the label out is returned once the line
     /// is drawn.
-    pub fn draw(
+    fn draw_one(
         &self,
         target: &ID2D1RenderTarget,
         measurement: &Measurement,
@@ -629,8 +664,8 @@ mod tests {
             draw: impl FnOnce(&Overlay, &ID2D1RenderTarget),
         ) -> Picture {
             let scale = Scale::from_dpi(dpi).expect("a scale");
-            let overlay =
-                Overlay::new(&self.target, &self.fonts, monitor, scale).expect("the overlay");
+            let overlay = Overlay::new(&self.target, &self.fonts, monitor, scale, Mode::Dark)
+                .expect("the overlay");
             let [r, g, b] = BACKGROUND;
             let background = D2D1_COLOR_F {
                 r: f32::from(r) / 255.0,
@@ -1039,7 +1074,9 @@ mod tests {
             let m = horizontal(-400, -301, 350, "100");
             let k = scaled(4, dpi);
             let picture = canvas.render(MONITOR, dpi, |overlay, target| {
-                overlay.draw(target, &m).expect("the measurement");
+                overlay
+                    .draw(target, &[], Some(&m))
+                    .expect("the measurement");
             });
             for x in 80..180 {
                 assert_eq!(picture.at(x, 150), CYAN, "column {x} at {dpi} DPI");
@@ -1077,6 +1114,7 @@ mod tests {
             &canvas.fonts,
             MONITOR,
             Scale::from_dpi(96).expect("a scale"),
+            Mode::Dark,
         )
         .expect("the overlay");
         for (part, format) in [
@@ -1137,7 +1175,7 @@ mod tests {
     fn check_cyan_after_the_label(canvas: &Canvas, m: &Measurement, dpi: u32) {
         let k = scaled(4, dpi);
         let picture = canvas.render(MONITOR, dpi, |overlay, target| {
-            overlay.draw(target, m).expect("the measurement");
+            overlay.draw(target, &[], Some(m)).expect("the measurement");
         });
         for y in 0..canvas.height as usize {
             for x in 0..canvas.width as usize {

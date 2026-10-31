@@ -1,9 +1,11 @@
 //! The session core's events, as the Windows layer makes them: what happened, with where the cursor was, the modifier
-//! keys held and the local time, read here so the core never reads them itself.
+//! keys held, the local time and how long Windows has been running, read here so the core never reads them itself.
+
+use std::time::Duration;
 
 use screengauge_core::session::{Event, Held, Input, Key, LocalTime, Point};
 use windows::Win32::Foundation::{SYSTEMTIME, WPARAM};
-use windows::Win32::System::SystemInformation::GetLocalTime;
+use windows::Win32::System::SystemInformation::{GetLocalTime, GetTickCount64};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, VIRTUAL_KEY, VK_1, VK_2, VK_3, VK_4, VK_BACK, VK_C, VK_CONTROL, VK_DELETE,
     VK_DOWN, VK_ESCAPE, VK_H, VK_LEFT, VK_MENU, VK_RIGHT, VK_SHIFT, VK_UP, VK_V,
@@ -13,7 +15,7 @@ use windows::Win32::UI::WindowsAndMessaging::GetMessagePos;
 use crate::win32::signed_words;
 
 /// `input`, as part of the message this thread is handling: the cursor's place when Windows sent it, the modifier keys
-/// held as of that message, and the local time now.
+/// held as of that message, and the local time and Windows' running time now.
 pub fn of_message(input: Input) -> Event {
     // SAFETY: no arguments; reads the cursor's place for the message this thread last retrieved.
     let position = unsafe { GetMessagePos() };
@@ -23,8 +25,15 @@ pub fn of_message(input: Input) -> Event {
         cursor: point(position),
         held: held(),
         time: local_time(time),
+        uptime: uptime(),
         input,
     }
+}
+
+/// How long Windows has been running, to the millisecond, on the clock its timers count on.
+pub fn uptime() -> Duration {
+    // SAFETY: no arguments.
+    Duration::from_millis(unsafe { GetTickCount64() })
 }
 
 fn held() -> Held {

@@ -13,9 +13,10 @@ mod units;
 
 pub use event::{Event, Held, Input, Key, LocalTime, ToolbarButton};
 pub use frozen_screen::{Colors, Image, Photo, Point, Rect, Scale};
-pub use output::{Cursor, Effect, Label, Measurement, Scene, Span};
+pub use output::{Cursor, Effect, Label, Measurement, Message, Notice, Scene, Sign, Span};
 
 use std::fmt;
+use std::time::Duration;
 
 use crate::settings::{DimensionsMode, Options, Remembered, Tolerance, Tool};
 
@@ -30,6 +31,11 @@ pub struct Opening {
     /// The options in Settings as the tools open; changing Settings meanwhile doesn't reach this session.
     pub options: Options,
     pub remembered: Remembered,
+    /// Until Windows has been running this long ([`Event::uptime`]), a press is taken for the second click of a
+    /// double-click that called ScreenGauge, as on its tray icon, and does nothing: it would pin a measurement of the
+    /// taskbar and copy it over what the user had copied. `None` when the global shortcut called it, after which a
+    /// click counts at once (the owner's choice in WPC-308).
+    pub second_click_until: Option<Duration>,
 }
 
 /// Why a session didn't open.
@@ -73,6 +79,10 @@ pub struct Session {
     remembered: Remembered,
     /// What Dimensions measures around the cursor.
     live: Option<Measurement>,
+    /// The pinned measurements, oldest first.
+    pinned: Vec<Measurement>,
+    /// The notice on screen.
+    notice: Option<Notice>,
     /// Set by the effect that closes the tools, after which events do nothing.
     closed: bool,
 }
@@ -84,6 +94,8 @@ impl Session {
             cursor,
             options,
             remembered,
+            // Taken by the rule that pins a measurement on a click, which comes next.
+            second_click_until: _,
         } = opening;
         if frozen_screen.is_empty() {
             return Err(Refused::NoMonitor);
@@ -106,6 +118,8 @@ impl Session {
             remembered_at_opening: remembered.clone(),
             remembered,
             live: None,
+            pinned: Vec::new(),
+            notice: None,
             closed: false,
         };
         session.measure();
@@ -223,6 +237,8 @@ impl Session {
             frozen_screen: &self.frozen_screen,
             cursor: Cursor::Cross,
             live: self.live.as_ref(),
+            pinned: &self.pinned,
+            notice: self.notice.as_ref(),
         }
     }
 }

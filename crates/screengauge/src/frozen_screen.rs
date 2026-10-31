@@ -1,18 +1,22 @@
 //! The frozen screen on screen: one window over each monitor, at its exact place and size in physical pixels, drawing
 //! the session core's scene. Each window draws its monitor's photo pixel for pixel with Direct2D, shows the cursor the
 //! scene names, and hands the core what the user does over it and what Windows tells it: another program came to the
-//! front, or the monitors changed. Over the photo of the monitor it is on, each window draws what Dimensions measures
-//! right now, and is drawn again whenever that changes. The windows share the session; destroying them when the tools
-//! close, by dropping [`FrozenScreen`], drops the session and erases the photos with it.
+//! front, or the monitors changed. Over its monitor's photo, each window draws the measurements pinned there, what
+//! Dimensions measures right now when the cursor is there, and the notice when it is there, and is drawn again whenever
+//! one of them changes. The first window also keeps the timer that wakes the session when a notice is due to go. The
+//! windows share the session; destroying them when the tools close, by dropping [`FrozenScreen`], drops the session and
+//! erases the photos with it.
 
 mod overlay;
 
 use std::cell::{OnceCell, RefCell};
+use std::collections::BTreeSet;
 use std::ffi::c_void;
 use std::rc::Rc;
+use std::time::Duration;
 
 use screengauge_core::session::{
-    Cursor, Effect, Event, Input, Measurement, Photo, Point, Rect, Session,
+    Cursor, Effect, Event, Input, Measurement, Notice, Photo, Point, Rect, Session,
 };
 use windows::Win32::Foundation::{
     D2DERR_RECREATE_TARGET, E_FAIL, ERROR_SUCCESS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT,
@@ -37,14 +41,16 @@ use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, PAINTS
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos,
-    GetWindowLongPtrW, HTCLIENT, IDC_CROSS, LoadCursorW, PostMessageW, RegisterClassExW, SW_SHOWNA,
-    SetCursor, SetForegroundWindow, SetWindowLongPtrW, ShowWindow, WM_APP, WM_CLOSE,
-    WM_DISPLAYCHANGE, WM_ERASEBKGND, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SYSKEYDOWN,
-    WM_SYSKEYUP, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    GetWindowLongPtrW, HTCLIENT, IDC_CROSS, KillTimer, LoadCursorW, PostMessageW, RegisterClassExW,
+    SW_SHOWNA, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, ShowWindow,
+    USER_TIMER_MAXIMUM, USER_TIMER_MINIMUM, WM_APP, WM_CLOSE, WM_DISPLAYCHANGE, WM_ERASEBKGND,
+    WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
+    WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDCLASSEXW,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{Error, PCWSTR, w};
 
+use crate::theme::Mode;
 use crate::win32::{low_word, struct_size};
 use crate::{event, foreground, log};
 use overlay::Overlay;
@@ -59,6 +65,10 @@ pub const EFFECTS_READY: u32 = WM_APP + 2;
 /// What a frozen screen window posts to itself when Windows says the monitors changed. WM_APP + 4 is taken by the
 /// notifications waiting to show (`notification::SHOW_WAITING`).
 const MONITORS_CHANGED: u32 = WM_APP + 5;
+
+/// The first window's timer that wakes the session core at the moment it asked for (`Effect::WakeAt`). Each window has
+/// its own timers, so the number is apart from the resident window's, and the timer goes with the window.
+const WAKE_TIMER: usize = 1;
 
 /// Registered once at startup. The class has no cursor: the session core's scene names it.
 pub fn register_class(instance: HINSTANCE) -> windows::core::Result<()> {
@@ -128,9 +138,13 @@ struct SharedSession {
 }
 
 impl FrozenScreen {
-    /// Shows the session's scene, one window per monitor, and gives the keyboard to the window under the cursor so
-    /// Esc reaches it. `resident` receives [`EFFECTS_READY`].
-    pub fn show(session: Session, resident: HWND) -> windows::core::Result<FrozenScreen> {
+    /// Shows the session's scene, one window per monitor, with ScreenGauge's own surfaces in the palette of `mode`, and
+    /// gives the keyboard to the window under the cursor so Esc reaches it. `resident` receives [`EFFECTS_READY`].
+    pub fn show(
+        session: Session,
+        resident: HWND,
+        mode: Mode,
+    ) -> windows::core::Result<FrozenScreen> {
         // SAFETY: no module name, so this is the handle of ScreenGauge.exe itself.
         let instance: HINSTANCE = unsafe { GetModuleHandleW(None) }?.into();
         let factory = factory()?;
@@ -152,7 +166,7 @@ impl FrozenScreen {
             watch: None,
         };
         for (monitor, &rect) in rects.iter().enumerate() {
-            let window = create_window(instance, monitor, rect, &factory, &frozen.session)?;
+            let window = create_window(instance, monitor, rect, mode, &factory, &frozen.session)?;
             frozen.windows.push(window);
         }
         if frozen.session.windows.set(frozen.windows.clone()).is_err() {
@@ -179,6 +193,24 @@ impl FrozenScreen {
         let mut effects = self.take_effects();
         effects.extend(self.session.handle(event));
         effects
+    }
+
+    /// Has the first window hand the session core [`Input::Wake`] once Windows has been running `uptime`, in place of
+    /// any wake still waiting. Should Windows refuse the timer, what was due to go stays until the next event.
+    pub fn wake_at(&self, uptime: Duration) {
+        // Can't happen: the session core refuses a frozen screen without monitors.
+        let Some(&window) = self.windows.first() else {
+            return;
+        };
+        let wait = uptime.saturating_sub(event::uptime());
+        // Windows waits at least USER_TIMER_MINIMUM, and a wait past USER_TIMER_MAXIMUM, about 25 days, is clamped to it.
+        let milliseconds = u32::try_from(wait.as_millis())
+            .unwrap_or(USER_TIMER_MAXIMUM)
+            .clamp(USER_TIMER_MINIMUM, USER_TIMER_MAXIMUM);
+        // SAFETY: our own window, on its thread. A timer with the same number is replaced.
+        if unsafe { SetTimer(Some(window), WAKE_TIMER, milliseconds, None) } == 0 {
+            log::failure("frozen screen: waking the session", &Error::from_thread());
+        }
     }
 
     /// What the windows' events left for the resident window since it last took them.
@@ -258,10 +290,10 @@ impl Drop for FrozenScreen {
 }
 
 impl SharedSession {
-    /// Hands `event` to the session core, and draws again the windows whose measurement it changed. Here rather than in
-    /// `input`, so an event that comes from the resident window redraws too.
+    /// Hands `event` to the session core, and draws again the windows whose part of the scene it changed. Here rather
+    /// than in `input`, so an event that comes from the resident window redraws too.
     fn handle(&self, event: Event) -> Vec<Effect> {
-        let before = self.live();
+        let before = self.shown();
         let effects = match self.core.try_borrow_mut() {
             Ok(mut session) => session.handle(event),
             // Can't happen: the core calls no Windows function, so no event arrives while it handles one.
@@ -273,41 +305,45 @@ impl SharedSession {
                 Vec::new()
             }
         };
-        let after = self.live();
-        // Moving along the same row often measures the same span: nothing to draw again.
-        if before != after {
-            self.redraw(before.as_ref(), after.as_ref());
-        }
+        let after = self.shown();
+        // Moving along the same row often measures the same span, and then nothing is drawn again.
+        self.redraw(&monitors_to_draw_again(&before, &after));
         effects
     }
 
-    /// What Dimensions measures right now, as a copy to compare with a later one. `None` while no tool measures.
-    fn live(&self) -> Option<Measurement> {
+    /// What the windows draw over their photos right now, as a copy to compare with a later one.
+    fn shown(&self) -> Shown {
         match self.core.try_borrow() {
-            Ok(session) => session.scene().live.cloned(),
+            Ok(session) => {
+                let scene = session.scene();
+                Shown {
+                    live: scene.live.cloned(),
+                    pinned: scene.pinned.to_vec(),
+                    notice: scene.notice.copied(),
+                }
+            }
             // Can't happen: this is read outside the moment the core handles an event.
             Err(_) => {
                 log::failure(
                     "frozen screen",
-                    &"the measurement was asked for while an event was handled",
+                    &"the scene was asked for while an event was handled",
                 );
-                None
+                Shown::default()
             }
         }
     }
 
-    /// Marks for drawing the windows the measurement was on and is on now, which differ when it moved to another
-    /// monitor: the one it left must lose its line.
-    fn redraw(&self, before: Option<&Measurement>, after: Option<&Measurement>) {
+    /// Marks the windows of `monitors` for drawing.
+    fn redraw(&self, monitors: &[usize]) {
         let Some(windows) = self.windows.get() else {
             return;
         };
-        for monitor in monitors_to_draw_again(before, after) {
+        for &monitor in monitors {
             let Some(&window) = windows.get(monitor) else {
-                // Can't happen: the core measures on a monitor of the frozen screen.
+                // Can't happen: the core draws only on monitors of the frozen screen.
                 log::failure(
                     "frozen screen",
-                    &"a measurement is on a monitor with no window",
+                    &"the scene has something on a monitor with no window",
                 );
                 continue;
             };
@@ -370,16 +406,62 @@ impl SharedSession {
     }
 }
 
-/// The monitors whose windows show something different once the measurement goes from `before` to `after`: the one it
-/// was on, which must lose its line, and the one it is on now. One monitor, once, when they are the same.
-fn monitors_to_draw_again(before: Option<&Measurement>, after: Option<&Measurement>) -> Vec<usize> {
-    let before = before.map(|measurement| measurement.monitor);
-    let after = after.map(|measurement| measurement.monitor);
-    let mut monitors: Vec<usize> = before.into_iter().collect();
-    if after != before {
-        monitors.extend(after);
+/// What the windows draw over their photos: the scene without the photos, copied.
+#[derive(Debug, Clone, PartialEq, Default)]
+struct Shown {
+    live: Option<Measurement>,
+    pinned: Vec<Measurement>,
+    notice: Option<Notice>,
+}
+
+/// One window's part of what is shown: what is on its monitor.
+#[derive(Debug, PartialEq)]
+struct OnMonitor<'a> {
+    /// Oldest first.
+    pinned: Vec<&'a Measurement>,
+    live: Option<&'a Measurement>,
+    notice: Option<&'a Notice>,
+}
+
+impl Shown {
+    fn on(&self, monitor: usize) -> OnMonitor<'_> {
+        OnMonitor {
+            pinned: self
+                .pinned
+                .iter()
+                .filter(|measurement| measurement.monitor == monitor)
+                .collect(),
+            live: self
+                .live
+                .as_ref()
+                .filter(|measurement| measurement.monitor == monitor),
+            notice: self
+                .notice
+                .as_ref()
+                .filter(|notice| notice.monitor == monitor),
+        }
     }
+
+    /// Every monitor something is drawn on.
+    fn monitors(&self) -> impl Iterator<Item = usize> + '_ {
+        let measured = self
+            .pinned
+            .iter()
+            .chain(&self.live)
+            .map(|measurement| measurement.monitor);
+        measured.chain(self.notice.iter().map(|notice| notice.monitor))
+    }
+}
+
+/// The monitors whose windows show something different from `before` to `after`, each once and in order: the one a
+/// measurement left, which must lose its line, the one it is on now, the one a measurement was pinned on or taken off,
+/// and the one a notice appeared on or went from.
+fn monitors_to_draw_again(before: &Shown, after: &Shown) -> Vec<usize> {
+    let monitors: BTreeSet<usize> = before.monitors().chain(after.monitors()).collect();
     monitors
+        .into_iter()
+        .filter(|&monitor| before.on(monitor) != after.on(monitor))
+        .collect()
 }
 
 /// Destroys one of the frozen screen's windows, from outside its window procedure.
@@ -394,14 +476,16 @@ fn destroy(window: HWND) {
 struct Window {
     /// Its monitor's index in the scene's frozen screen.
     monitor: usize,
+    /// The palette of what ScreenGauge draws itself over the photo.
+    mode: Mode,
     session: Rc<SharedSession>,
     factory: ID2D1Factory,
     /// Made at the first draw, and again when Direct2D says the graphics device was lost.
     drawing: RefCell<Option<Drawing>>,
 }
 
-/// The photo on the graphics card, ready to draw, with what draws the measurement over it. They belong to the render
-/// target, so they are made again together when it is lost.
+/// The photo on the graphics card, ready to draw, with what draws the measurements and the notice over it. They belong
+/// to the render target, so they are made again together when it is lost.
 struct Drawing {
     target: ID2D1HwndRenderTarget,
     bitmap: ID2D1Bitmap,
@@ -416,6 +500,7 @@ fn create_window(
     instance: HINSTANCE,
     monitor: usize,
     rect: Rect,
+    mode: Mode,
     factory: &ID2D1Factory,
     session: &Rc<SharedSession>,
 ) -> windows::core::Result<HWND> {
@@ -424,6 +509,7 @@ fn create_window(
     let height = i32::try_from(rect.height).map_err(|_| too_large())?;
     let mut slot: Slot = Some(Box::new(Window {
         monitor,
+        mode,
         session: Rc::clone(session),
         factory: factory.clone(),
         drawing: RefCell::new(None),
@@ -527,6 +613,14 @@ extern "system" fn window_proc(
                 Some(LRESULT(0))
             }
             MONITORS_CHANGED => deliver(Input::MonitorsChanged),
+            WM_TIMER if wparam.0 == WAKE_TIMER => {
+                // Once: the session asks again when it needs another wake.
+                // SAFETY: our own window's timer.
+                if let Err(e) = unsafe { KillTimer(Some(hwnd), WAKE_TIMER) } {
+                    log::failure("frozen screen: stopping the wake timer", &e);
+                }
+                deliver(Input::Wake)
+            }
             _ => None,
         }
     });
@@ -594,11 +688,12 @@ fn paint(hwnd: HWND, window: &Window) {
     let _ = unsafe { EndPaint(hwnd, &paint) };
 }
 
-/// Draws the window's part of the scene: its monitor's photo, and over it what Dimensions measures when that is on this
-/// monitor.
+/// Draws the window's part of the scene: its monitor's photo, and over it the measurements pinned on this monitor, what
+/// Dimensions measures when that is on this monitor, and the notice when it is here.
 fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
     // A copy, so the session is borrowed only for a moment.
-    let live = window.live();
+    let shown = window.session.shown();
+    let here = shown.on(window.monitor);
     let mut drawing = window
         .drawing
         .try_borrow_mut()
@@ -619,12 +714,14 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
             None,
         );
     }
-    // A label that can't be laid out leaves the photo and the line as they are; the failure is returned once the frame
-    // is finished.
-    let overlaid = match &live {
-        Some(measurement) => ready.overlay.draw(&ready.target, measurement),
+    // A label or a notice that can't be laid out leaves the photo and the lines as they are; the failure is returned
+    // once the frame is finished.
+    let measured = ready.overlay.draw(&ready.target, &here.pinned, here.live);
+    let noticed = match here.notice {
+        Some(notice) => ready.overlay.draw_notice(&ready.target, notice),
         None => Ok(()),
     };
+    let overlaid = measured.and(noticed);
     // SAFETY: ends the BeginDraw above.
     match unsafe { ready.target.EndDraw(None, None) } {
         Ok(()) => {
@@ -703,7 +800,7 @@ impl Drawing {
                 )
             }
         })??;
-        let overlay = Overlay::new(&target, &overlay::fonts()?, rect, scale)?;
+        let overlay = Overlay::new(&target, &overlay::fonts()?, rect, scale, window.mode)?;
         Ok(Drawing {
             target,
             bitmap,
@@ -727,47 +824,104 @@ impl Window {
             .ok_or_else(|| Error::new(E_FAIL, "the scene has no photo for this window"))?;
         Ok(f(photo))
     }
-
-    /// The measurement to draw over this window's photo: `None` while no tool measures, and when it is on another
-    /// monitor.
-    fn live(&self) -> Option<Measurement> {
-        self.session
-            .live()
-            .filter(|measurement| measurement.monitor == self.monitor)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn on(monitor: usize) -> Measurement {
+    use screengauge_core::session::{Label, Message};
+
+    /// A measurement on `monitor` whose label reads `text`, so two of them on one monitor differ.
+    fn on(monitor: usize, text: &str) -> Measurement {
         Measurement {
             monitor,
             horizontal: None,
             vertical: None,
-            label: screengauge_core::session::Label::default(),
+            label: Label {
+                physical: text.to_owned(),
+                logical: None,
+            },
+        }
+    }
+
+    fn live(measurement: Measurement) -> Shown {
+        Shown {
+            live: Some(measurement),
+            ..Shown::default()
+        }
+    }
+
+    fn copied_on(monitor: usize) -> Notice {
+        Notice {
+            message: Message::Copied,
+            at: Point { x: 10, y: 10 },
+            monitor,
         }
     }
 
     #[test]
     fn a_measurement_that_appears_or_goes_redraws_its_monitor() {
-        assert_eq!(monitors_to_draw_again(None, Some(&on(1))), [1]);
-        assert_eq!(monitors_to_draw_again(Some(&on(1)), None), [1]);
+        let nothing = Shown::default();
+        assert_eq!(monitors_to_draw_again(&nothing, &live(on(1, "24"))), [1]);
+        assert_eq!(monitors_to_draw_again(&live(on(1, "24")), &nothing), [1]);
     }
 
     #[test]
     fn a_measurement_that_changes_on_one_monitor_redraws_it_once() {
-        assert_eq!(monitors_to_draw_again(Some(&on(0)), Some(&on(0))), [0]);
+        assert_eq!(
+            monitors_to_draw_again(&live(on(0, "24")), &live(on(0, "25"))),
+            [0]
+        );
     }
 
     #[test]
     fn a_measurement_that_moves_to_another_monitor_redraws_both() {
-        assert_eq!(monitors_to_draw_again(Some(&on(0)), Some(&on(2))), [0, 2]);
+        assert_eq!(
+            monitors_to_draw_again(&live(on(0, "24")), &live(on(2, "24"))),
+            [0, 2]
+        );
     }
 
     #[test]
-    fn no_measurement_before_or_after_redraws_nothing() {
-        assert_eq!(monitors_to_draw_again(None, None), Vec::<usize>::new());
+    fn the_same_measurement_or_none_redraws_nothing() {
+        let same = live(on(0, "24"));
+        assert_eq!(monitors_to_draw_again(&same, &same), Vec::<usize>::new());
+        let nothing = Shown::default();
+        assert_eq!(
+            monitors_to_draw_again(&nothing, &nothing),
+            Vec::<usize>::new()
+        );
+    }
+
+    #[test]
+    fn pinning_the_live_measurement_redraws_its_monitor_though_the_live_one_stays() {
+        let before = live(on(0, "24"));
+        let after = Shown {
+            pinned: vec![on(0, "24")],
+            ..before.clone()
+        };
+        assert_eq!(monitors_to_draw_again(&before, &after), [0]);
+    }
+
+    #[test]
+    fn taking_off_a_pin_on_another_monitor_redraws_that_monitor_alone() {
+        let before = Shown {
+            pinned: vec![on(1, "180")],
+            ..live(on(0, "24"))
+        };
+        let after = live(on(0, "24"));
+        assert_eq!(monitors_to_draw_again(&before, &after), [1]);
+    }
+
+    #[test]
+    fn a_notice_that_appears_or_goes_redraws_its_monitor() {
+        let quiet = live(on(0, "24"));
+        let noticed = Shown {
+            notice: Some(copied_on(1)),
+            ..quiet.clone()
+        };
+        assert_eq!(monitors_to_draw_again(&quiet, &noticed), [1]);
+        assert_eq!(monitors_to_draw_again(&noticed, &quiet), [1]);
     }
 }

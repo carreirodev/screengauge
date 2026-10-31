@@ -2,6 +2,8 @@
 //! frozen screens drawn here, rectangle by rectangle, without a screen. They look only at the live measurement the
 //! session would draw and at the effects it returns.
 
+use std::time::Duration;
+
 use screengauge_core::session::{
     Colors, Effect, Event, Held, Image, Input, Key, Label, LocalTime, Measurement, Opening, Photo,
     Point, Rect, Scale, Session, Span,
@@ -75,6 +77,7 @@ fn open(frozen_screen: Vec<Photo>, mode: DimensionsMode, cursor: Point) -> Sessi
             dimensions_mode: mode,
             ..Remembered::default()
         },
+        second_click_until: None,
     })
     .expect("a frozen screen the session takes")
 }
@@ -260,6 +263,7 @@ fn a_tolerance_of_zero_stops_at_the_first_pixel_that_differs_at_all() {
             dimensions_mode: DimensionsMode::Horizontal,
             ..Remembered::default()
         },
+        second_click_until: None,
     })
     .expect("a frozen screen the session takes");
     assert_eq!(
@@ -289,6 +293,7 @@ fn event(cursor: Point, input: Input) -> Event {
             minute: 41,
             second: 12,
         },
+        uptime: Duration::from_millis(50),
         input,
     }
 }
@@ -385,6 +390,7 @@ fn the_first_time_dimensions_measures_in_cross() {
         cursor: at(900, 600),
         options: Options::default(),
         remembered: Remembered::default(),
+        second_click_until: None,
     })
     .expect("a frozen screen the session takes");
     assert_eq!(
@@ -409,6 +415,7 @@ fn open_remembering(remembered: Remembered) -> Session {
         cursor: at(900, 600),
         options: Options::default(),
         remembered,
+        second_click_until: None,
     })
     .expect("a frozen screen the session takes")
 }

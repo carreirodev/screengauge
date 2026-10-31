@@ -2,6 +2,8 @@
 //! screens and monitor arrangements made up here, without a screen. They look only at what would be drawn and at the
 //! effects the Windows layer would carry out.
 
+use std::time::Duration;
+
 use screengauge_core::session::{
     Colors, Cursor, Effect, Event, Held, Image, Input, Key, LocalTime, Opening, Photo, Point, Rect,
     Refused, Scale, Session,
@@ -49,6 +51,7 @@ fn opening(frozen_screen: Vec<Photo>) -> Opening {
         cursor: Point { x: 1920, y: 1080 },
         options: Options::default(),
         remembered: Remembered::default(),
+        second_click_until: None,
     }
 }
 
@@ -145,6 +148,7 @@ fn event(input: Input) -> Event {
             minute: 41,
             second: 12,
         },
+        uptime: Duration::from_millis(50),
         input,
     }
 }

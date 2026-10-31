@@ -17,6 +17,7 @@ mod notification;
 mod resident;
 mod settings_file;
 mod single_instance;
+mod theme;
 mod tray;
 mod win32;
 

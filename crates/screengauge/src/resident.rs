@@ -5,6 +5,7 @@
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
 use screengauge_core::session::{Effect, Input, Opening, Point, Session};
 use screengauge_core::settings::{Remembered, Stored};
@@ -12,6 +13,7 @@ use windows::Win32::Foundation::{
     E_FAIL, ERROR_SUCCESS, HINSTANCE, HWND, LPARAM, LRESULT, POINT, SetLastError, WPARAM,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime;
 use windows::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
     FindWindowW, GetCursorPos, GetMessageW, GetWindowThreadProcessId, MSG, PostMessageW,
@@ -25,7 +27,7 @@ use crate::frozen_screen::{self, FrozenScreen};
 use crate::notification::{self, Notification};
 use crate::settings_file::SettingsFile;
 use crate::win32::{low_word, struct_size};
-use crate::{capture, event, global_shortcut, log, tray};
+use crate::{capture, event, global_shortcut, log, theme, tray};
 
 /// The resident window's class, which a copy opened again looks for to call the running copy.
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.Resident");
@@ -215,13 +217,15 @@ extern "system" fn window_proc(
 /// A call opens the tools, or, when they are open, goes to the session core as `input`: the global shortcut closes
 /// them, and the tray icon or opening ScreenGauge again (`Input::Called`) leaves them as they are.
 fn on_call(resident: HWND, input: Input) {
+    // Read before the photo, which takes about 120 ms: the double-click began with the call.
+    let second_click_until = second_click_until(&input);
     let told = FROZEN_SCREEN.with_borrow(|open| {
         open.as_ref()
             .map(|frozen| frozen.handle(event::of_message(input)))
     });
     match told {
         Some(effects) => carry_out(resident, effects),
-        None => match open(resident) {
+        None => match open(resident, second_click_until) {
             Ok(frozen) => {
                 FROZEN_SCREEN.set(Some(frozen));
                 notification::tools_opened();
@@ -236,9 +240,13 @@ fn on_call(resident: HWND, input: Input) {
     }
 }
 
-/// Opens the tools: the photo comes first, before any window of ScreenGauge appears or takes the keyboard, so whatever
-/// was on screen at the call (a hover, an open menu, a tooltip) is in it.
-fn open(resident: HWND) -> windows::core::Result<FrozenScreen> {
+/// Opens the tools, taking a press before `second_click_until` for the second click of the double-click that called
+/// them: the photo comes first, before any window of ScreenGauge appears or takes the keyboard, so whatever was on
+/// screen at the call (a hover, an open menu, a tooltip) is in it.
+fn open(
+    resident: HWND,
+    second_click_until: Option<Duration>,
+) -> windows::core::Result<FrozenScreen> {
     let frozen_screen = capture::every_monitor()?;
     let Stored {
         options,
@@ -246,14 +254,28 @@ fn open(resident: HWND) -> windows::core::Result<FrozenScreen> {
     } = SETTINGS_FILE
         .with_borrow(|loaded| loaded.as_ref().map(|loaded| loaded.stored.clone()))
         .ok_or_else(|| Error::new(E_FAIL, "the settings file wasn't read at startup"))?;
+    let mode = theme::mode(options.theme);
     let session = Session::open(Opening {
         frozen_screen,
         cursor: cursor_now()?,
         options,
         remembered,
+        second_click_until,
     })
     .map_err(|refused| Error::new(E_FAIL, refused.to_string()))?;
-    FrozenScreen::show(session, resident)
+    FrozenScreen::show(session, resident, mode)
+}
+
+/// Until when a press over the frozen screen is the second click of a double-click that called ScreenGauge: Windows'
+/// double-click time from the call, for any call but the global shortcut's (the owner's choice in WPC-308). The tray
+/// icon is the call a double-click habit reaches, since the photo shows about 140 ms after its first click (WPC-301).
+fn second_click_until(call: &Input) -> Option<Duration> {
+    if *call == Input::GlobalShortcut {
+        return None;
+    }
+    // SAFETY: no arguments.
+    let double_click = Duration::from_millis(u64::from(unsafe { GetDoubleClickTime() }));
+    Some(event::uptime() + double_click)
 }
 
 /// Where the cursor is now, in physical pixels of the virtual screen: the process is Per-Monitor V2.
@@ -284,6 +306,14 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
                 if let Err(e) = unsafe { SetCursorPos(point.x, point.y) } {
                     log::failure("session: moving the cursor", &e);
                 }
+                continue;
+            }
+            Effect::WakeAt(uptime) => {
+                FROZEN_SCREEN.with_borrow(|open| {
+                    if let Some(frozen) = open {
+                        frozen.wake_at(uptime);
+                    }
+                });
                 continue;
             }
             // No rule asks for these yet: the tools that do bring them (Dimensions' copy with WPC-308, Snip with

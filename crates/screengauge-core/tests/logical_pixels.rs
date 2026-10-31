@@ -2,6 +2,8 @@
 //! WPC-307): what the live label says on made-up arrangements of monitors and at every Windows scale, without a screen.
 //! They look only at the label the session would draw.
 
+use std::time::Duration;
+
 use screengauge_core::session::{
     Colors, Event, Held, Image, Input, Label, LocalTime, Opening, Photo, Point, Rect, Scale,
     Session,
@@ -64,6 +66,7 @@ fn open_with(
             dimensions_mode: mode,
             ..Remembered::default()
         },
+        second_click_until: None,
     })
     .expect("a frozen screen the session takes")
 }
@@ -216,6 +219,7 @@ fn move_to(cursor: Point) -> Event {
             minute: 41,
             second: 12,
         },
+        uptime: Duration::from_millis(50),
         input: Input::Move,
     }
 }

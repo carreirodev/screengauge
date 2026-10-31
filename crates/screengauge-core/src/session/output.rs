@@ -1,6 +1,7 @@
 //! What the session core gives the Windows layer: the scene to draw and the effects to carry out.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use super::{Image, Photo, Point};
 use crate::settings::{Folder, Remembered};
@@ -13,9 +14,59 @@ pub struct Scene<'a> {
     pub frozen_screen: &'a [Photo],
     /// The cursor over the frozen screen.
     pub cursor: Cursor,
-    /// What Dimensions measures around the cursor right now, drawn over the photo of its monitor. `None` while no tool
-    /// measures.
+    /// What Dimensions measures around the cursor right now, drawn over the photo of its monitor, over the pinned
+    /// measurements. `None` while no tool measures.
     pub live: Option<&'a Measurement>,
+    /// The pinned measurements, oldest first, each drawn over the photo of the monitor it was measured on, whichever
+    /// monitor the cursor is on. Their labels are in the theme's colors, the live one's in cyan, so the one that still
+    /// changes stands out (v1 spec WPC-296, Como as medidas aparecem).
+    pub pinned: &'a [Measurement],
+    /// The notice on screen, drawn over everything else on its monitor. `None` when there is none.
+    pub notice: Option<&'a Notice>,
+}
+
+/// A short message ScreenGauge draws on screen itself (v1 spec WPC-296, Como as medidas aparecem): small, with an ok or
+/// an alert sign before its text, above and to the right of where the cursor was when it appeared. It goes by itself a
+/// moment later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Notice {
+    pub message: Message,
+    /// Where the cursor was when the notice appeared, in physical pixels of the virtual screen. It stays there while
+    /// the cursor moves on, kept inside its monitor.
+    pub at: Point,
+    /// The monitor it is drawn on, as an index in the frozen screen's order.
+    pub monitor: usize,
+}
+
+/// What a notice says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Message {
+    /// A copy to the clipboard was made.
+    Copied,
+}
+
+impl Message {
+    /// The text on screen. ScreenGauge is in English only (WPC-293).
+    pub fn text(self) -> &'static str {
+        match self {
+            Message::Copied => "Copied",
+        }
+    }
+
+    pub fn sign(self) -> Sign {
+        match self {
+            Message::Copied => Sign::Ok,
+        }
+    }
+}
+
+/// The icon before a notice's text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sign {
+    /// A check mark: what the user asked for was done.
+    Ok,
+    /// An exclamation mark in a circle: it wasn't, as with "No content found" (WPC-314).
+    Alert,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +138,10 @@ pub enum Effect {
     /// Put the mouse cursor at this point, in physical pixels of the virtual screen, as the arrow keys do. The session
     /// has already measured there; the move Windows then reports changes nothing more.
     MoveCursor(Point),
+    /// Hand the session [`Input::Wake`](super::Input::Wake) once Windows has been running this long
+    /// ([`Event::uptime`](super::Event::uptime)): the moment something on screen goes by itself, such as a notice. A
+    /// later `WakeAt` takes the place of an earlier one still waiting.
+    WakeAt(Duration),
     /// Close the tools: the frozen screen goes, its photos are erased, and the mouse goes back to the programs. The
     /// session takes no more events.
     Close,
