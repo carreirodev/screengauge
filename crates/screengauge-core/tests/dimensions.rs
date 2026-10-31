@@ -87,11 +87,12 @@ fn at(x: i32, y: i32) -> Point {
     Point { x, y }
 }
 
-/// A label in physical pixels alone.
-fn physical(text: &str) -> Label {
+/// A label in physical pixels with the logical pixels after them, as the default options show it on a monitor whose
+/// scale isn't 100% (ticket WPC-307).
+fn label(physical: &str, logical: &str) -> Label {
     Label {
-        physical: text.to_owned(),
-        logical: None,
+        physical: physical.to_owned(),
+        logical: Some(logical.to_owned()),
     }
 }
 
@@ -129,7 +130,7 @@ fn horizontal_measures_the_gap_between_two_cards_from_any_point_in_it() {
                 monitor: 0,
                 horizontal: Some(row(600, 1000, 1023)),
                 vertical: None,
-                label: physical("24"),
+                label: label("24", "13.7"),
             }),
             "cursor at x = {x}"
         );
@@ -146,7 +147,7 @@ fn vertical_measures_a_card_from_its_top_row_to_its_bottom_row() {
             monitor: 0,
             horizontal: None,
             vertical: Some(column(900, 500, 700)),
-            label: physical("201"),
+            label: label("201", "114.9"),
         })
     );
 }
@@ -165,7 +166,7 @@ fn cross_measures_width_and_height_at_once_with_no_distance_to_each_edge() {
             monitor: 0,
             horizontal: Some(row(1250, 2000, 2239)),
             vertical: Some(column(2010, 1200, 1379)),
-            label: physical("240 × 180"),
+            label: label("240 × 180", "137.1 × 102.9"),
         })
     );
 }
@@ -183,7 +184,7 @@ fn an_item_of_one_pixel_measures_one() {
             monitor: 0,
             horizontal: Some(row(900, 1500, 1500)),
             vertical: Some(column(1500, 0, 2159)),
-            label: physical("1 × 2160"),
+            label: label("1 × 2160", "0.6 × 1234.3"),
         })
     );
 }
@@ -202,7 +203,7 @@ fn with_no_edge_before_the_monitors_limit_the_span_runs_to_its_last_pixel_which_
             monitor: 0,
             horizontal: Some(row(2000, 3000, 3839)),
             vertical: Some(column(3500, 1800, 2159)),
-            label: physical("840 × 360"),
+            label: label("840 × 360", "480 × 205.7"),
         })
     );
 }
@@ -241,7 +242,7 @@ fn in_a_gradient_the_edge_is_the_first_pixel_too_far_from_the_reference_color_no
             monitor: 0,
             horizontal: Some(row(1000, 144, 156)),
             vertical: None,
-            label: physical("13"),
+            label: label("13", "7.4"),
         })
     );
 }
@@ -307,7 +308,7 @@ fn moving_to_another_monitor_measures_there_on_that_monitor_alone() {
             monitor: 0,
             horizontal: Some(row(500, 0, 3839)),
             vertical: Some(column(0, 0, 2159)),
-            label: physical("3840 × 2160"),
+            label: label("3840 × 2160", "2194.3 × 1234.3"),
         }),
         "on the 4K monitor's first column"
     );
@@ -318,7 +319,7 @@ fn moving_to_another_monitor_measures_there_on_that_monitor_alone() {
             monitor: 1,
             horizontal: Some(row(1079, -1920, -1)),
             vertical: Some(column(-1, 0, 1079)),
-            label: physical("1920 × 1080"),
+            label: label("1920 × 1080", "1536 × 864"),
         }),
         "on the Full HD monitor's last column and last row"
     );

@@ -1,15 +1,17 @@
 //! Dimensions: the span of pixels around the cursor, from the edge on one side to the edge on the other, along the
 //! cursor's row, its column or both (v1 spec WPC-296, Dimensions).
 
-use super::{Label, Measurement, Photo, Point, Span};
+use super::{Measurement, Photo, Point, Span, units};
 use crate::settings::{DimensionsMode, Tolerance};
 
-/// What Dimensions measures with the cursor at `cursor`, on the monitor under it.
+/// What Dimensions measures with the cursor at `cursor`, on the monitor under it. The label shows the logical pixels
+/// too when `also_show_logical_pixels` is on and that monitor's scale isn't 100%.
 pub(super) fn measure(
     frozen_screen: &[Photo],
     cursor: Point,
     mode: DimensionsMode,
     tolerance: Tolerance,
+    also_show_logical_pixels: bool,
 ) -> Option<Measurement> {
     let monitor = frozen_screen
         .iter()
@@ -21,22 +23,17 @@ pub(super) fn measure(
         DimensionsMode::Vertical => (None, Some(along(Axis::Column))),
         DimensionsMode::Cross => (Some(along(Axis::Row)), Some(along(Axis::Column))),
     };
-    // Width before height, with the multiplication sign between them, as the label shows them (v1 spec WPC-296, Como
-    // as medidas aparecem).
-    let physical = [horizontal, vertical]
+    // Width before height, as the label shows them (v1 spec WPC-296, Como as medidas aparecem).
+    let lengths: Vec<u32> = [horizontal, vertical]
         .iter()
         .flatten()
-        .map(|span| span.length().to_string())
-        .collect::<Vec<_>>()
-        .join(" × ");
+        .map(|span| span.length())
+        .collect();
     Some(Measurement {
         monitor,
         horizontal,
         vertical,
-        label: Label {
-            physical,
-            logical: None,
-        },
+        label: units::label(&lengths, photo.scale, also_show_logical_pixels),
     })
 }
 

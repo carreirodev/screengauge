@@ -60,6 +60,9 @@ pub struct Scale {
 }
 
 impl Scale {
+    /// 100%, where a logical pixel is a physical pixel.
+    pub const HUNDRED_PERCENT: Scale = Scale { dpi: 96 };
+
     /// `None` for 0, which no monitor has.
     pub fn from_dpi(dpi: u32) -> Option<Scale> {
         (dpi > 0).then_some(Scale { dpi })

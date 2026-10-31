@@ -9,6 +9,7 @@ mod dimensions;
 mod event;
 mod frozen_screen;
 mod output;
+mod units;
 
 pub use event::{Event, Held, Input, Key, LocalTime, ToolbarButton};
 pub use frozen_screen::{Colors, Image, Photo, Point, Rect, Scale};
@@ -64,6 +65,8 @@ pub struct Session {
     cursor: Point,
     /// The default tolerance from Settings, until the mouse wheel adjusts it (WPC-309).
     tolerance: Tolerance,
+    /// "Also show logical pixels" in Settings: whether a label on a monitor whose scale isn't 100% shows them.
+    also_show_logical_pixels: bool,
     /// The remembered state as the tools opened, and as they will leave it: the Windows layer keeps it only when the
     /// two differ.
     remembered_at_opening: Remembered,
@@ -99,6 +102,7 @@ impl Session {
             frozen_screen,
             cursor,
             tolerance: options.default_tolerance,
+            also_show_logical_pixels: options.also_show_logical_pixels,
             remembered_at_opening: remembered.clone(),
             remembered,
             live: None,
@@ -198,6 +202,7 @@ impl Session {
             self.cursor,
             self.remembered.dimensions_mode,
             self.tolerance,
+            self.also_show_logical_pixels,
         );
     }
 
