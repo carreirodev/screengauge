@@ -399,7 +399,7 @@ fn the_word_and_the_number_are_in_the_panels_ink_on_one_baseline_inside_the_line
                 .collect()
             };
             let word = ink(word_left, number_left - s.gap + 1);
-            let number = ink(number_left, number_left + d.number);
+            let number = ink(number_left - s.gap / 2, number_left + d.number);
             assert!(!word.is_empty() && !number.is_empty(), "{context}");
             // Some pixel of each is in full ink.
             for (name, from, to) in [
@@ -435,15 +435,21 @@ fn the_word_and_the_number_are_in_the_panels_ink_on_one_baseline_inside_the_line
                 "{} between the texts, {context}",
                 number_first - word_right
             );
-            // One baseline: the bottoms of the ink, the word's round letters and the number's round digits, are
-            // within the pixel that overshoot may take.
+            // One baseline: the last row of ink is the same for the word and the number.
             let bottom = |ink: &[(i32, i32)]| ink.iter().map(|&(_, y)| y).max().expect("ink");
-            assert!(
-                bottom(&word).abs_diff(bottom(&number)) <= 1,
+            assert_eq!(
+                bottom(&word),
+                bottom(&number),
                 "the word's ink ends at row {}, the number's at {}, {context}",
                 bottom(&word),
                 bottom(&number)
             );
+            // At 100% the baseline is 10 below the top of the line: in Chromium the text's content area starts 2 above the
+            // line and its ascent is 12 (a "Tolerance" at 11px is 14.67 tall at 1.5 with the line at 16.5). The digits sit
+            // on it, so the last row of the number's ink is the line's tenth.
+            if dpi == 96 {
+                assert_eq!(bottom(&number), line.top + 9, "{context}");
+            }
             // And the texts are not pushed to one end of the line: they start within a few pixels of its top, and
             // end well above its bottom, where a baseline sits.
             let first = word
