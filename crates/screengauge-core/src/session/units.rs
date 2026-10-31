@@ -36,6 +36,24 @@ impl fmt::Display for LogicalPixels {
     }
 }
 
+/// What a copy of `lengths`, measured on a monitor at `scale`, puts on the clipboard: the physical pixels, or the logical
+/// ones when `logical`, whatever "Also show logical pixels" says. Only the numbers, without "px", width then height with
+/// the letter x between them, so they paste into a numeric field: `24`, `24 x 180`, `114.3` (v1 spec WPC-296,
+/// Dimensions). At 100% both are the same whole numbers.
+pub(super) fn copied(lengths: &[u32], scale: Scale, logical: bool) -> String {
+    lengths
+        .iter()
+        .map(|&length| {
+            if logical {
+                LogicalPixels::of(length, scale).to_string()
+            } else {
+                length.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" x ")
+}
+
 /// The label of `lengths` in physical pixels, measured on a monitor at `scale`: one length, or width then height, with
 /// the multiplication sign between them. The logical pixels come only when the scale isn't 100% and
 /// `also_show_logical_pixels` is on. The option only hides them on the label: [`LogicalPixels`] gives them whatever it

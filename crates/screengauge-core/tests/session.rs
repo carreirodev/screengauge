@@ -290,7 +290,8 @@ fn moving_clicking_turning_the_wheel_and_other_keys_leave_the_tools_open() {
     .chain(keys.iter().map(|&key| Input::KeyUp(key)));
     for input in inputs {
         let effects = session.handle(event(input.clone()));
-        // An arrow key going down moves the cursor (tests/dimensions.rs); nothing else here has an effect.
+        // An arrow key going down moves the cursor (tests/dimensions.rs), and a press in Dimensions copies what it
+        // measures (tests/pinned.rs); nothing else here has an effect.
         let arrow = matches!(
             input,
             Input::KeyDown(Key::Left | Key::Right | Key::Up | Key::Down)
@@ -298,6 +299,11 @@ fn moving_clicking_turning_the_wheel_and_other_keys_leave_the_tools_open() {
         if arrow {
             assert!(
                 matches!(effects[..], [Effect::MoveCursor(_)]),
+                "{input:?}: {effects:?}"
+            );
+        } else if input == Input::Press {
+            assert!(
+                matches!(effects.first(), Some(Effect::CopyText(_))),
                 "{input:?}: {effects:?}"
             );
         } else {

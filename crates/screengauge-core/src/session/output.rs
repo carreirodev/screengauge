@@ -109,6 +109,17 @@ pub struct Span {
     pub last: Point,
 }
 
+impl Measurement {
+    /// How many pixels each span has, width before height, as the label shows them.
+    pub(crate) fn lengths(&self) -> Vec<u32> {
+        [self.horizontal, self.vertical]
+            .iter()
+            .flatten()
+            .map(|span| span.length())
+            .collect()
+    }
+}
+
 impl Span {
     /// How many pixels the span has: the number Dimensions shows for it.
     pub fn length(self) -> u32 {
