@@ -214,11 +214,11 @@ pub struct Columns {
 pub fn columns(physical: i32, logical: i32, dpi: u32) -> Columns {
     let gap = scaled(BAR_GAP, dpi);
     let bar = physical + gap;
-    let text = bar + scaled(BAR_WIDTH, dpi) + gap;
+    let after_bar = bar + scaled(BAR_WIDTH, dpi) + gap;
     Columns {
         bar,
-        logical: text,
-        width: text + logical,
+        logical: after_bar,
+        width: after_bar + logical,
     }
 }
 

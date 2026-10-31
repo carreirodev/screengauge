@@ -38,7 +38,8 @@ impl fmt::Display for LogicalPixels {
 
 /// The label of `lengths` in physical pixels, measured on a monitor at `scale`: one length, or width then height, with
 /// the multiplication sign between them. The logical pixels come only when the scale isn't 100% and
-/// `also_show_logical_pixels` is on: the option decides only what the label shows, never what is copied.
+/// `also_show_logical_pixels` is on. The option only hides them on the label: [`LogicalPixels`] gives them whatever it
+/// says, for what is copied (v1 spec WPC-296, "Shift + clique ... mesmo com 'Also show logical pixels' desligado").
 pub(super) fn label(lengths: &[u32], scale: Scale, also_show_logical_pixels: bool) -> Label {
     let join = |parts: Vec<String>| parts.join(" × ");
     let shown = also_show_logical_pixels && scale != Scale::HUNDRED_PERCENT;

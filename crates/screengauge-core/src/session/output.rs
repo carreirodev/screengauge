@@ -33,6 +33,7 @@ pub struct Measurement {
     pub horizontal: Option<Span>,
     /// The span along the cursor's column, in the vertical and Cross modes.
     pub vertical: Option<Span>,
+    /// What its label says.
     pub label: Label,
 }
 

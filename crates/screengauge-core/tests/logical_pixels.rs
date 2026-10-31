@@ -156,7 +156,7 @@ fn a_logical_pixel_halfway_between_two_tenths_rounds_up() {
 
 #[test]
 fn every_windows_scale_divides_the_same_button() {
-    // Each scale Windows offers in Settings, as Windows reports it in DPI (96 a 100%), and 150 physical pixels divided
+    // Each scale Windows offers in Settings, as Windows reports it in DPI (96 is 100%), and 150 physical pixels divided
     // by it, worked out by hand to the nearest tenth.
     let scales = [
         (96, None),

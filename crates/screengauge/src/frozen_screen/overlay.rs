@@ -79,6 +79,30 @@ impl Fonts {
             cap_height: f32::from(metrics.capHeight) / f32::from(metrics.designUnitsPerEm),
         })
     }
+
+    /// The label's font and size in `weight`, in a window of `dpi`.
+    fn text_format(
+        &self,
+        weight: DWRITE_FONT_WEIGHT,
+        dpi: u32,
+    ) -> windows::core::Result<IDWriteTextFormat> {
+        // SAFETY: plain values and static strings. A size that is a whole number of pixels keeps the digits crisp.
+        let format = unsafe {
+            self.factory.CreateTextFormat(
+                FAMILY,
+                None,
+                weight,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                px(scaled(geometry::TEXT, dpi)),
+                w!("en-US"),
+            )
+        }?;
+        // The label is one line, so the window's width is never the reason to break it.
+        // SAFETY: plain value.
+        unsafe { format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP) }?;
+        Ok(format)
+    }
 }
 
 /// The installed family of the label's font.
@@ -96,30 +120,6 @@ fn font_family(factory: &IDWriteFactory) -> windows::core::Result<IDWriteFontFam
     }
     // SAFETY: `index` came from FindFamilyName just above.
     unsafe { collection.GetFontFamily(index) }
-}
-
-/// The label's text size in `weight`, in a window of `dpi`.
-fn text_format(
-    fonts: &Fonts,
-    weight: DWRITE_FONT_WEIGHT,
-    dpi: u32,
-) -> windows::core::Result<IDWriteTextFormat> {
-    // SAFETY: plain values and static strings. A size that is a whole number of pixels keeps the digits crisp.
-    let format = unsafe {
-        fonts.factory.CreateTextFormat(
-            FAMILY,
-            None,
-            weight,
-            DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL,
-            px(scaled(geometry::TEXT, dpi)),
-            w!("en-US"),
-        )
-    }?;
-    // The label is one line, so the window's width is never the reason to break it.
-    // SAFETY: plain value.
-    unsafe { format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP) }?;
-    Ok(format)
 }
 
 thread_local! {
@@ -189,7 +189,7 @@ struct PlacedLogical {
 }
 
 /// A text laid out, with what the label needs to place it.
-struct Measured {
+struct Typeset {
     layout: IDWriteTextLayout,
     /// The text's width, in whole pixels.
     width: i32,
@@ -231,8 +231,8 @@ impl Overlay {
             shade: brush([0, 0, 0])?,
             // #04161b
             ink: brush([0x04, 0x16, 0x1b])?,
-            format: text_format(fonts, DWRITE_FONT_WEIGHT_SEMI_BOLD, dpi)?,
-            logical_format: text_format(fonts, LOGICAL_WEIGHT, dpi)?,
+            format: fonts.text_format(DWRITE_FONT_WEIGHT_SEMI_BOLD, dpi)?,
+            logical_format: fonts.text_format(LOGICAL_WEIGHT, dpi)?,
             figures,
             fonts: fonts.clone(),
             monitor: geometry::bounds(monitor)?,
@@ -286,21 +286,21 @@ impl Overlay {
     /// nothing to label.
     fn label(&self, measurement: &Measurement) -> windows::core::Result<Option<PlacedLabel>> {
         let label = &measurement.label;
-        let physical = self.measure(&label.physical, &self.format)?;
-        // The logical part, if the label has one, with where the bar and the text start.
-        let logical = label
+        let physical = self.typeset(&label.physical, &self.format)?;
+        // The logical text, if the label has one, with where the bar and that text start along the label.
+        let after = label
             .logical
             .as_deref()
-            .map(|text| self.measure(text, &self.logical_format))
+            .map(|text| self.typeset(text, &self.logical_format))
             .transpose()?
-            .map(|measured| {
+            .map(|typeset| {
                 (
-                    geometry::columns(physical.width, measured.width, self.dpi),
-                    measured,
+                    geometry::columns(physical.width, typeset.width, self.dpi),
+                    typeset,
                 )
             });
 
-        let text_width = logical
+        let text_width = after
             .as_ref()
             .map_or(physical.width, |(columns, _)| columns.width);
         let size = geometry::pill_size(text_width, self.dpi);
@@ -315,7 +315,7 @@ impl Overlay {
         let middle = (window.top + window.bottom) / 2.0;
         let baseline = whole((middle + self.fonts.cap_height * font / 2.0).round());
         let text_left = window.left + px(scaled(geometry::PAD_X, self.dpi));
-        let logical = logical.map(|(columns, logical)| {
+        let logical = after.map(|(columns, text)| {
             // The bar is placed in the virtual screen like the pill and then moved into the window. Its bottom side is
             // measured from the baseline, which is the same one for both parts.
             let left = pill.left + scaled(geometry::PAD_X, self.dpi) + columns.bar;
@@ -325,8 +325,8 @@ impl Overlay {
                 text: PlacedText {
                     left: text_left + px(columns.logical),
                     // Its own distance to the baseline: another face may have another ascent.
-                    top: px(baseline) - logical.baseline,
-                    layout: logical.layout,
+                    top: px(baseline) - text.baseline,
+                    layout: text.layout,
                 },
             }
         });
@@ -342,7 +342,7 @@ impl Overlay {
     }
 
     /// `text` laid out in `format`, and how wide it is and how far down its baseline is.
-    fn measure(&self, text: &str, format: &IDWriteTextFormat) -> windows::core::Result<Measured> {
+    fn typeset(&self, text: &str, format: &IDWriteTextFormat) -> windows::core::Result<Typeset> {
         let layout = self.layout(text, format)?;
         let mut metrics = DWRITE_TEXT_METRICS::default();
         // SAFETY: fills a local.
@@ -352,7 +352,7 @@ impl Overlay {
         // SAFETY: fills a one-line buffer, and fails should the label need more.
         unsafe { layout.GetLineMetrics(Some(&mut line), &mut lines) }?;
         let [line] = line;
-        Ok(Measured {
+        Ok(Typeset {
             layout,
             width: whole_up(metrics.width),
             baseline: line.baseline,
@@ -488,8 +488,9 @@ fn whole_up(width: f32) -> i32 {
     width.ceil() as i32
 }
 
-/// A position that is already a whole number of pixels, as the integer geometry takes it. Positions are far below
-/// 2^24, so the conversion keeps every digit.
+/// A position that is already a whole number of pixels, as the integer geometry takes it. Positions in a window are
+/// below a million pixels, far inside `i32`, so the conversion keeps every digit.
+// TODO: place the baseline in whole pixels without going through a float, so no float comes back to `i32` here.
 fn whole(position: f32) -> i32 {
     debug_assert!(
         position.fract() == 0.0 && position.abs() < 1e6,
@@ -686,15 +687,20 @@ mod tests {
         }
     }
 
+    /// A label in physical pixels alone, as at 100% or with "Also show logical pixels" off.
+    fn physical_only(label: &str) -> screengauge_core::session::Label {
+        screengauge_core::session::Label {
+            physical: label.to_owned(),
+            logical: None,
+        }
+    }
+
     fn horizontal(x0: i32, x1: i32, y: i32, label: &str) -> Measurement {
         Measurement {
             monitor: 0,
             horizontal: Some(span((x0, y), (x1, y))),
             vertical: None,
-            label: screengauge_core::session::Label {
-                physical: label.to_owned(),
-                logical: None,
-            },
+            label: physical_only(label),
         }
     }
 
@@ -703,10 +709,7 @@ mod tests {
             monitor: 0,
             horizontal: None,
             vertical: Some(span((x, y0), (x, y1))),
-            label: screengauge_core::session::Label {
-                physical: label.to_owned(),
-                logical: None,
-            },
+            label: physical_only(label),
         }
     }
 
@@ -716,10 +719,7 @@ mod tests {
             monitor: 0,
             horizontal: Some(span((h.0, y), (h.1, y))),
             vertical: Some(span((x, v.0), (x, v.1))),
-            label: screengauge_core::session::Label {
-                physical: label.to_owned(),
-                logical: None,
-            },
+            label: physical_only(label),
         }
     }
 
@@ -1069,7 +1069,7 @@ mod tests {
     fn the_labels_digits_are_as_wide_as_each_other() {
         // Without tabular figures Segoe UI's 1 is 4.8 pixels wide at this size and its 0 is 6.7, so the pill would
         // jump as the number changed. With them the widths agree to a fraction of a pixel (the font's 7 is 0.2
-        // narrower).
+        // narrower), in the physical text's format and in the logical text's.
         let canvas = Canvas::new(8, 8);
         let overlay = Overlay::new(
             &canvas.target,
@@ -1078,22 +1078,27 @@ mod tests {
             Scale::from_dpi(96).expect("a scale"),
         )
         .expect("the overlay");
-        let widths: Vec<f32> = "0123456789"
-            .chars()
-            .map(|digit| {
-                let layout = overlay
-                    .layout(&digit.to_string(), &overlay.format)
-                    .expect("a layout");
-                let mut metrics = DWRITE_TEXT_METRICS::default();
-                // SAFETY: fills a local.
-                unsafe { layout.GetMetrics(&mut metrics) }.expect("metrics");
-                metrics.width
-            })
-            .collect();
-        let widest = widths.iter().copied().fold(f32::MIN, f32::max);
-        let narrowest = widths.iter().copied().fold(f32::MAX, f32::min);
-        assert!(widest - narrowest < 0.3, "{widths:?}");
-        assert!(narrowest > 6.0, "{widths:?}");
+        for (part, format) in [
+            ("physical", &overlay.format),
+            ("logical", &overlay.logical_format),
+        ] {
+            let widths: Vec<f32> = "0123456789"
+                .chars()
+                .map(|digit| {
+                    let layout = overlay
+                        .layout(&digit.to_string(), format)
+                        .expect("a layout");
+                    let mut metrics = DWRITE_TEXT_METRICS::default();
+                    // SAFETY: fills a local.
+                    unsafe { layout.GetMetrics(&mut metrics) }.expect("metrics");
+                    metrics.width
+                })
+                .collect();
+            let widest = widths.iter().copied().fold(f32::MIN, f32::max);
+            let narrowest = widths.iter().copied().fold(f32::MAX, f32::min);
+            assert!(widest - narrowest < 0.3, "{part}: {widths:?}");
+            assert!(narrowest > 6.0, "{part}: {widths:?}");
+        }
     }
 
     #[test]
@@ -1529,9 +1534,10 @@ mod tests {
     }
 
     #[test]
-    fn the_logical_part_asks_for_a_face_that_is_not_bolder_than_the_physical_one() {
-        // Segoe UI has no face at weight 500; DirectWrite takes the nearest, and the label only needs it not to be
-        // bolder than the physical text's semibold, nor made bold by simulation. On Windows 11 it is the semibold.
+    fn the_logical_part_is_in_the_same_semibold_the_prototype_showed() {
+        // Segoe UI has no face at weight 500, and both DirectWrite and the browser the prototype was approved in take
+        // its semibold for it, with no simulated bolding. Should Windows ever bring a face at 500, the logical part would
+        // change weight from what the owner approved: this fails then, so it is looked at again.
         let fonts = Fonts::new().expect("the fonts");
         let family = font_family(&fonts.factory).expect("the family");
         let face = |weight| {
@@ -1554,36 +1560,7 @@ mod tests {
                 logical.GetSimulations(),
             )
         };
-        assert!(logical_weight <= physical_weight, "{logical_weight}");
+        assert_eq!(logical_weight, physical_weight);
         assert_eq!(simulations, DWRITE_FONT_SIMULATIONS_NONE);
-    }
-
-    #[test]
-    fn the_logical_labels_digits_are_as_wide_as_each_other() {
-        // The same as for the physical text: the pill must not jump as the logical number changes.
-        let canvas = Canvas::new(8, 8);
-        let overlay = Overlay::new(
-            &canvas.target,
-            &canvas.fonts,
-            MONITOR,
-            Scale::from_dpi(96).expect("a scale"),
-        )
-        .expect("the overlay");
-        let widths: Vec<f32> = "0123456789"
-            .chars()
-            .map(|digit| {
-                let layout = overlay
-                    .layout(&digit.to_string(), &overlay.logical_format)
-                    .expect("a layout");
-                let mut metrics = DWRITE_TEXT_METRICS::default();
-                // SAFETY: fills a local.
-                unsafe { layout.GetMetrics(&mut metrics) }.expect("metrics");
-                metrics.width
-            })
-            .collect();
-        let widest = widths.iter().copied().fold(f32::MIN, f32::max);
-        let narrowest = widths.iter().copied().fold(f32::MAX, f32::min);
-        assert!(widest - narrowest < 0.3, "{widths:?}");
-        assert!(narrowest > 6.0, "{widths:?}");
     }
 }
