@@ -119,6 +119,16 @@ pub struct Overlay {
     dpi: u32,
 }
 
+/// A label ready to draw.
+struct Label {
+    /// The pill's place in the virtual screen.
+    pill: RECT,
+    layout: IDWriteTextLayout,
+    /// Where the text's layout starts, in the window's own pixels. Its baseline is on a whole pixel.
+    text_left: f32,
+    text_top: f32,
+}
+
 impl Overlay {
     /// For a window over `monitor`, whose scale is `scale`, drawing on `target`.
     pub fn new(
@@ -176,19 +186,28 @@ impl Overlay {
         })
     }
 
-    /// Draws `measurement` over what `target` holds, between its BeginDraw and EndDraw. Order matters: every outline
-    /// first and every cyan pixel after, so no outline darkens a cyan pixel, then the label above both. A failure to
-    /// lay the label out is returned, once the line is drawn.
+    /// Draws `measurement` over what `target` holds, between its BeginDraw and EndDraw. Order matters, and every step
+    /// only draws over the one before: the label's shadow, which is faint and reaches toward the line; every outline;
+    /// every cyan pixel, so nothing darkens one, whatever is under it; then the pill and its text, which never touch
+    /// the line, being further from it than a tick reaches. A failure to lay the label out is returned once the line
+    /// is drawn.
     pub fn draw(
         &self,
         target: &ID2D1RenderTarget,
         measurement: &Measurement,
     ) -> windows::core::Result<()> {
+        let label = self.label(measurement);
+        if let Ok(Some(label)) = &label {
+            self.draw_shadow(target, &label.pill);
+        }
         self.draw_lines(target, measurement);
-        self.draw_label(target, measurement).map(|_| ())
+        if let Ok(Some(label)) = &label {
+            self.draw_pill(target, label);
+        }
+        label.map(|_| ())
     }
 
-    /// The line, the ticks and the outline.
+    /// The outline, then the line and the ticks.
     fn draw_lines(&self, target: &ID2D1RenderTarget, measurement: &Measurement) {
         let parts = geometry::parts(measurement, self.dpi);
         // SAFETY: drawing calls on a live render target, between its BeginDraw and EndDraw. Aliased fills of
@@ -208,13 +227,9 @@ impl Overlay {
         }
     }
 
-    /// The pill with its shadow and text. Returns the pill's place in the virtual screen, `None` when the measurement
-    /// has no span, so there is nothing to label.
-    fn draw_label(
-        &self,
-        target: &ID2D1RenderTarget,
-        measurement: &Measurement,
-    ) -> windows::core::Result<Option<RECT>> {
+    /// The label's size and place, and where its text goes. `None` when the measurement has no span, so there is
+    /// nothing to label.
+    fn label(&self, measurement: &Measurement) -> windows::core::Result<Option<Label>> {
         let layout = self.layout(&measurement.label)?;
         let mut metrics = DWRITE_TEXT_METRICS::default();
         // SAFETY: fills a local.
@@ -236,29 +251,49 @@ impl Overlay {
         let window = self.in_window(&pill);
         let middle = (window.top + window.bottom) / 2.0;
         let baseline = (middle + self.fonts.cap_height * font / 2.0).round();
-        let left = window.left + px(scaled(geometry::PAD_X, self.dpi));
-        // DrawTextLayout takes a Vector2, which windows 0.62 takes from the windows-numerics crate without
-        // re-exporting it, and this program may not add the crate. Direct2D's ellipse holds one.
-        let mut origin = D2D1_ELLIPSE::default().point;
-        origin.X = left;
-        origin.Y = baseline - line.baseline;
+        Ok(Some(Label {
+            pill,
+            layout,
+            text_left: window.left + px(scaled(geometry::PAD_X, self.dpi)),
+            text_top: baseline - line.baseline,
+        }))
+    }
 
+    /// The pill's shadow, which the line is drawn over.
+    fn draw_shadow(&self, target: &ID2D1RenderTarget, pill: &RECT) {
+        let drop = scaled(geometry::SHADOW_DROP, self.dpi);
         // SAFETY: drawing calls on a live render target, between its BeginDraw and EndDraw. The shapes are on whole
         // pixels, so their straight edges are crisp; the corners are antialiased.
         unsafe {
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            let drop = scaled(geometry::SHADOW_DROP, self.dpi);
             for (grow, opacity) in SHADOW {
                 self.shade.SetOpacity(opacity);
-                let shape = self.rounded(&pill, scaled(grow, self.dpi), drop);
+                let shape = self.rounded(pill, scaled(grow, self.dpi), drop);
                 target.FillRoundedRectangle(&shape, &self.shade);
             }
-            target.FillRoundedRectangle(&self.rounded(&pill, 0, 0), &self.cyan);
+        }
+    }
+
+    /// The pill and the text on it.
+    fn draw_pill(&self, target: &ID2D1RenderTarget, label: &Label) {
+        // DrawTextLayout takes a Vector2, which windows 0.62 takes from the windows-numerics crate without
+        // re-exporting it, and this program may not add the crate. Direct2D's ellipse holds one.
+        let mut origin = D2D1_ELLIPSE::default().point;
+        origin.X = label.text_left;
+        origin.Y = label.text_top;
+        // SAFETY: drawing calls on a live render target, between its BeginDraw and EndDraw.
+        unsafe {
+            target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            target.FillRoundedRectangle(&self.rounded(&label.pill, 0, 0), &self.cyan);
             // Grayscale, not ClearType: color fringes would show on the cyan.
             target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
-            target.DrawTextLayout(origin, &layout, &self.ink, D2D1_DRAW_TEXT_OPTIONS_NONE);
+            target.DrawTextLayout(
+                origin,
+                &label.layout,
+                &self.ink,
+                D2D1_DRAW_TEXT_OPTIONS_NONE,
+            );
         }
-        Ok(Some(pill))
     }
 
     /// `label` laid out on one line in the label's font, with tabular figures.
@@ -745,6 +780,14 @@ mod tests {
         }
     }
 
+    /// The label alone, drawn as the whole measurement draws it, and where its pill went.
+    fn draw_label(overlay: &Overlay, target: &ID2D1RenderTarget, m: &Measurement) -> Option<RECT> {
+        let label = overlay.label(m).expect("the label")?;
+        overlay.draw_shadow(target, &label.pill);
+        overlay.draw_pill(target, &label);
+        Some(label.pill)
+    }
+
     /// The rows (top, bottom) and columns (left, right) of the text's pixels inside `pill`: those that are more than half
     /// the text's near-black, which neither the cyan, nor the photo showing at the rounded corners, nor the shadow is.
     fn ink(picture: &Picture, pill: &RECT) -> ((i32, i32), (i32, i32)) {
@@ -769,7 +812,7 @@ mod tests {
             let m = horizontal(-400, -301, 350, "24");
             let mut pill = None;
             let picture = canvas.render(MONITOR, dpi, |overlay, target| {
-                pill = overlay.draw_label(target, &m).expect("the label");
+                pill = draw_label(overlay, target, &m);
             });
             let pill = pill.expect("a pill");
             assert_eq!(pill.bottom - pill.top, height, "at {dpi} DPI");
@@ -809,7 +852,7 @@ mod tests {
         let m = horizontal(-400, -301, 350, "24");
         let mut pill = None;
         let picture = canvas.render(MONITOR, 96, |overlay, target| {
-            pill = overlay.draw_label(target, &m).expect("the label");
+            pill = draw_label(overlay, target, &m);
         });
         let pill = pill.expect("a pill");
         let at =
@@ -830,7 +873,7 @@ mod tests {
         let m = cross((-350, -100), (230, 480), -230, 360, "240 \u{d7} 180");
         let mut pill = None;
         canvas.render(MONITOR, 96, |overlay, target| {
-            pill = overlay.draw_label(target, &m).expect("the label");
+            pill = draw_label(overlay, target, &m);
         });
         let pill = pill.expect("a pill");
         // Below and to the right of the crossing, and wide enough for nine characters.
@@ -865,7 +908,7 @@ mod tests {
         let m = horizontal(-480, -478, 202, "3");
         let mut pill = None;
         canvas.render(MONITOR, 168, |overlay, target| {
-            pill = overlay.draw_label(target, &m).expect("the label");
+            pill = draw_label(overlay, target, &m);
         });
         let pill = pill.expect("a pill");
         assert!(pill.left >= MONITOR.left && pill.top >= MONITOR.top);
@@ -918,7 +961,7 @@ mod tests {
             let m = horizontal(-400, -301, 350, label);
             let mut pill = None;
             canvas.render(MONITOR, 96, |overlay, target| {
-                pill = overlay.draw_label(target, &m).expect("the label");
+                pill = draw_label(overlay, target, &m);
             });
             let pill = pill.expect("a pill");
             Size {
@@ -929,5 +972,39 @@ mod tests {
         let (one, three) = (size_of("1"), size_of("100"));
         assert_eq!(one.height, three.height);
         assert!(three.width > one.width + 10);
+    }
+
+    /// Every pixel the model says is cyan, in the picture of the whole measurement, line and label together.
+    fn check_cyan_after_the_label(canvas: &Canvas, m: &Measurement, dpi: u32) {
+        let k = scaled(4, dpi);
+        let picture = canvas.render(MONITOR, dpi, |overlay, target| {
+            overlay.draw(target, m).expect("the measurement");
+        });
+        for y in 0..canvas.height as usize {
+            for x in 0..canvas.width as usize {
+                let (vx, vy) = (x as i32 + MONITOR.left, y as i32 + MONITOR.top);
+                if expected(m, k, vx, vy) == CYAN {
+                    assert_eq!(
+                        picture.at(x, y),
+                        CYAN,
+                        "pixel ({vx}, {vy}) at {dpi} DPI for {m:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_label_and_its_shadow_never_darken_a_cyan_pixel() {
+        // Short spans put the ticks under the label's shadow, which reaches 2 + 6 pixels below the pill.
+        let canvas = Canvas::new(480, 320);
+        for dpi in [96, 120, 168] {
+            for (last, label) in [(-400, "1"), (-391, "10"), (-377, "24")] {
+                check_cyan_after_the_label(&canvas, &horizontal(-400, last, 350, label), dpi);
+                check_cyan_after_the_label(&canvas, &vertical(300, last + 700, -300, label), dpi);
+                let cross = cross((-400, last), (300, last + 700), -400, 350, label);
+                check_cyan_after_the_label(&canvas, &cross, dpi);
+            }
+        }
     }
 }
