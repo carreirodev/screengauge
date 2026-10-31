@@ -1,13 +1,17 @@
 //! Dimensions' measurements drawn over a window's photo: the cyan line with its ticks and outline, and the label in a
-//! pill, for the pinned measurements and the live one, and the notice. Everything about where they go is in `geometry`
-//! and `notice`, which need no Windows; this draws them onto any Direct2D render target at 96 DPI, so a test can render
-//! them on a bitmap and count pixels.
+//! pill, for the pinned measurements and the live one, the tolerance indicator and the notice. Everything about where
+//! they go is in `geometry`, `tolerance` and `notice`, which need no Windows; this draws them onto any Direct2D render
+//! target at 96 DPI, so a test can render them on a bitmap and count pixels.
 
+mod floating;
 mod geometry;
 mod notice;
 mod palette;
 #[cfg(test)]
 mod panel_tests;
+mod tolerance;
+#[cfg(test)]
+mod tolerance_tests;
 
 use std::cell::RefCell;
 
@@ -91,10 +95,11 @@ impl Fonts {
         })
     }
 
-    /// The label's font and size in `weight`, in a window of `dpi`.
+    /// The label's font in `weight`, `size` logical pixels tall, in a window of `dpi`.
     fn text_format(
         &self,
         weight: DWRITE_FONT_WEIGHT,
+        size: u32,
         dpi: u32,
     ) -> windows::core::Result<IDWriteTextFormat> {
         // SAFETY: plain values and static strings. A size that is a whole number of pixels keeps the digits crisp.
@@ -105,7 +110,7 @@ impl Fonts {
                 weight,
                 DWRITE_FONT_STYLE_NORMAL,
                 DWRITE_FONT_STRETCH_NORMAL,
-                px(scaled(geometry::TEXT, dpi)),
+                px(scaled(size, dpi)),
                 w!("en-US"),
             )
         }?;
@@ -176,6 +181,10 @@ pub struct Overlay {
     format: IDWriteTextFormat,
     /// The logical text's: the same family, size and wrapping, asked for the medium weight.
     logical_format: IDWriteTextFormat,
+    /// The tolerance indicator's texts: its word in the same semibold at its own size, and its number in the black
+    /// face the prototype's `<b>` gets (see `tolerance`).
+    indicator_format: IDWriteTextFormat,
+    number_format: IDWriteTextFormat,
     /// Asks for tabular figures; applied to each label's text.
     figures: IDWriteTypography,
     fonts: Fonts,
@@ -230,6 +239,26 @@ struct Typeset {
     line_height: f32,
 }
 
+impl Typeset {
+    /// `layout`, measured.
+    fn of(layout: IDWriteTextLayout) -> windows::core::Result<Typeset> {
+        let mut metrics = DWRITE_TEXT_METRICS::default();
+        // SAFETY: fills a local.
+        unsafe { layout.GetMetrics(&mut metrics) }?;
+        let mut line = [DWRITE_LINE_METRICS::default()];
+        let mut lines = 0;
+        // SAFETY: fills a one-line buffer, and fails should the label need more.
+        unsafe { layout.GetLineMetrics(Some(&mut line), &mut lines) }?;
+        let [line] = line;
+        Ok(Typeset {
+            layout,
+            width: whole_up(metrics.width),
+            baseline: line.baseline,
+            line_height: line.height,
+        })
+    }
+}
+
 impl Overlay {
     /// For a window over `monitor`, whose scale is `scale`, drawing on `target`, with ScreenGauge's own surfaces (the
     /// pinned measurements' labels and the notices) in the palette of `mode`.
@@ -282,8 +311,14 @@ impl Overlay {
             surfaces: Surfaces::new(target, mode)?,
             factory,
             stroke,
-            format: fonts.text_format(DWRITE_FONT_WEIGHT_SEMI_BOLD, dpi)?,
-            logical_format: fonts.text_format(LOGICAL_WEIGHT, dpi)?,
+            format: fonts.text_format(DWRITE_FONT_WEIGHT_SEMI_BOLD, geometry::TEXT, dpi)?,
+            logical_format: fonts.text_format(LOGICAL_WEIGHT, geometry::TEXT, dpi)?,
+            indicator_format: fonts.text_format(
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                tolerance::TEXT,
+                dpi,
+            )?,
+            number_format: fonts.text_format(tolerance::NUMBER_WEIGHT, tolerance::TEXT, dpi)?,
             figures,
             fonts: fonts.clone(),
             monitor: geometry::bounds(monitor)?,
@@ -362,9 +397,7 @@ impl Overlay {
         target: &ID2D1RenderTarget,
         indicator: &ToleranceIndicator,
     ) -> windows::core::Result<()> {
-        // TODO(WPC-309): the drawing builder draws it here; until then nothing shows.
-        let _ = (target, indicator);
-        Ok(())
+        self.show_tolerance(target, indicator.at, indicator.tolerance)
     }
 
     /// The outlines of every measurement.
@@ -466,23 +499,18 @@ impl Overlay {
         }))
     }
 
-    /// `text` laid out in `format`, and how wide it is and how far down its baseline is.
+    /// `text` laid out in `format` with tabular figures, and how wide it is and how far down its baseline is.
     fn typeset(&self, text: &str, format: &IDWriteTextFormat) -> windows::core::Result<Typeset> {
-        let layout = self.layout(text, format)?;
-        let mut metrics = DWRITE_TEXT_METRICS::default();
-        // SAFETY: fills a local.
-        unsafe { layout.GetMetrics(&mut metrics) }?;
-        let mut line = [DWRITE_LINE_METRICS::default()];
-        let mut lines = 0;
-        // SAFETY: fills a one-line buffer, and fails should the label need more.
-        unsafe { layout.GetLineMetrics(Some(&mut line), &mut lines) }?;
-        let [line] = line;
-        Ok(Typeset {
-            layout,
-            width: whole_up(metrics.width),
-            baseline: line.baseline,
-            line_height: line.height,
-        })
+        Typeset::of(self.layout(text, format)?)
+    }
+
+    /// As `typeset`, without tabular figures: for text with no digits, see `layout_as`.
+    fn typeset_plain(
+        &self,
+        text: &str,
+        format: &IDWriteTextFormat,
+    ) -> windows::core::Result<Typeset> {
+        Typeset::of(self.layout_as(text, format, false)?)
     }
 
     /// The pill's shadow, which the lines are drawn over. A pinned pill is a little see-through, and CSS never paints an
@@ -648,6 +676,18 @@ impl Overlay {
         label: &str,
         format: &IDWriteTextFormat,
     ) -> windows::core::Result<IDWriteTextLayout> {
+        self.layout_as(label, format, true)
+    }
+
+    /// `label` laid out on one line in `format`, with tabular figures only if `tabular`. Asking DirectWrite for a
+    /// feature replaces its default ones, kerning among them, so text with no digits to align asks for none: the
+    /// "To" of "Tolerance" kerns by a pixel at 11px, as it does in Chromium.
+    fn layout_as(
+        &self,
+        label: &str,
+        format: &IDWriteTextFormat,
+        tabular: bool,
+    ) -> windows::core::Result<IDWriteTextLayout> {
         let text: Vec<u16> = label.encode_utf16().collect();
         let length = u32::try_from(text.len())
             .map_err(|_| Error::new(E_FAIL, "the label is too long to lay out"))?;
@@ -658,16 +698,18 @@ impl Overlay {
                 .factory
                 .CreateTextLayout(&text, format, 4096.0, 4096.0)
         }?;
-        // SAFETY: the range is the whole text.
-        unsafe {
-            layout.SetTypography(
-                &self.figures,
-                DWRITE_TEXT_RANGE {
-                    startPosition: 0,
-                    length,
-                },
-            )
-        }?;
+        if tabular {
+            // SAFETY: the range is the whole text.
+            unsafe {
+                layout.SetTypography(
+                    &self.figures,
+                    DWRITE_TEXT_RANGE {
+                        startPosition: 0,
+                        length,
+                    },
+                )
+            }?;
+        }
         Ok(layout)
     }
 

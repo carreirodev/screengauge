@@ -10,6 +10,7 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1RenderTarget,
 };
 
+use super::floating;
 use super::geometry::{self, Size, scaled};
 use super::{Overlay, dot, px};
 
@@ -31,16 +32,8 @@ const LINE: u32 = 15;
 /// and below it.
 const REACH: u32 = 14;
 const BELOW: u32 = 18;
-/// How near the monitor's right and top sides the notice may come before it moves to the other side of the cursor, and
-/// how near the monitor's sides it may come at all.
+/// How near the monitor's right and top sides the notice may come before it moves to the other side of the cursor.
 const EDGE: u32 = 4;
-const MARGIN: u32 = 2;
-
-/// The shadow, CSS `0 10px 28px -8px`: it falls this far and is this much smaller than the panel on every side before
-/// it blurs. The blur is `SHADOW_LAYERS` rounded rectangles, each this much bigger than the one before it.
-const SHADOW_DROP: u32 = 10;
-const SHADOW_SPREAD: u32 = 8;
-const SHADOW_STEP: usize = 4;
 
 /// The sign is drawn in the 24 by 24 units of its prototype, and scaled to `SIGN` pixels.
 const SIGN_UNITS: f32 = 24.0;
@@ -63,15 +56,10 @@ pub fn size(text_width: i32, dpi: u32) -> Size {
 /// Where the panel goes: its rectangle in the virtual screen, right and bottom one past its last pixel. It sits `REACH`
 /// right of `at` and `REACH` above it. Where it would come within `EDGE` of the monitor's right side it goes to the left
 /// of `at` instead, and where it would come within `EDGE` of the monitor's top it goes `BELOW` below `at`. Where it
-/// would still stick out, it slides inside, `MARGIN` from the sides; should the monitor be smaller than the panel, it
-/// starts `MARGIN` inside the monitor's left and top sides.
+/// would still stick out, it slides inside, `floating::MARGIN` from the sides; should the monitor be smaller than the
+/// panel, it starts that far inside the monitor's left and top sides.
 pub fn place(at: Point, size: Size, monitor: RECT, dpi: u32) -> RECT {
-    let (reach, below, edge, margin) = (
-        scaled(REACH, dpi),
-        scaled(BELOW, dpi),
-        scaled(EDGE, dpi),
-        scaled(MARGIN, dpi),
-    );
+    let (reach, below, edge) = (scaled(REACH, dpi), scaled(BELOW, dpi), scaled(EDGE, dpi));
     let mut left = at.x + reach;
     let mut top = at.y - reach - size.height;
     if left + size.width > monitor.right - edge {
@@ -80,24 +68,12 @@ pub fn place(at: Point, size: Size, monitor: RECT, dpi: u32) -> RECT {
     if top < monitor.top + edge {
         top = at.y + below;
     }
-    // Not `clamp`, which panics when the monitor is smaller than the panel.
-    let left = left
-        .min(monitor.right - margin - size.width)
-        .max(monitor.left + margin);
-    let top = top
-        .min(monitor.bottom - margin - size.height)
-        .max(monitor.top + margin);
-    RECT {
-        left,
-        top,
-        right: left + size.width,
-        bottom: top + size.height,
-    }
+    floating::inside_monitor(left, top, size, monitor, dpi)
 }
 
 impl Overlay {
-    /// Draws a notice that says `text` after `sign`, for the cursor having been at `at`: the shadow, the panel with
-    /// its border and the highlight inside its top, the sign and the text.
+    /// Draws a notice that says `text` after `sign`, for the cursor having been at `at`: the floating panel, the sign
+    /// and the text.
     pub(super) fn show_notice(
         &self,
         target: &ID2D1RenderTarget,
@@ -107,35 +83,9 @@ impl Overlay {
     ) -> windows::core::Result<()> {
         let typeset = self.typeset(text, &self.format)?;
         let panel = place(at, size(typeset.width, self.dpi), self.monitor, self.dpi);
+        self.draw_floating_panel(target, &panel, RADIUS, 1.0)?;
+
         let ring_width = scaled(geometry::RING, self.dpi);
-        let radius = scaled(RADIUS, self.dpi);
-        let outer = self.shaped(&panel, radius, 0, 0);
-
-        // The shadow is cut out where the panel is: the panel is a little see-through, and CSS never paints an outer
-        // shadow inside the box it belongs to.
-        let hole = self.geometry_of(&outer)?;
-        let drop = scaled(SHADOW_DROP, self.dpi);
-        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
-        // Direct2D only fails the frame at EndDraw.
-        unsafe { target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };
-        let layers = (0u32..).step_by(SHADOW_STEP);
-        for (step, &opacity) in layers.zip(&self.surfaces.shadow_opacities) {
-            // The layers start smaller than the panel by the spread and grow from there; their corners grow with them.
-            let grow = scaled(step, self.dpi) - scaled(SHADOW_SPREAD, self.dpi);
-            // SAFETY: as above.
-            unsafe { self.surfaces.shadow.SetOpacity(opacity) };
-            let layer = self.shaped(&panel, radius, grow, drop);
-            self.fill_except(target, &layer, &hole, &self.surfaces.shadow)?;
-        }
-
-        // The panel, its border over it, and the highlight along the inside of the border's top: the padding box less
-        // itself moved down a pixel.
-        let inside = self.shaped(&panel, radius, -ring_width, 0);
-        let lower = self.shaped(&panel, radius, -ring_width, scaled(1, self.dpi));
-        let lower = self.geometry_of(&lower)?;
-        self.fill_panel(target, &outer, ring_width);
-        self.fill_except(target, &inside, &lower, &self.surfaces.highlight)?;
-
         let window = self.in_window(&panel);
         let content_left = window.left + px(ring_width + scaled(PAD_LEFT, self.dpi));
         let content_top = window.top + px(ring_width + scaled(PAD_TOP, self.dpi));
@@ -152,7 +102,8 @@ impl Overlay {
             baseline - typeset.baseline,
         )
         .point;
-        // SAFETY: as above.
+        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
+        // Direct2D only fails the frame at EndDraw.
         unsafe {
             // Grayscale, not ClearType: color fringes would show on the see-through panel.
             target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
@@ -239,6 +190,7 @@ impl Overlay {
 
 #[cfg(test)]
 mod tests {
+    use super::floating::MARGIN;
     use super::*;
 
     fn point(x: i32, y: i32) -> Point {

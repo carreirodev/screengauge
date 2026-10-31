@@ -10,21 +10,21 @@ use super::tests::{
 };
 use super::*;
 
-const MODES: [Mode; 2] = [Mode::Dark, Mode::Light];
+pub(super) const MODES: [Mode; 2] = [Mode::Dark, Mode::Light];
 
 /// One palette's colors as the prototype states them (`--panel`, `--panel-ink` and so on), written out here a second time
 /// so that a slip in the palette is caught.
-struct Tokens {
-    panel: ([u8; 3], f32),
-    ink: [u8; 3],
-    border: ([u8; 3], f32),
-    accent: [u8; 3],
-    warn: [u8; 3],
+pub(super) struct Tokens {
+    pub(super) panel: ([u8; 3], f32),
+    pub(super) ink: [u8; 3],
+    pub(super) border: ([u8; 3], f32),
+    pub(super) accent: [u8; 3],
+    pub(super) warn: [u8; 3],
     /// The 1px highlight inside the notice's top border.
-    highlight: ([u8; 3], f32),
+    pub(super) highlight: ([u8; 3], f32),
 }
 
-fn tokens(mode: Mode) -> Tokens {
+pub(super) fn tokens(mode: Mode) -> Tokens {
     match mode {
         Mode::Dark => Tokens {
             panel: ([26, 27, 31], 0.94),
@@ -46,7 +46,7 @@ fn tokens(mode: Mode) -> Tokens {
 }
 
 /// `color` at `alpha` over the opaque `under`.
-fn over(color: [u8; 3], alpha: f32, under: [u8; 3]) -> [u8; 3] {
+pub(super) fn over(color: [u8; 3], alpha: f32, under: [u8; 3]) -> [u8; 3] {
     // A mix of two channels with weights adding up to 1 stays within 0 to 255, so the cast only drops the fraction
     // `round` already took away.
     // TODO: mix in whole numbers, so no float comes back to `u8`.
@@ -57,18 +57,18 @@ fn over(color: [u8; 3], alpha: f32, under: [u8; 3]) -> [u8; 3] {
 
 impl Tokens {
     /// What the panel looks like over the test's background.
-    fn panel_over(&self, under: [u8; 3]) -> [u8; 3] {
+    pub(super) fn panel_over(&self, under: [u8; 3]) -> [u8; 3] {
         over(self.panel.0, self.panel.1, under)
     }
 
     /// The panel over the background, and the ring over that: the ring's pixels.
-    fn ring_over_panel(&self) -> [u8; 3] {
+    pub(super) fn ring_over_panel(&self) -> [u8; 3] {
         over(self.border.0, self.border.1, self.panel_over(BACKGROUND))
     }
 }
 
 /// A pixel by its place in the virtual screen, which must be on the test's monitor.
-fn at(picture: &Picture, x: i32, y: i32) -> [u8; 3] {
+pub(super) fn at(picture: &Picture, x: i32, y: i32) -> [u8; 3] {
     let column =
         usize::try_from(x - MONITOR.left).expect("a pixel right of the monitor's left side");
     let row = usize::try_from(y - MONITOR.top).expect("a pixel below the monitor's top");
@@ -76,11 +76,11 @@ fn at(picture: &Picture, x: i32, y: i32) -> [u8; 3] {
 }
 
 /// The pixels of `area` as (x, y) in the virtual screen.
-fn pixels(area: RECT) -> impl Iterator<Item = (i32, i32)> {
+pub(super) fn pixels(area: RECT) -> impl Iterator<Item = (i32, i32)> {
     (area.top..area.bottom).flat_map(move |y| (area.left..area.right).map(move |x| (x, y)))
 }
 
-fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
+pub(super) fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
     RECT {
         left,
         top,
@@ -89,7 +89,7 @@ fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
     }
 }
 
-fn inside(pill: &RECT, x: i32, y: i32) -> bool {
+pub(super) fn inside(pill: &RECT, x: i32, y: i32) -> bool {
     pill.left <= x && x < pill.right && pill.top <= y && y < pill.bottom
 }
 
@@ -120,7 +120,7 @@ fn render_scene(
 
 /// The brightest green in `area` for a palette whose ink is lighter than its panel, the darkest for one whose ink is
 /// darker: the pixel of a glyph that is covered all through.
-fn strongest_green(picture: &Picture, area: RECT, mode: Mode) -> u8 {
+pub(super) fn strongest_green(picture: &Picture, area: RECT, mode: Mode) -> u8 {
     let greens = pixels(area).map(|(x, y)| at(picture, x, y)[1]);
     match mode {
         Mode::Dark => greens.max(),
