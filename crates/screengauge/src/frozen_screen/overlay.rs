@@ -38,8 +38,9 @@ const BAR_OPACITY: f32 = 0.4;
 const LOGICAL_OPACITY: f32 = 0.62;
 
 /// The logical part's weight, the prototype's CSS 500. Segoe UI has no face at 500, and DirectWrite gives its semibold
-/// for it, so the logical part is fainter by its opacity alone. That is what the approved prototype showed: in Chromium
-/// on Windows 11, Segoe UI at 500 lays out exactly as wide as at 600 and wider than at 400 (measured for WPC-307).
+/// for it, so the logical part is fainter by its opacity alone. Chromium does the same on Windows 11 (Segoe UI at 500
+/// lays out exactly as wide as at 600 and wider than at 400, measured for WPC-307), and the owner approved this label
+/// on screen in WPC-307.
 const LOGICAL_WEIGHT: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT_MEDIUM;
 
 /// The pill's shadow, approximating CSS `0 2px 7px rgba(0,0,0,.35)`: black rounded rectangles that grow by this many
@@ -1534,10 +1535,10 @@ mod tests {
     }
 
     #[test]
-    fn the_logical_part_is_in_the_same_semibold_the_prototype_showed() {
-        // Segoe UI has no face at weight 500, and both DirectWrite and the browser the prototype was approved in take
-        // its semibold for it, with no simulated bolding. Should Windows ever bring a face at 500, the logical part would
-        // change weight from what the owner approved: this fails then, so it is looked at again.
+    fn the_logical_part_is_in_the_same_semibold_the_owner_approved() {
+        // Segoe UI has no face at weight 500, and DirectWrite takes its semibold for it, with no simulated bolding: the
+        // label the owner approved on screen. Should Windows ever bring a face at 500, the logical part would change
+        // weight from what was approved: this fails then, so it is looked at again.
         let fonts = Fonts::new().expect("the fonts");
         let family = font_family(&fonts.factory).expect("the family");
         let face = |weight| {
