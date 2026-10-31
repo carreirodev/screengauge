@@ -38,6 +38,10 @@ _Avoid_: background color, base color, sample color
 How much a pixel's color may differ from the reference color and still count as the same area.
 _Avoid_: threshold, sensitivity, pixel difference
 
+**Tolerance indicator**:
+The small panel above and to the left of the cursor that shows the tolerance while the mouse wheel changes it, and goes a second after the wheel stops.
+_Avoid_: notice (a message that something was done, a different thing), tooltip, pill (the label of a measurement)
+
 **Edge**:
 The first pixel, moving away from the cursor along its row or column, whose color differs from the reference color by more than the tolerance.
 _Avoid_: border, boundary

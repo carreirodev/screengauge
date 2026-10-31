@@ -125,7 +125,21 @@ impl Tolerance {
     pub fn get(self) -> u8 {
         self.0
     }
+
+    /// One step higher, as a notch of the mouse wheel turned forward and Settings' + make it. At `MAX` it stays.
+    pub fn up(self) -> Tolerance {
+        Tolerance::new(self.0.saturating_add(STEP)).unwrap_or(Tolerance::MAX)
+    }
+
+    /// One step lower, as a notch of the mouse wheel turned back and Settings' − make it. At `MIN` it stays.
+    pub fn down(self) -> Tolerance {
+        Tolerance::new(self.0.saturating_sub(STEP)).unwrap_or(Tolerance::MIN)
+    }
 }
+
+/// How far a notch of the mouse wheel and Settings' − / + move the tolerance: the prototype's step, provisional until
+/// the calibration (WPC-332).
+const STEP: u8 = 1;
 
 impl Default for Tolerance {
     fn default() -> Tolerance {

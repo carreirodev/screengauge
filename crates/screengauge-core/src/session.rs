@@ -26,6 +26,12 @@ use crate::settings::{DimensionsMode, Options, Remembered, Tolerance, Tool};
 /// medidas aparecem, "o tempo exato se ajusta na construção").
 const NOTICE_LASTS: Duration = Duration::from_millis(1300);
 
+/// How long the tolerance indicator stays after the mouse wheel's last notch (v1 spec WPC-296, Tolerance).
+const INDICATOR_LASTS: Duration = Duration::from_secs(1);
+
+/// How far the mouse wheel turns in a notch, in the units of [`Input::Wheel`]: Windows' WHEEL_DELTA.
+const NOTCH: i32 = 120;
+
 /// What the session opens with.
 #[derive(Debug, Clone)]
 pub struct Opening {
@@ -75,7 +81,8 @@ pub struct Session {
     frozen_screen: Vec<Photo>,
     /// Where the cursor is, as far as the session knows: the last event's place, or where the arrow keys put it.
     cursor: Point,
-    /// The default tolerance from Settings, until the mouse wheel adjusts it (WPC-309).
+    /// The tolerance Dimensions, Bounds and Snip share: the default tolerance from Settings, until the mouse wheel
+    /// changes it. It lasts until the tools close and is never kept.
     tolerance: Tolerance,
     /// "Also show logical pixels" in Settings: whether a label on a monitor whose scale isn't 100% shows them.
     also_show_logical_pixels: bool,
@@ -89,6 +96,10 @@ pub struct Session {
     pinned: Vec<Measurement>,
     /// The notice on screen, and when it goes.
     notice: Option<TimedNotice>,
+    /// Until when the tolerance indicator shows, when it does.
+    indicator_until: Option<Duration>,
+    /// How far the mouse wheel has turned towards its next notch, in Windows' units: forward above zero, back below it.
+    wheel_turned: i32,
     /// Until when a press is the second click of the double-click that called ScreenGauge.
     second_click_until: Option<Duration>,
     /// Set by the effect that closes the tools, after which events do nothing.
@@ -134,6 +145,8 @@ impl Session {
             live: None,
             pinned: Vec::new(),
             notice: None,
+            indicator_until: None,
+            wheel_turned: 0,
             second_click_until,
             closed: false,
         };
@@ -146,13 +159,20 @@ impl Session {
         if self.closed {
             return Vec::new();
         }
-        // Whatever the event, a notice whose time is up goes, so one never outstays its time should a wake be lost.
+        // Whatever the event, a notice or the tolerance indicator whose time is up goes, so neither outstays its time
+        // should a wake be lost.
         if self
             .notice
             .as_ref()
             .is_some_and(|timed| timed.until <= event.uptime)
         {
             self.notice = None;
+        }
+        if self
+            .indicator_until
+            .is_some_and(|until| until <= event.uptime)
+        {
+            self.indicator_until = None;
         }
         match event.input {
             // Esc closes the tools whatever tool is active (v1 spec WPC-296, derived rule 3), and so does the global
@@ -180,12 +200,10 @@ impl Session {
             }
             Input::Press => self.pin(event.held, event.uptime),
             Input::KeyDown(Key::Backspace | Key::Delete) => self.unpin(),
-            // A timer may come a little early: the notice then stays, and the session asks again for the moment left.
-            Input::Wake => self
-                .notice
-                .as_ref()
-                .map(|timed| vec![Effect::WakeAt(timed.until)])
-                .unwrap_or_default(),
+            Input::Wheel(delta) => self.turn_wheel(delta, event.uptime),
+            // What was due has gone above. A timer may also come a little early: what was due then stays, and the
+            // session asks again for the moment left. Either way it asks for whatever is due next.
+            Input::Wake => self.wake().into_iter().collect(),
             _ => Vec::new(),
         }
     }
@@ -223,7 +241,8 @@ impl Session {
         Vec::new()
     }
 
-    /// Shows `message` where the cursor is, on `monitor`, in place of any notice still on screen, until it is due to go.
+    /// Shows `message` where the cursor is, on `monitor`, in place of any notice still on screen, until it is due to go,
+    /// and asks for the next wake, which is the tolerance indicator's when that goes first.
     fn show(&mut self, message: Message, monitor: usize, uptime: Duration) -> Option<Effect> {
         // Can't happen: Windows' uptime is milliseconds since it started, nowhere near Duration's limit.
         let until = uptime.checked_add(NOTICE_LASTS)?;
@@ -235,7 +254,53 @@ impl Session {
             },
             until,
         });
-        Some(Effect::WakeAt(until))
+        self.wake()
+    }
+
+    /// Moves the tolerance a step for each notch the mouse wheel turned, up for a notch forward and down for one back,
+    /// and measures again at once (v1 spec WPC-296, Tolerance). A precision touchpad turns it a part of a notch at a
+    /// time, so the parts add up until they make a notch, and turning the other way starts counting again. Dimensions,
+    /// Bounds and Snip share the tolerance; with Inspect active, which uses none, the wheel leaves it alone.
+    fn turn_wheel(&mut self, delta: i32, uptime: Duration) -> Vec<Effect> {
+        if self.remembered.last_tool == Tool::Inspect {
+            return Vec::new();
+        }
+        if self.wheel_turned.signum() == -delta.signum() {
+            self.wheel_turned = 0;
+        }
+        let turned = self.wheel_turned.saturating_add(delta);
+        let notches = turned / NOTCH;
+        self.wheel_turned = turned % NOTCH;
+        if notches == 0 {
+            return Vec::new();
+        }
+        let step = if notches > 0 {
+            Tolerance::up
+        } else {
+            Tolerance::down
+        };
+        for _ in 0..notches.unsigned_abs() {
+            let next = step(self.tolerance);
+            if next == self.tolerance {
+                // At a limit, where the rest of the notches change nothing either.
+                break;
+            }
+            self.tolerance = next;
+        }
+        self.indicator_until = uptime.checked_add(INDICATOR_LASTS);
+        self.measure();
+        self.wake().into_iter().collect()
+    }
+
+    /// The wake for the soonest of what is on screen only for a while, the notice and the tolerance indicator: the one
+    /// timer the Windows layer keeps serves both, so the session always asks for the next moment one of them goes.
+    fn wake(&self) -> Option<Effect> {
+        let notice = self.notice.as_ref().map(|timed| timed.until);
+        [notice, self.indicator_until]
+            .into_iter()
+            .flatten()
+            .min()
+            .map(Effect::WakeAt)
     }
 
     /// Dimensions measures in `mode` from now on, and the next call starts in it. The keys do nothing with another
@@ -299,18 +364,34 @@ impl Session {
         );
     }
 
-    /// Closes the tools, erasing every pinned measurement and the notice, and has the remembered state kept when the
-    /// session changed it (v1 spec WPC-296, Fechar as ferramentas). Closing comes first, so the screen is back before the
-    /// settings file is written.
+    /// Closes the tools, erasing every pinned measurement, the notice and the tolerance indicator, and has the remembered
+    /// state kept when the session changed it (v1 spec WPC-296, Fechar as ferramentas). Closing comes first, so the
+    /// screen is back before the settings file is written. The tolerance the mouse wheel set is never kept: the next
+    /// call starts at the default tolerance in Settings.
     fn close(&mut self) -> Vec<Effect> {
         self.closed = true;
         self.pinned.clear();
         self.notice = None;
+        self.indicator_until = None;
         let mut effects = vec![Effect::Close];
         if self.remembered != self.remembered_at_opening {
             effects.push(Effect::SaveRemembered(self.remembered.clone()));
         }
         effects
+    }
+
+    /// The tolerance indicator where the cursor is, while it shows.
+    fn tolerance_indicator(&self) -> Option<ToleranceIndicator> {
+        self.indicator_until?;
+        let monitor = self
+            .frozen_screen
+            .iter()
+            .position(|photo| photo.rect.contains(self.cursor))?;
+        Some(ToleranceIndicator {
+            tolerance: self.tolerance,
+            at: self.cursor,
+            monitor,
+        })
     }
 
     /// What to draw now.
@@ -320,7 +401,7 @@ impl Session {
             cursor: Cursor::Cross,
             live: self.live.as_ref(),
             pinned: &self.pinned,
-            tolerance_indicator: None,
+            tolerance_indicator: self.tolerance_indicator(),
             notice: self.notice.as_ref().map(|timed| &timed.notice),
         }
     }

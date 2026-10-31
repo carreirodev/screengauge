@@ -417,3 +417,14 @@ fn a_folder_that_isnt_a_full_path_goes_back_to_its_default() {
         }
     }
 }
+
+#[test]
+fn a_step_of_the_tolerance_is_one_and_stops_at_the_limits() {
+    // The step that a notch of the mouse wheel and Settings' − / + share (WPC-309), provisional until the calibration
+    // (WPC-332).
+    let two = Tolerance::default();
+    assert_eq!(two.up().get(), 3);
+    assert_eq!(two.down().get(), 1);
+    assert_eq!(Tolerance::MAX.up(), Tolerance::MAX);
+    assert_eq!(Tolerance::MIN.down(), Tolerance::MIN);
+}
