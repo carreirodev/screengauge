@@ -442,3 +442,23 @@ fn the_next_call_starts_at_the_default_tolerance_in_settings() {
     assert_eq!(live_span(&next), Some(row(135, 165)));
     assert_eq!(indicator(&next), None);
 }
+
+#[test]
+fn while_a_precision_touchpad_keeps_turning_the_indicator_stays_though_no_notch_is_complete() {
+    // The indicator goes a second after the wheel stops, not after its last full notch: small turns 700 ms apart keep it
+    // up, showing the tolerance as it is until they make a notch.
+    let mut session = open(options());
+    assert_eq!(
+        wakes(&session.handle(wheel(30, 1000))),
+        [ms(1000 + INDICATOR)]
+    );
+    assert_eq!(shown_tolerance(&session), Some(Tolerance::default()));
+    session.handle(wheel(30, 1700));
+    session.handle(wheel(30, 2400));
+    session.handle(event(GRAY_150, 3000, Input::Wake));
+    assert_eq!(shown_tolerance(&session), Some(Tolerance::default()));
+    session.handle(wheel(30, 3100));
+    assert_eq!(shown_tolerance(&session), Some(tolerance(3)));
+    session.handle(event(GRAY_150, 3100 + INDICATOR, Input::Wake));
+    assert_eq!(indicator(&session), None);
+}

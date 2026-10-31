@@ -4,8 +4,8 @@
 //! front, or the monitors changed. Over its monitor's photo, each window draws the measurements pinned there, what
 //! Dimensions measures right now when the cursor is there, and the tolerance indicator and the notice when they are
 //! there, and is drawn again whenever one of them changes. The first window also keeps the timer that wakes the session
-//! when either is due to go. The windows share the session; destroying them when the tools close, by dropping [`FrozenScreen`], drops the session and
-//! erases the photos with it.
+//! when either is due to go. The windows share the session; destroying them when the tools close, by dropping
+//! [`FrozenScreen`], drops the session and erases the photos with it.
 
 mod overlay;
 

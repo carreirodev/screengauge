@@ -183,7 +183,7 @@ pub struct Overlay {
     logical_format: IDWriteTextFormat,
     /// The tolerance indicator's texts: its word in the same semibold at its own size, and its number in the black
     /// face the prototype's `<b>` gets (see `tolerance`).
-    indicator_format: IDWriteTextFormat,
+    word_format: IDWriteTextFormat,
     number_format: IDWriteTextFormat,
     /// Asks for tabular figures; applied to each label's text.
     figures: IDWriteTypography,
@@ -313,11 +313,7 @@ impl Overlay {
             stroke,
             format: fonts.text_format(DWRITE_FONT_WEIGHT_SEMI_BOLD, geometry::TEXT, dpi)?,
             logical_format: fonts.text_format(LOGICAL_WEIGHT, geometry::TEXT, dpi)?,
-            indicator_format: fonts.text_format(
-                DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                tolerance::TEXT,
-                dpi,
-            )?,
+            word_format: fonts.text_format(DWRITE_FONT_WEIGHT_SEMI_BOLD, tolerance::TEXT, dpi)?,
             number_format: fonts.text_format(tolerance::NUMBER_WEIGHT, tolerance::TEXT, dpi)?,
             figures,
             fonts: fonts.clone(),

@@ -259,8 +259,9 @@ impl Session {
 
     /// Moves the tolerance a step for each notch the mouse wheel turned, up for a notch forward and down for one back,
     /// and measures again at once (v1 spec WPC-296, Tolerance). A precision touchpad turns it a part of a notch at a
-    /// time, so the parts add up until they make a notch, and turning the other way starts counting again. Dimensions,
-    /// Bounds and Snip share the tolerance; with Inspect active, which uses none, the wheel leaves it alone.
+    /// time, so the parts add up until they make a notch, and turning the other way starts counting again. Any turn
+    /// shows the tolerance indicator, which goes a second after the wheel stops. Dimensions, Bounds and Snip share the
+    /// tolerance; with Inspect active, which uses none, the wheel leaves it alone.
     fn turn_wheel(&mut self, delta: i32, uptime: Duration) -> Vec<Effect> {
         if self.remembered.last_tool == Tool::Inspect {
             return Vec::new();
@@ -271,9 +272,18 @@ impl Session {
         let turned = self.wheel_turned.saturating_add(delta);
         let notches = turned / NOTCH;
         self.wheel_turned = turned % NOTCH;
-        if notches == 0 {
-            return Vec::new();
+        if notches != 0 {
+            self.step_tolerance(notches);
         }
+        // Can't happen: Windows' uptime is milliseconds since it started, nowhere near Duration's limit. Should it, the
+        // indicator doesn't show.
+        self.indicator_until = uptime.checked_add(INDICATOR_LASTS);
+        self.wake().into_iter().collect()
+    }
+
+    /// Moves the tolerance `notches` steps, up when they are above zero and down when below, stopping at its limits,
+    /// and measures again.
+    fn step_tolerance(&mut self, notches: i32) {
         let step = if notches > 0 {
             Tolerance::up
         } else {
@@ -287,9 +297,7 @@ impl Session {
             }
             self.tolerance = next;
         }
-        self.indicator_until = uptime.checked_add(INDICATOR_LASTS);
         self.measure();
-        self.wake().into_iter().collect()
     }
 
     /// The wake for the soonest of what is on screen only for a while, the notice and the tolerance indicator: the one

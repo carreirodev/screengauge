@@ -122,7 +122,7 @@ impl Tolerance {
             .then_some(Tolerance(value))
     }
 
-    pub fn get(self) -> u8 {
+    pub const fn get(self) -> u8 {
         self.0
     }
 

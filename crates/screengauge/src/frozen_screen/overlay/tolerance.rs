@@ -25,7 +25,7 @@ use super::{Overlay, dot, px};
 // Every size below is in logical pixels, which `scaled` turns into physical pixels for the monitor's scale.
 
 /// The indicator's word. Everything ScreenGauge shows is in English (WPC-293).
-const LABEL: &str = "Tolerance";
+const WORD: &str = "Tolerance";
 
 /// The panel's corner radius.
 const RADIUS: u32 = 9;
@@ -113,14 +113,17 @@ pub fn place(at: Point, size: Size, monitor: RECT, dpi: u32) -> RECT {
     )
 }
 
-/// How many of the bar's segments are lit for `tolerance` of at most `max`: its share of `max` in tenths, rounded with
+// The bar divides by the highest tolerance; should the calibration ever make it 0, this stops the build.
+const _: () = assert!(
+    Tolerance::MAX.get() > 0,
+    "the highest tolerance must be above 0"
+);
+
+/// How many of the bar's segments are lit for `tolerance`: its share of the highest tolerance in tenths, rounded with
 /// halves up, as the prototype's `Math.round(tol / TOL_MAX * 10)`, in whole numbers.
-pub fn lit_segments(tolerance: u8, max: u8) -> i32 {
-    let tolerance = i32::from(tolerance);
-    // A highest tolerance of 0 would divide by zero. It is a constant above that, so this only keeps a slip there from
-    // panicking in the middle of a frame.
-    let max = i32::from(max).max(1);
-    ((tolerance * SEGMENTS * 2 + max) / (2 * max)).min(SEGMENTS)
+pub fn lit_segments(tolerance: Tolerance) -> i32 {
+    let (tolerance, max) = (i32::from(tolerance.get()), i32::from(Tolerance::MAX.get()));
+    (tolerance * SEGMENTS * 2 + max) / (2 * max)
 }
 
 impl Overlay {
@@ -132,7 +135,7 @@ impl Overlay {
         at: Point,
         tolerance: Tolerance,
     ) -> windows::core::Result<()> {
-        let word = self.typeset_plain(LABEL, &self.indicator_format)?;
+        let word = self.typeset_plain(WORD, &self.word_format)?;
         let number = self.typeset(&tolerance.get().to_string(), &self.number_format)?;
         let panel = place(
             at,
@@ -172,12 +175,7 @@ impl Overlay {
 
         let bar_left = number_left + px(number.width + scaled(GAP, self.dpi));
         let bar_top = content_top + px(bar_offset(self.dpi));
-        self.draw_bar(
-            target,
-            bar_left,
-            bar_top,
-            lit_segments(tolerance.get(), Tolerance::MAX.get()),
-        );
+        self.draw_bar(target, bar_left, bar_top, lit_segments(tolerance));
         Ok(())
     }
 
@@ -430,39 +428,35 @@ mod tests {
         assert_eq!((placed.left, placed.top), (tiny.left + 2, tiny.top + 2));
     }
 
-    #[test]
-    fn the_bar_lights_the_tolerances_share_of_the_highest_in_tenths_rounded_half_up() {
-        // The prototype's table, for a highest tolerance of 50 (provisional until the calibration, WPC-332).
-        for (tolerance, lit) in [(0, 0), (2, 0), (3, 1), (25, 5), (47, 9), (48, 10), (50, 10)] {
-            assert_eq!(lit_segments(tolerance, 50), lit, "tolerance {tolerance}");
-        }
-        // Halves go up: 5 of 100 is half a tenth of the way to the first segment, and 15 is one and a half.
-        assert_eq!(lit_segments(4, 100), 0);
-        assert_eq!(lit_segments(5, 100), 1);
-        assert_eq!(lit_segments(14, 100), 1);
-        assert_eq!(lit_segments(15, 100), 2);
-        // The bar never has more than its ten segments, whatever the highest says.
-        assert_eq!(lit_segments(60, 50), 10);
+    fn tolerance(value: u8) -> Tolerance {
+        Tolerance::new(value).expect("within the limits")
     }
 
     #[test]
-    fn the_bar_follows_javascripts_rounding_for_every_tolerance() {
-        for tolerance in 0..=50u8 {
-            let by_float = (f64::from(tolerance) / 50.0 * 10.0).round();
+    fn the_bar_lights_the_tolerances_share_of_the_highest_in_tenths() {
+        // The prototype's table, for a highest tolerance of 50 (provisional until the calibration, WPC-332).
+        for (value, lit) in [(0, 0), (2, 0), (3, 1), (25, 5), (47, 9), (48, 10), (50, 10)] {
+            assert_eq!(lit_segments(tolerance(value)), lit, "tolerance {value}");
+        }
+    }
+
+    #[test]
+    fn the_bar_follows_javascripts_rounding_with_halves_up_for_every_tolerance() {
+        // `Math.round` sends halves up, as `f64::round` does for these values, none of them below zero.
+        let max = Tolerance::MAX.get();
+        for value in Tolerance::MIN.get()..=max {
+            let by_float = (f64::from(value) / f64::from(max) * 10.0).round();
             assert_eq!(
-                f64::from(lit_segments(tolerance, 50)),
+                f64::from(lit_segments(tolerance(value))),
                 by_float,
-                "tolerance {tolerance}"
+                "tolerance {value}"
             );
         }
     }
 
     #[test]
     fn the_highest_tolerance_the_settings_allow_lights_the_whole_bar() {
-        assert_eq!(
-            lit_segments(Tolerance::MAX.get(), Tolerance::MAX.get()),
-            SEGMENTS
-        );
-        assert_eq!(lit_segments(Tolerance::MIN.get(), Tolerance::MAX.get()), 0);
+        assert_eq!(lit_segments(Tolerance::MAX), SEGMENTS);
+        assert_eq!(lit_segments(Tolerance::MIN), 0);
     }
 }

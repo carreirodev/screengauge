@@ -93,7 +93,7 @@ fn render_indicator(canvas: &Canvas, mode: Mode, dpi: u32, cursor: Point, value:
             .expect("the indicator");
         // The word has no digits to align, so it is laid out without the tabular figures, which would take its kerning.
         let word = overlay
-            .typeset_plain("Tolerance", &overlay.indicator_format)
+            .typeset_plain("Tolerance", &overlay.word_format)
             .expect("the word")
             .width;
         let number = text_width(overlay, &value.get().to_string(), &overlay.number_format);
@@ -601,7 +601,7 @@ fn the_ink_has_its_full_strength_whatever_opacity_the_brush_was_left_at_and_leav
                     .show_notice(target, notice_at, "Copied", Sign::Ok)
                     .expect("the notice");
                 let word = overlay
-                    .typeset_plain("Tolerance", &overlay.indicator_format)
+                    .typeset_plain("Tolerance", &overlay.word_format)
                     .expect("the word")
                     .width;
                 let number = text_width(overlay, "50", &overlay.number_format);
@@ -695,7 +695,7 @@ fn the_number_is_in_segoe_ui_black_and_the_texts_are_as_wide_as_chromium_laid_th
         metrics.width
     };
     for (text, format, tabular, chromium) in [
-        ("Tolerance", &overlay.indicator_format, false, 47.542),
+        ("Tolerance", &overlay.word_format, false, 47.542),
         ("0", &overlay.number_format, true, 6.594),
         ("25", &overlay.number_format, true, 13.188),
         ("47", &overlay.number_format, true, 13.427),
