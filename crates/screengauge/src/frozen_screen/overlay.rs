@@ -231,7 +231,7 @@ impl Overlay {
     /// The label's size and place, and where its text goes. `None` when the measurement has no span, so there is
     /// nothing to label.
     fn label(&self, measurement: &Measurement) -> windows::core::Result<Option<Label>> {
-        let layout = self.layout(&measurement.label)?;
+        let layout = self.layout(&measurement.label.physical)?;
         let mut metrics = DWRITE_TEXT_METRICS::default();
         // SAFETY: fills a local.
         unsafe { layout.GetMetrics(&mut metrics) }?;
@@ -556,7 +556,10 @@ mod tests {
             monitor: 0,
             horizontal: Some(span((x0, y), (x1, y))),
             vertical: None,
-            label: label.to_owned(),
+            label: screengauge_core::session::Label {
+                physical: label.to_owned(),
+                logical: None,
+            },
         }
     }
 
@@ -565,7 +568,10 @@ mod tests {
             monitor: 0,
             horizontal: None,
             vertical: Some(span((x, y0), (x, y1))),
-            label: label.to_owned(),
+            label: screengauge_core::session::Label {
+                physical: label.to_owned(),
+                logical: None,
+            },
         }
     }
 
@@ -575,7 +581,10 @@ mod tests {
             monitor: 0,
             horizontal: Some(span((h.0, y), (h.1, y))),
             vertical: Some(span((x, v.0), (x, v.1))),
-            label: label.to_owned(),
+            label: screengauge_core::session::Label {
+                physical: label.to_owned(),
+                logical: None,
+            },
         }
     }
 

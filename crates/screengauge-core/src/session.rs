@@ -12,7 +12,7 @@ mod output;
 
 pub use event::{Event, Held, Input, Key, LocalTime, ToolbarButton};
 pub use frozen_screen::{Colors, Image, Photo, Point, Rect, Scale};
-pub use output::{Cursor, Effect, Measurement, Scene, Span};
+pub use output::{Cursor, Effect, Label, Measurement, Scene, Span};
 
 use std::fmt;
 

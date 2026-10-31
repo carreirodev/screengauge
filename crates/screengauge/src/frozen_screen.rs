@@ -746,7 +746,7 @@ mod tests {
             monitor,
             horizontal: None,
             vertical: None,
-            label: String::new(),
+            label: screengauge_core::session::Label::default(),
         }
     }
 

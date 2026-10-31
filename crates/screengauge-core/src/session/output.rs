@@ -33,8 +33,18 @@ pub struct Measurement {
     pub horizontal: Option<Span>,
     /// The span along the cursor's column, in the vertical and Cross modes.
     pub vertical: Option<Span>,
-    /// What the label says, in physical pixels: `24` for one span, `240 × 180` (width × height) for Cross.
-    pub label: String,
+    pub label: Label,
+}
+
+/// What a measurement's label says (v1 spec WPC-296, Como as medidas aparecem): the physical pixels, then, after a thin
+/// bar and fainter, the logical pixels.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Label {
+    /// In physical pixels: `24` for one span, `240 × 180` (width × height) for Cross.
+    pub physical: String,
+    /// The same lengths in logical pixels, with a point before the tenths: `13.7`, `137.1 × 102.9`. `None` when the
+    /// monitor's scale is 100% or "Also show logical pixels" is off, and then the label has no bar either.
+    pub logical: Option<String>,
 }
 
 /// Pixels in a straight run along one row or one column, from the first to the last, both included: where a

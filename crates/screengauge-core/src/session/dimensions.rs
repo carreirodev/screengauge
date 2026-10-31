@@ -1,7 +1,7 @@
 //! Dimensions: the span of pixels around the cursor, from the edge on one side to the edge on the other, along the
 //! cursor's row, its column or both (v1 spec WPC-296, Dimensions).
 
-use super::{Measurement, Photo, Point, Span};
+use super::{Label, Measurement, Photo, Point, Span};
 use crate::settings::{DimensionsMode, Tolerance};
 
 /// What Dimensions measures with the cursor at `cursor`, on the monitor under it.
@@ -23,7 +23,7 @@ pub(super) fn measure(
     };
     // Width before height, with the multiplication sign between them, as the label shows them (v1 spec WPC-296, Como
     // as medidas aparecem).
-    let label = [horizontal, vertical]
+    let physical = [horizontal, vertical]
         .iter()
         .flatten()
         .map(|span| span.length().to_string())
@@ -33,7 +33,10 @@ pub(super) fn measure(
         monitor,
         horizontal,
         vertical,
-        label,
+        label: Label {
+            physical,
+            logical: None,
+        },
     })
 }
 

@@ -3,8 +3,8 @@
 //! session would draw and at the effects it returns.
 
 use screengauge_core::session::{
-    Colors, Effect, Event, Held, Image, Input, Key, LocalTime, Measurement, Opening, Photo, Point,
-    Rect, Scale, Session, Span,
+    Colors, Effect, Event, Held, Image, Input, Key, Label, LocalTime, Measurement, Opening, Photo,
+    Point, Rect, Scale, Session, Span,
 };
 use screengauge_core::settings::{DimensionsMode, Options, Remembered, Tool};
 
@@ -87,6 +87,14 @@ fn at(x: i32, y: i32) -> Point {
     Point { x, y }
 }
 
+/// A label in physical pixels alone.
+fn physical(text: &str) -> Label {
+    Label {
+        physical: text.to_owned(),
+        logical: None,
+    }
+}
+
 /// The span along row `y`, from column `first` to column `last`.
 fn row(y: i32, first: i32, last: i32) -> Span {
     Span {
@@ -121,7 +129,7 @@ fn horizontal_measures_the_gap_between_two_cards_from_any_point_in_it() {
                 monitor: 0,
                 horizontal: Some(row(600, 1000, 1023)),
                 vertical: None,
-                label: "24".to_owned(),
+                label: physical("24"),
             }),
             "cursor at x = {x}"
         );
@@ -138,7 +146,7 @@ fn vertical_measures_a_card_from_its_top_row_to_its_bottom_row() {
             monitor: 0,
             horizontal: None,
             vertical: Some(column(900, 500, 700)),
-            label: "201".to_owned(),
+            label: physical("201"),
         })
     );
 }
@@ -157,7 +165,7 @@ fn cross_measures_width_and_height_at_once_with_no_distance_to_each_edge() {
             monitor: 0,
             horizontal: Some(row(1250, 2000, 2239)),
             vertical: Some(column(2010, 1200, 1379)),
-            label: "240 × 180".to_owned(),
+            label: physical("240 × 180"),
         })
     );
 }
@@ -175,7 +183,7 @@ fn an_item_of_one_pixel_measures_one() {
             monitor: 0,
             horizontal: Some(row(900, 1500, 1500)),
             vertical: Some(column(1500, 0, 2159)),
-            label: "1 × 2160".to_owned(),
+            label: physical("1 × 2160"),
         })
     );
 }
@@ -194,7 +202,7 @@ fn with_no_edge_before_the_monitors_limit_the_span_runs_to_its_last_pixel_which_
             monitor: 0,
             horizontal: Some(row(2000, 3000, 3839)),
             vertical: Some(column(3500, 1800, 2159)),
-            label: "840 × 360".to_owned(),
+            label: physical("840 × 360"),
         })
     );
 }
@@ -204,7 +212,7 @@ fn a_blank_monitor_measures_from_limit_to_limit() {
     let blank = Canvas::new(AOC, WHITE).photo(168);
     let session = open(vec![blank], DimensionsMode::Cross, at(0, 0));
     assert_eq!(
-        live(&session).map(|measurement| measurement.label),
+        live(&session).map(|measurement| measurement.label.physical),
         Some("3840 × 2160".to_owned())
     );
 }
@@ -233,7 +241,7 @@ fn in_a_gradient_the_edge_is_the_first_pixel_too_far_from_the_reference_color_no
             monitor: 0,
             horizontal: Some(row(1000, 144, 156)),
             vertical: None,
-            label: "13".to_owned(),
+            label: physical("13"),
         })
     );
 }
@@ -299,7 +307,7 @@ fn moving_to_another_monitor_measures_there_on_that_monitor_alone() {
             monitor: 0,
             horizontal: Some(row(500, 0, 3839)),
             vertical: Some(column(0, 0, 2159)),
-            label: "3840 × 2160".to_owned(),
+            label: physical("3840 × 2160"),
         }),
         "on the 4K monitor's first column"
     );
@@ -310,7 +318,7 @@ fn moving_to_another_monitor_measures_there_on_that_monitor_alone() {
             monitor: 1,
             horizontal: Some(row(1079, -1920, -1)),
             vertical: Some(column(-1, 0, 1079)),
-            label: "1920 × 1080".to_owned(),
+            label: physical("1920 × 1080"),
         }),
         "on the Full HD monitor's last column and last row"
     );
@@ -320,7 +328,7 @@ fn moving_to_another_monitor_measures_there_on_that_monitor_alone() {
 fn moving_the_mouse_measures_where_it_went() {
     let mut session = open(vec![two_cards()], DimensionsMode::Horizontal, at(900, 600));
     assert_eq!(
-        live(&session).map(|measurement| measurement.label),
+        live(&session).map(|measurement| measurement.label.physical),
         Some("200".to_owned()),
         "inside the left card"
     );
@@ -361,7 +369,7 @@ fn h_v_and_c_change_the_mode_and_the_measurement_follows() {
         );
         assert_eq!(spans(&session), expected, "{key:?}");
         assert_eq!(
-            live(&session).map(|measurement| measurement.label),
+            live(&session).map(|measurement| measurement.label.physical),
             Some(label.to_owned()),
             "{key:?}"
         );
@@ -456,7 +464,7 @@ fn an_arrow_moves_the_cursor_one_pixel_and_the_measurement_follows() {
         [Effect::MoveCursor(at(1000, 600))]
     );
     assert_eq!(
-        live(&session).map(|measurement| measurement.label),
+        live(&session).map(|measurement| measurement.label.physical),
         Some("24".to_owned())
     );
     for (key, to) in [
