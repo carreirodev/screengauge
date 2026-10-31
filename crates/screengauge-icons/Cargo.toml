@@ -1,0 +1,25 @@
+[package]
+name = "screengauge-icons"
+description = "Draws ScreenGauge's app icon and Store icon and writes every icon file in assets/: the .ico, the package images and the Store icon."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# Run with `cargo run -p screengauge-icons` to write assets/ again. Never part of ScreenGauge.exe.
+[dependencies.windows]
+workspace = true
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Imaging",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_UI_Shell",
+]

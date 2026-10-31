@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/screengauge", "crates/screengauge-core"]
+members = ["crates/screengauge", "crates/screengauge-core", "crates/screengauge-icons"]
 
 [workspace.package]
 version = "0.1.0"
