@@ -37,9 +37,10 @@ const OUTLINE_OPACITY: f32 = 0.28;
 const BAR_OPACITY: f32 = 0.4;
 const LOGICAL_OPACITY: f32 = 0.62;
 
-/// The logical part's weight (CSS 500), a step lighter than the physical part's semibold. Segoe UI has no face at 500,
-/// so DirectWrite takes the nearest, and on Windows 11 that is the semibold itself: the logical part is fainter by its
-/// opacity alone. `DWRITE_FONT_WEIGHT_REGULAR` here would make it lighter in weight too.
+/// The logical part's weight (CSS 500), meant to be a step lighter than the physical part's semibold. Segoe UI has no
+/// face at 500, so DirectWrite takes the nearest, and on the Windows 11 this was checked on that is the semibold
+/// itself: the logical part is then fainter by its opacity alone. `DWRITE_FONT_WEIGHT_REGULAR` here would make it
+/// lighter in weight too.
 const LOGICAL_WEIGHT: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT_MEDIUM;
 
 /// The pill's shadow, approximating CSS `0 2px 7px rgba(0,0,0,.35)`: black rounded rectangles that grow by this many
@@ -1410,6 +1411,34 @@ mod tests {
             assert!(
                 logical > physical + 50,
                 "{logical} against {physical} at {dpi} DPI"
+            );
+        }
+    }
+
+    #[test]
+    fn the_texts_start_a_padding_in_and_a_gap_a_bar_and_a_gap_apart() {
+        // A glyph's side bearings keep pixels from showing a shift of one pixel in where a text starts, so this reads
+        // where the label put each text. The expected places are worked out here from the scale alone.
+        let canvas = Canvas::new(480, 320);
+        for dpi in SCALES {
+            let m = with_logical(horizontal(-400, -301, 350, "24"), "13.7");
+            let mut found = None;
+            canvas.render(MONITOR, dpi, |overlay, _| {
+                let label = overlay.label(&m).expect("the label").expect("a pill");
+                let physical_width = text_width(overlay, "24", &overlay.format);
+                found = Some((label, physical_width));
+            });
+            let (label, w) = found.expect("the label was made");
+            let logical = label.logical.expect("a logical part");
+            let physical_left = px(label.pill.left - MONITOR.left + scaled(8, dpi));
+            assert_eq!(label.physical.left, physical_left, "at {dpi} DPI");
+            let bar_left = physical_left + px(w + scaled(7, dpi));
+            assert_eq!(logical.bar.left, bar_left, "at {dpi} DPI");
+            assert_eq!(logical.bar.right, bar_left + px(scaled(1, dpi)));
+            assert_eq!(
+                logical.text.left,
+                bar_left + px(scaled(1, dpi) + scaled(7, dpi)),
+                "at {dpi} DPI"
             );
         }
     }
