@@ -11,7 +11,7 @@ mod panel_tests;
 
 use std::cell::RefCell;
 
-use screengauge_core::session::{Measurement, Notice, Rect, Scale};
+use screengauge_core::session::{Measurement, Notice, Rect, Scale, ToleranceIndicator};
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{D2D_RECT_F, D2D1_COLOR_F};
 use windows::Win32::Graphics::Direct2D::{
@@ -352,6 +352,19 @@ impl Overlay {
             notice.message.text(),
             notice.message.sign(),
         )
+    }
+
+    /// Draws the tolerance indicator over the measurements and under any notice, inside the window's monitor, between
+    /// BeginDraw and EndDraw: the palette's panel with its border and shadow, "Tolerance N" and the bar, above and to
+    /// the left of the cursor.
+    pub fn draw_tolerance(
+        &self,
+        target: &ID2D1RenderTarget,
+        indicator: &ToleranceIndicator,
+    ) -> windows::core::Result<()> {
+        // TODO(WPC-309): the drawing builder draws it here; until then nothing shows.
+        let _ = (target, indicator);
+        Ok(())
     }
 
     /// The outlines of every measurement.

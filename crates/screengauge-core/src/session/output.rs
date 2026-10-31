@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use super::{Image, Photo, Point};
-use crate::settings::{Folder, Remembered};
+use crate::settings::{Folder, Remembered, Tolerance};
 
 /// What the Windows layer draws while the tools are open.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -21,8 +21,25 @@ pub struct Scene<'a> {
     /// monitor the cursor is on. Their labels are in the theme's colors, the live one's in cyan, so the one that still
     /// changes stands out (v1 spec WPC-296, Como as medidas aparecem).
     pub pinned: &'a [Measurement],
+    /// The tolerance indicator, drawn over the measurements on the cursor's monitor and under the notice. `None` once
+    /// the mouse wheel hasn't changed the tolerance for a second.
+    pub tolerance_indicator: Option<ToleranceIndicator>,
     /// The notice on screen, drawn over everything else on its monitor. `None` when there is none.
     pub notice: Option<&'a Notice>,
+}
+
+/// What the mouse wheel has just made the tolerance (v1 spec WPC-296, Tolerance): "Tolerance N" and a bar of ten
+/// segments, as many of them lit as the tolerance's share of the highest one, on a small panel above and to the left of
+/// the cursor. It follows the cursor, and goes a second after the wheel stops. It is no notice: it says what a value is
+/// now, not that something was done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToleranceIndicator {
+    /// The tolerance now: the number Settings' − / + shows for the default tolerance.
+    pub tolerance: Tolerance,
+    /// Where the cursor is, in physical pixels of the virtual screen.
+    pub at: Point,
+    /// The monitor the cursor is on, as an index in the frozen screen's order.
+    pub monitor: usize,
 }
 
 /// A short message ScreenGauge draws on screen itself (v1 spec WPC-296, Como as medidas aparecem): small, with an ok or
@@ -150,8 +167,9 @@ pub enum Effect {
     /// has already measured there; the move Windows then reports changes nothing more.
     MoveCursor(Point),
     /// Hand the session [`Input::Wake`](super::Input::Wake) once Windows has been running this long
-    /// ([`Event::uptime`](super::Event::uptime)): the moment something on screen goes by itself, such as a notice. A
-    /// later `WakeAt` takes the place of an earlier one still waiting.
+    /// ([`Event::uptime`](super::Event::uptime)): the moment something on screen goes by itself, such as a notice or
+    /// the tolerance indicator. A later `WakeAt` takes the place of an earlier one still waiting, so the session always
+    /// asks for the soonest of them, and once woken asks for the next.
     WakeAt(Duration),
     /// Close the tools: the frozen screen goes, its photos are erased, and the mouse goes back to the programs. The
     /// session takes no more events.

@@ -2,9 +2,9 @@
 //! the session core's scene. Each window draws its monitor's photo pixel for pixel with Direct2D, shows the cursor the
 //! scene names, and hands the core what the user does over it and what Windows tells it: another program came to the
 //! front, or the monitors changed. Over its monitor's photo, each window draws the measurements pinned there, what
-//! Dimensions measures right now when the cursor is there, and the notice when it is there, and is drawn again whenever
-//! one of them changes. The first window also keeps the timer that wakes the session when a notice is due to go. The
-//! windows share the session; destroying them when the tools close, by dropping [`FrozenScreen`], drops the session and
+//! Dimensions measures right now when the cursor is there, and the tolerance indicator and the notice when they are
+//! there, and is drawn again whenever one of them changes. The first window also keeps the timer that wakes the session
+//! when either is due to go. The windows share the session; destroying them when the tools close, by dropping [`FrozenScreen`], drops the session and
 //! erases the photos with it.
 
 mod overlay;
@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use screengauge_core::session::{
     Cursor, Effect, Event, Input, Measurement, Notice, Photo, Point, Rect, Session,
+    ToleranceIndicator,
 };
 use windows::Win32::Foundation::{
     D2DERR_RECREATE_TARGET, E_FAIL, ERROR_SUCCESS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT,
@@ -319,6 +320,7 @@ impl SharedSession {
                 Shown {
                     live: scene.live.cloned(),
                     pinned: scene.pinned.to_vec(),
+                    tolerance_indicator: scene.tolerance_indicator,
                     notice: scene.notice.copied(),
                 }
             }
@@ -411,6 +413,7 @@ impl SharedSession {
 struct Shown {
     live: Option<Measurement>,
     pinned: Vec<Measurement>,
+    tolerance_indicator: Option<ToleranceIndicator>,
     notice: Option<Notice>,
 }
 
@@ -420,6 +423,7 @@ struct OnMonitor<'a> {
     /// Oldest first.
     pinned: Vec<&'a Measurement>,
     live: Option<&'a Measurement>,
+    tolerance_indicator: Option<&'a ToleranceIndicator>,
     notice: Option<&'a Notice>,
 }
 
@@ -435,6 +439,10 @@ impl Shown {
                 .live
                 .as_ref()
                 .filter(|measurement| measurement.monitor == monitor),
+            tolerance_indicator: self
+                .tolerance_indicator
+                .as_ref()
+                .filter(|indicator| indicator.monitor == monitor),
             notice: self
                 .notice
                 .as_ref()
@@ -449,19 +457,43 @@ impl Shown {
             .iter()
             .chain(&self.live)
             .map(|measurement| measurement.monitor);
-        measured.chain(self.notice.iter().map(|notice| notice.monitor))
+        let indicated = self
+            .tolerance_indicator
+            .iter()
+            .map(|indicator| indicator.monitor);
+        measured
+            .chain(indicated)
+            .chain(self.notice.iter().map(|notice| notice.monitor))
     }
 }
 
 /// The monitors whose windows show something different from `before` to `after`, each once and in order: the one a
 /// measurement left, which must lose its line, the one it is on now, the one a measurement was pinned on or taken off,
-/// and the one a notice appeared on or went from.
+/// the ones the tolerance indicator appeared on, followed the cursor between or went from, and the one a notice appeared
+/// on or went from.
 fn monitors_to_draw_again(before: &Shown, after: &Shown) -> Vec<usize> {
     let monitors: BTreeSet<usize> = before.monitors().chain(after.monitors()).collect();
     monitors
         .into_iter()
         .filter(|&monitor| before.on(monitor) != after.on(monitor))
         .collect()
+}
+
+/// The first of `results` that failed, with every later failure logged under its name.
+fn first_failure<const N: usize>(
+    results: [(&str, windows::core::Result<()>); N],
+) -> windows::core::Result<()> {
+    let mut first = Ok(());
+    for (what, result) in results {
+        if let Err(e) = result {
+            if first.is_ok() {
+                first = Err(e);
+            } else {
+                log::failure(what, &e);
+            }
+        }
+    }
+    first
 }
 
 /// Destroys one of the frozen screen's windows, from outside its window procedure.
@@ -689,7 +721,7 @@ fn paint(hwnd: HWND, window: &Window) {
 }
 
 /// Draws the window's part of the scene: its monitor's photo, and over it the measurements pinned on this monitor, what
-/// Dimensions measures when that is on this monitor, and the notice when it is here.
+/// Dimensions measures when that is on this monitor, and the tolerance indicator and the notice when they are here.
 fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
     // A copy, so the session is borrowed only for a moment.
     let shown = window.session.shown();
@@ -714,20 +746,22 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
             None,
         );
     }
-    // A label or a notice that can't be laid out leaves the photo and the lines as they are; the failure is returned
-    // once the frame is finished.
+    // A label, the indicator or a notice that can't be laid out leaves the photo and the lines as they are; the first
+    // failure is returned once the frame is finished, and any later one is logged.
     let measured = ready.overlay.draw(&ready.target, &here.pinned, here.live);
+    let indicated = match here.tolerance_indicator {
+        Some(indicator) => ready.overlay.draw_tolerance(&ready.target, indicator),
+        None => Ok(()),
+    };
     let noticed = match here.notice {
         Some(notice) => ready.overlay.draw_notice(&ready.target, notice),
         None => Ok(()),
     };
-    let overlaid = match (measured, noticed) {
-        (Err(measured), Err(noticed)) => {
-            log::failure("frozen screen: drawing the notice", &noticed);
-            Err(measured)
-        }
-        (measured, noticed) => measured.and(noticed),
-    };
+    let overlaid = first_failure([
+        ("frozen screen: drawing the measurements", measured),
+        ("frozen screen: drawing the tolerance indicator", indicated),
+        ("frozen screen: drawing the notice", noticed),
+    ]);
     // SAFETY: ends the BeginDraw above.
     match unsafe { ready.target.EndDraw(None, None) } {
         Ok(()) => {
@@ -837,6 +871,7 @@ mod tests {
     use super::*;
 
     use screengauge_core::session::{Label, Message};
+    use screengauge_core::settings::Tolerance;
 
     /// A measurement on `monitor` whose label reads `text`, so two of them on one monitor differ.
     fn on(monitor: usize, text: &str) -> Measurement {
@@ -918,6 +953,43 @@ mod tests {
         };
         let after = live(on(0, "24"));
         assert_eq!(monitors_to_draw_again(&before, &after), [1]);
+    }
+
+    fn tolerance_on(monitor: usize, value: u8) -> ToleranceIndicator {
+        ToleranceIndicator {
+            tolerance: Tolerance::new(value).expect("within the limits"),
+            at: Point { x: 10, y: 10 },
+            monitor,
+        }
+    }
+
+    #[test]
+    fn the_tolerance_indicator_that_appears_changes_or_goes_redraws_its_monitor() {
+        let quiet = live(on(0, "24"));
+        let indicated = Shown {
+            tolerance_indicator: Some(tolerance_on(0, 3)),
+            ..quiet.clone()
+        };
+        let raised = Shown {
+            tolerance_indicator: Some(tolerance_on(0, 4)),
+            ..quiet.clone()
+        };
+        assert_eq!(monitors_to_draw_again(&quiet, &indicated), [0]);
+        assert_eq!(monitors_to_draw_again(&indicated, &raised), [0]);
+        assert_eq!(monitors_to_draw_again(&indicated, &quiet), [0]);
+    }
+
+    #[test]
+    fn the_tolerance_indicator_that_follows_the_cursor_to_another_monitor_redraws_both() {
+        let here = Shown {
+            tolerance_indicator: Some(tolerance_on(0, 3)),
+            ..Shown::default()
+        };
+        let there = Shown {
+            tolerance_indicator: Some(tolerance_on(1, 3)),
+            ..Shown::default()
+        };
+        assert_eq!(monitors_to_draw_again(&here, &there), [0, 1]);
     }
 
     #[test]

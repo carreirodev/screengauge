@@ -13,7 +13,9 @@ mod units;
 
 pub use event::{Event, Held, Input, Key, LocalTime, ToolbarButton};
 pub use frozen_screen::{Colors, Image, Photo, Point, Rect, Scale};
-pub use output::{Cursor, Effect, Label, Measurement, Message, Notice, Scene, Sign, Span};
+pub use output::{
+    Cursor, Effect, Label, Measurement, Message, Notice, Scene, Sign, Span, ToleranceIndicator,
+};
 
 use std::fmt;
 use std::time::Duration;
@@ -318,6 +320,7 @@ impl Session {
             cursor: Cursor::Cross,
             live: self.live.as_ref(),
             pinned: &self.pinned,
+            tolerance_indicator: None,
             notice: self.notice.as_ref().map(|timed| &timed.notice),
         }
     }
