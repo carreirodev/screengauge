@@ -7,11 +7,11 @@ use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Direct2D::Common::{D2D1_FIGURE_BEGIN_HOLLOW, D2D1_FIGURE_END_OPEN};
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
-    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1RenderTarget, ID2D1StrokeStyle,
+    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1RenderTarget,
 };
 
 use super::geometry::{self, Size, scaled};
-use super::{Overlay, px, ring};
+use super::{Overlay, dot, px};
 
 // Every size below is in logical pixels, which `scaled` turns into physical pixels for the monitor's scale.
 
@@ -113,7 +113,7 @@ impl Overlay {
 
         // The shadow is cut out where the panel is: the panel is a little see-through, and CSS never paints an outer
         // shadow inside the box it belongs to.
-        let hole = self.hollow(&outer)?;
+        let hole = self.geometry_of(&outer)?;
         let drop = scaled(SHADOW_DROP, self.dpi);
         // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
         // Direct2D only fails the frame at EndDraw.
@@ -132,17 +132,8 @@ impl Overlay {
         // itself moved down a pixel.
         let inside = self.shaped(&panel, radius, -ring_width, 0);
         let lower = self.shaped(&panel, radius, -ring_width, scaled(1, self.dpi));
-        let lower = self.hollow(&lower)?;
-        // SAFETY: as above.
-        unsafe {
-            target.FillRoundedRectangle(&outer, &self.surfaces.panel);
-            target.DrawRoundedRectangle(
-                &ring(&outer, px(ring_width)),
-                &self.surfaces.border,
-                px(ring_width),
-                None::<&ID2D1StrokeStyle>,
-            );
-        }
+        let lower = self.geometry_of(&lower)?;
+        self.fill_panel(target, &outer, ring_width);
         self.fill_except(target, &inside, &lower, &self.surfaces.highlight)?;
 
         let window = self.in_window(&panel);
@@ -156,11 +147,11 @@ impl Overlay {
         let line = px(scaled(LINE, self.dpi));
         let baseline =
             (content_top + (line - typeset.line_height) / 2.0 + typeset.baseline).round();
-        // DrawTextLayout takes a Vector2, which windows 0.62 takes from the windows-numerics crate without
-        // re-exporting it, and this program may not add the crate. Direct2D's ellipse holds one.
-        let mut origin = D2D1_ELLIPSE::default().point;
-        origin.X = content_left + px(scaled(SIGN, self.dpi) + scaled(GAP, self.dpi));
-        origin.Y = baseline - typeset.baseline;
+        let origin = dot(
+            content_left + px(scaled(SIGN, self.dpi) + scaled(GAP, self.dpi)),
+            baseline - typeset.baseline,
+        )
+        .point;
         // SAFETY: as above.
         unsafe {
             // Grayscale, not ClearType: color fringes would show on the see-through panel.
@@ -188,13 +179,8 @@ impl Overlay {
         top: f32,
     ) -> windows::core::Result<()> {
         let unit = px(scaled(SIGN, self.dpi)) / SIGN_UNITS;
-        // A Vector2 in the sign's units, from the same ellipse trick as for the text's origin.
-        let at = |x: f32, y: f32| {
-            let mut point = D2D1_ELLIPSE::default().point;
-            point.X = left + x * unit;
-            point.Y = top + y * unit;
-            point
-        };
+        // A point given in the sign's units.
+        let at = |x: f32, y: f32| dot(left + x * unit, top + y * unit).point;
         // SAFETY: a drawing call on a live render target. Out of BeginDraw and EndDraw, Direct2D only fails the frame
         // at EndDraw.
         unsafe { target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };

@@ -721,7 +721,13 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
         Some(notice) => ready.overlay.draw_notice(&ready.target, notice),
         None => Ok(()),
     };
-    let overlaid = measured.and(noticed);
+    let overlaid = match (measured, noticed) {
+        (Err(measured), Err(noticed)) => {
+            log::failure("frozen screen: drawing the notice", &noticed);
+            Err(measured)
+        }
+        (measured, noticed) => measured.and(noticed),
+    };
     // SAFETY: ends the BeginDraw above.
     match unsafe { ready.target.EndDraw(None, None) } {
         Ok(()) => {

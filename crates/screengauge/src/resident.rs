@@ -318,6 +318,7 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
             }
             Effect::WakeAt(uptime) => {
                 FROZEN_SCREEN.with_borrow(|open| {
+                    // With the tools closed there is nothing left to wake: what was due to go went with them.
                     if let Some(frozen) = open {
                         frozen.wake_at(uptime);
                     }

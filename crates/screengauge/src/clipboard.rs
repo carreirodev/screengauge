@@ -23,7 +23,14 @@ pub fn copy_text(owner: HWND, text: &str) -> windows::core::Result<()> {
     let put = put_text(&wide_with_nul(text));
     // SAFETY: the clipboard was opened just above, by this thread.
     let closed = unsafe { CloseClipboard() };
-    put.and(closed)
+    match (put, closed) {
+        (Err(put), Err(closed)) => {
+            // The copy's failure is the one returned; the clipboard left open matters too, as every program needs it.
+            crate::log::failure("clipboard: closing it after a failed copy", &closed);
+            Err(put)
+        }
+        (put, closed) => put.and(closed),
+    }
 }
 
 /// Opens the clipboard for this thread, waiting a little while another program holds it.
@@ -80,8 +87,8 @@ fn fill(memory: HGLOBAL, wide: &[u16]) -> windows::core::Result<()> {
 
 /// Frees memory Windows didn't take.
 fn free(memory: HGLOBAL) {
-    // SAFETY: `memory` came from GlobalAlloc, is unlocked, and nothing else holds it. GlobalFree returns the handle on
-    // failure; there is nothing more to do with it then than log it.
+    // SAFETY: `memory` came from GlobalAlloc and nothing else holds it; GlobalFree frees it even should `fill` have
+    // failed to unlock it. GlobalFree returns the handle on failure; there is nothing more to do with it then than log it.
     if let Err(e) = unsafe { GlobalFree(Some(memory)) } {
         crate::log::failure("clipboard: freeing the text Windows didn't take", &e);
     }

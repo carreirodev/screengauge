@@ -203,7 +203,7 @@ impl Session {
             // Can't happen: Dimensions measures on a monitor of the frozen screen.
             return Vec::new();
         };
-        let text = units::copied(&measurement.lengths(), photo.scale, held.shift);
+        let text = units::clipboard_text(&measurement.lengths(), photo.scale, held.shift);
         let monitor = measurement.monitor;
         self.pinned.push(measurement);
         let mut effects = vec![Effect::CopyText(text)];
@@ -223,6 +223,7 @@ impl Session {
 
     /// Shows `message` where the cursor is, on `monitor`, in place of any notice still on screen, until it is due to go.
     fn show(&mut self, message: Message, monitor: usize, uptime: Duration) -> Option<Effect> {
+        // Can't happen: Windows' uptime is milliseconds since it started, nowhere near Duration's limit.
         let until = uptime.checked_add(NOTICE_LASTS)?;
         self.notice = Some(TimedNotice {
             notice: Notice {

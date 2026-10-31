@@ -44,9 +44,10 @@ struct Palette {
     shadow_opacities: [f32; SHADOW_LAYERS],
 }
 
-// The notice's shadow is CSS `0 10px 28px -8px`: a gaussian blur with a sigma of 14px (CSS's blur of 28px) of a box 15px
-// tall (the notice's 31px less the spread of 8 on each side), at an opacity of .75 in the dark palette and .45 in the
-// light one. Its layers are rounded rectangles 4px bigger each than the one before, and each one's opacity is what makes
+// The notice's shadow is CSS `0 10px 28px -8px` in the dark palette: a gaussian blur with a sigma of 14px (CSS's blur of
+// 28px) of a box 15px tall (the notice's 31px less the spread of 8 on each side), at an opacity of .75. The light one's
+// is `0 10px 26px -8px` at .45; it is drawn with the same layers, as its 2px less of blur moves where it fades by about a
+// pixel. Its layers are rounded rectangles 4px bigger each than the one before, and each one's opacity is what makes
 // the layers laid over each other add up to the gaussian's strength in the middle of its 4px band, reading it from the
 // outermost layer in; the last band beyond them is clear.
 const DARK: Palette = Palette {

@@ -47,6 +47,9 @@ fn tokens(mode: Mode) -> Tokens {
 
 /// `color` at `alpha` over the opaque `under`.
 fn over(color: [u8; 3], alpha: f32, under: [u8; 3]) -> [u8; 3] {
+    // A mix of two channels with weights adding up to 1 stays within 0 to 255, so the cast only drops the fraction
+    // `round` already took away.
+    // TODO: mix in whole numbers, so no float comes back to `u8`.
     std::array::from_fn(|i| {
         (f32::from(color[i]) * alpha + f32::from(under[i]) * (1.0 - alpha)).round() as u8
     })
@@ -64,9 +67,12 @@ impl Tokens {
     }
 }
 
-/// A pixel by its place in the virtual screen.
+/// A pixel by its place in the virtual screen, which must be on the test's monitor.
 fn at(picture: &Picture, x: i32, y: i32) -> [u8; 3] {
-    picture.at((x - MONITOR.left) as usize, (y - MONITOR.top) as usize)
+    let column =
+        usize::try_from(x - MONITOR.left).expect("a pixel right of the monitor's left side");
+    let row = usize::try_from(y - MONITOR.top).expect("a pixel below the monitor's top");
+    picture.at(column, row)
 }
 
 /// The pixels of `area` as (x, y) in the virtual screen.

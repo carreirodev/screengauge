@@ -40,7 +40,7 @@ impl fmt::Display for LogicalPixels {
 /// ones when `logical`, whatever "Also show logical pixels" says. Only the numbers, without "px", width then height with
 /// the letter x between them, so they paste into a numeric field: `24`, `24 x 180`, `114.3` (v1 spec WPC-296,
 /// Dimensions). At 100% both are the same whole numbers.
-pub(super) fn copied(lengths: &[u32], scale: Scale, logical: bool) -> String {
+pub(super) fn clipboard_text(lengths: &[u32], scale: Scale, logical: bool) -> String {
     lengths
         .iter()
         .map(|&length| {

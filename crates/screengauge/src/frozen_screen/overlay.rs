@@ -30,6 +30,7 @@ use windows::Win32::Graphics::DirectWrite::{
 };
 use windows::core::{BOOL, Error, PCWSTR, w};
 
+use crate::log;
 use crate::theme::Mode;
 use geometry::{Parts, scaled};
 use palette::Surfaces;
@@ -298,14 +299,23 @@ impl Overlay {
     /// reaches toward the lines; every outline; every cyan pixel, so nothing darkens one, whichever measurement it
     /// belongs to; then the pills with their text. A pill never touches its own line, being further from it than a
     /// tick reaches, but it covers another measurement's. A label that can't be laid out doesn't stop the others; the
-    /// first failure is returned once everything else is drawn.
+    /// first failure is returned once everything else is drawn, and any later one is logged.
     pub fn draw(
         &self,
         target: &ID2D1RenderTarget,
         pinned: &[&Measurement],
         live: Option<&Measurement>,
     ) -> windows::core::Result<()> {
-        let mut drawn = Ok(());
+        let mut first_failure = None;
+        let mut keep = |result: windows::core::Result<()>| {
+            if let Err(e) = result {
+                if first_failure.is_none() {
+                    first_failure = Some(e);
+                } else {
+                    log::failure("frozen screen: drawing a label", &e);
+                }
+            }
+        };
         let mut parts = Vec::new();
         let mut labels = Vec::new();
         let pinned = pinned.iter().map(|&m| (m, Look::Pinned));
@@ -315,18 +325,18 @@ impl Overlay {
                 Ok(Some(label)) => labels.push(label),
                 // No span, so nothing to label.
                 Ok(None) => {}
-                Err(e) => drawn = drawn.and(Err(e)),
+                Err(e) => keep(Err(e)),
             }
         }
         for label in &labels {
-            drawn = drawn.and(self.draw_shadow(target, label));
+            keep(self.draw_shadow(target, label));
         }
         self.draw_outlines(target, &parts);
         self.draw_cyan(target, &parts);
         for label in &labels {
             self.draw_pill(target, label);
         }
-        drawn
+        first_failure.map_or(Ok(()), Err)
     }
 
     /// Draws `notice` over everything else, inside the window's monitor, between BeginDraw and EndDraw: the palette's
@@ -477,7 +487,7 @@ impl Overlay {
         unsafe { target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };
         let cut_out = match label.look {
             Look::Live => None,
-            Look::Pinned => Some(self.hollow(&self.rounded(pill, 0, 0))?),
+            Look::Pinned => Some(self.geometry_of(&self.rounded(pill, 0, 0))?),
         };
         for (grow, opacity) in SHADOW {
             // SAFETY: as above.
@@ -497,19 +507,8 @@ impl Overlay {
     /// The pill and the text on it: the physical part in full ink, then, when the label has one, the bar and the
     /// logical part fainter.
     fn draw_pill(&self, target: &ID2D1RenderTarget, label: &PlacedLabel) {
-        // DrawTextLayout takes a Vector2, which windows 0.62 takes from the windows-numerics crate without
-        // re-exporting it, and this program may not add the crate. Direct2D's ellipse holds one.
-        let origin = |text: &PlacedText| {
-            let mut origin = D2D1_ELLIPSE::default().point;
-            origin.X = text.left;
-            origin.Y = text.top;
-            origin
-        };
+        let origin = |text: &PlacedText| dot(text.left, text.top).point;
         let ink = match label.look {
-            Look::Live => &self.ink,
-            Look::Pinned => &self.surfaces.ink,
-        };
-        match label.look {
             Look::Live => {
                 // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw
                 // and EndDraw, Direct2D only fails the frame at EndDraw.
@@ -517,9 +516,13 @@ impl Overlay {
                     target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
                     target.FillRoundedRectangle(&self.rounded(&label.pill, 0, 0), &self.cyan);
                 }
+                &self.ink
             }
-            Look::Pinned => self.draw_panel(target, &label.pill),
-        }
+            Look::Pinned => {
+                self.draw_panel(target, &label.pill);
+                &self.surfaces.ink
+            }
+        };
         // SAFETY: drawing calls on a live render target with arguments that outlive them, as for the background.
         unsafe {
             // Grayscale, not ClearType: color fringes would show on the cyan and on the see-through panel.
@@ -561,18 +564,12 @@ impl Overlay {
             right: window.left + px(border.strip),
             ..window
         };
+        self.fill_panel(target, &outer, border.ring);
         // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
         // Direct2D only fails the frame at EndDraw. The clip is popped right after it is pushed, with nothing between
         // that could return early, so the frame is never left with a clip pushed.
         unsafe {
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            target.FillRoundedRectangle(&outer, &self.surfaces.panel);
-            target.DrawRoundedRectangle(
-                &ring(&outer, px(border.ring)),
-                &self.surfaces.border,
-                px(border.ring),
-                None::<&ID2D1StrokeStyle>,
-            );
             // The strip's sides are on whole pixels, so an aliased clip loses nothing.
             target.PushAxisAlignedClip(&strip, D2D1_ANTIALIAS_MODE_ALIASED);
             target.FillRoundedRectangle(&outer, &self.cyan);
@@ -580,8 +577,25 @@ impl Overlay {
         }
     }
 
+    /// The palette's panel filling `outer`, and a ring of the palette's border `ring_width` pixels wide inside its edge:
+    /// the background of a pinned label and of the notice.
+    fn fill_panel(&self, target: &ID2D1RenderTarget, outer: &D2D1_ROUNDED_RECT, ring_width: i32) {
+        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
+        // Direct2D only fails the frame at EndDraw.
+        unsafe {
+            target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            target.FillRoundedRectangle(outer, &self.surfaces.panel);
+            target.DrawRoundedRectangle(
+                &ring(outer, px(ring_width)),
+                &self.surfaces.border,
+                px(ring_width),
+                None::<&ID2D1StrokeStyle>,
+            );
+        }
+    }
+
     /// `shape` as a geometry, which can be cut out of another.
-    fn hollow(
+    fn geometry_of(
         &self,
         shape: &D2D1_ROUNDED_RECT,
     ) -> windows::core::Result<ID2D1RoundedRectangleGeometry> {
@@ -597,7 +611,7 @@ impl Overlay {
         hole: &ID2D1RoundedRectangleGeometry,
         brush: &ID2D1SolidColorBrush,
     ) -> windows::core::Result<()> {
-        let shape = self.hollow(shape)?;
+        let shape = self.geometry_of(shape)?;
         // SAFETY: no arguments.
         let cut = unsafe { self.factory.CreatePathGeometry() }?;
         // SAFETY: no arguments.
@@ -674,6 +688,15 @@ impl Overlay {
             radiusY: radius,
         }
     }
+}
+
+/// An ellipse of no size at (`x`, `y`), for its `point`: the Vector2 Direct2D's calls take, which windows 0.62 takes from
+/// the windows-numerics crate without re-exporting it, so this program can't name it, and may not add the crate.
+fn dot(x: f32, y: f32) -> D2D1_ELLIPSE {
+    let mut dot = D2D1_ELLIPSE::default();
+    dot.point.X = x;
+    dot.point.Y = y;
+    dot
 }
 
 /// The rounded rectangle to stroke with a line `width` pixels wide so the stroke covers the ring between `outer` and the
