@@ -202,8 +202,9 @@ fn invalid_ico(path: &str, why: &str) -> ! {
 // The version resource
 // ---------------------------------------------------------------------------------------------------------------------
 
-/// The numbers and texts Windows shows for the program: Task Manager, the file's Details tab and, with WPC-303, the
-/// header of Windows notifications, which reads the FileDescription instead of the file name.
+/// The numbers and texts Windows shows for the program: the file's Details tab, Task Manager and, as the owner noted in
+/// WPC-303, the header of Windows notifications, which should read "ScreenGauge" instead of "ScreenGauge.exe" once this
+/// resource is in. That is for a hardware check to confirm; the tests only prove what the resource holds.
 fn version_resource() -> Resource {
     let version = var("CARGO_PKG_VERSION");
     let part = |name: &str| {
