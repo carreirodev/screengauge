@@ -37,10 +37,9 @@ const OUTLINE_OPACITY: f32 = 0.28;
 const BAR_OPACITY: f32 = 0.4;
 const LOGICAL_OPACITY: f32 = 0.62;
 
-/// The logical part's weight (CSS 500), meant to be a step lighter than the physical part's semibold. Segoe UI has no
-/// face at 500, so DirectWrite takes the nearest, and on the Windows 11 this was checked on that is the semibold
-/// itself: the logical part is then fainter by its opacity alone. `DWRITE_FONT_WEIGHT_REGULAR` here would make it
-/// lighter in weight too.
+/// The logical part's weight, the prototype's CSS 500. Segoe UI has no face at 500, and DirectWrite gives its semibold
+/// for it, so the logical part is fainter by its opacity alone. That is what the approved prototype showed: in Chromium
+/// on Windows 11, Segoe UI at 500 lays out exactly as wide as at 600 and wider than at 400 (measured for WPC-307).
 const LOGICAL_WEIGHT: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT_MEDIUM;
 
 /// The pill's shadow, approximating CSS `0 2px 7px rgba(0,0,0,.35)`: black rounded rectangles that grow by this many
