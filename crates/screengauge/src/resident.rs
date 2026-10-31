@@ -6,18 +6,18 @@
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use screengauge_core::session::{Effect, Input, Opening, Session};
+use screengauge_core::session::{Effect, Input, Opening, Point, Session};
 use screengauge_core::settings::{Remembered, Stored};
 use windows::Win32::Foundation::{
-    E_FAIL, ERROR_SUCCESS, HINSTANCE, HWND, LPARAM, LRESULT, SetLastError, WPARAM,
+    E_FAIL, ERROR_SUCCESS, HINSTANCE, HWND, LPARAM, LRESULT, POINT, SetLastError, WPARAM,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-    FindWindowW, GetMessageW, GetWindowThreadProcessId, MSG, PostMessageW, PostQuitMessage,
-    RegisterClassExW, RegisterWindowMessageW, TranslateMessage, WINDOW_EX_STYLE, WM_CONTEXTMENU,
-    WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_HOTKEY, WM_SETTINGCHANGE, WM_TIMER,
-    WNDCLASSEXW, WS_OVERLAPPED,
+    FindWindowW, GetCursorPos, GetMessageW, GetWindowThreadProcessId, MSG, PostMessageW,
+    PostQuitMessage, RegisterClassExW, RegisterWindowMessageW, SetCursorPos, TranslateMessage,
+    WINDOW_EX_STYLE, WM_CONTEXTMENU, WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_HOTKEY,
+    WM_SETTINGCHANGE, WM_TIMER, WNDCLASSEXW, WS_OVERLAPPED,
 };
 use windows::core::{Error, PCWSTR, w};
 
@@ -248,11 +248,23 @@ fn open(resident: HWND) -> windows::core::Result<FrozenScreen> {
         .ok_or_else(|| Error::new(E_FAIL, "the settings file wasn't read at startup"))?;
     let session = Session::open(Opening {
         frozen_screen,
+        cursor: cursor_now()?,
         options,
         remembered,
     })
     .map_err(|refused| Error::new(E_FAIL, refused.to_string()))?;
     FrozenScreen::show(session, resident)
+}
+
+/// Where the cursor is now, in physical pixels of the virtual screen: the process is Per-Monitor V2.
+fn cursor_now() -> windows::core::Result<Point> {
+    let mut cursor = POINT::default();
+    // SAFETY: fills a local.
+    unsafe { GetCursorPos(&mut cursor) }?;
+    Ok(Point {
+        x: cursor.x,
+        y: cursor.y,
+    })
 }
 
 /// Does what the session core asked, in its order, for the resident window `resident`.
@@ -265,6 +277,13 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
             }
             Effect::SaveRemembered(remembered) => {
                 save_remembered(remembered);
+                continue;
+            }
+            Effect::MoveCursor(point) => {
+                // SAFETY: no pointers. The process is Per-Monitor V2, so the point is in physical pixels.
+                if let Err(e) = unsafe { SetCursorPos(point.x, point.y) } {
+                    log::failure("session: moving the cursor", &e);
+                }
                 continue;
             }
             // No rule asks for these yet: the tools that do bring them (Dimensions' copy with WPC-308, Snip with

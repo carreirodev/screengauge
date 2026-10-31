@@ -41,10 +41,12 @@ fn owners_monitors() -> Vec<Photo> {
     vec![photo(AOC, 168, 1), photo(ARZOPA, 120, 2)]
 }
 
-/// Opening with `frozen_screen`, every monitor's photo taken, the default options and nothing remembered yet.
+/// Opening with `frozen_screen`, every monitor's photo taken, the cursor in the middle of the 4K monitor, the default
+/// options and nothing remembered yet.
 fn opening(frozen_screen: Vec<Photo>) -> Opening {
     Opening {
         frozen_screen: frozen_screen.into_iter().map(Some).collect(),
+        cursor: Point { x: 1920, y: 1080 },
         options: Options::default(),
         remembered: Remembered::default(),
     }

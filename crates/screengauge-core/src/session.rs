@@ -11,7 +11,7 @@ mod output;
 
 pub use event::{Event, Held, Input, Key, LocalTime, ToolbarButton};
 pub use frozen_screen::{Colors, Image, Photo, Point, Rect, Scale};
-pub use output::{Cursor, Effect, Scene};
+pub use output::{Cursor, Effect, Measurement, Scene, Span};
 
 use std::fmt;
 
@@ -23,6 +23,8 @@ pub struct Opening {
     /// The frozen screen: every monitor's photo, in the order the Windows layer shows them, or `None` for a monitor
     /// that neither capture path could photograph.
     pub frozen_screen: Vec<Option<Photo>>,
+    /// Where the cursor is as the tools open, in physical pixels of the virtual screen.
+    pub cursor: Point,
     /// The options in Settings as the tools open; changing Settings meanwhile doesn't reach this session.
     pub options: Options,
     pub remembered: Remembered,
@@ -57,6 +59,8 @@ impl std::error::Error for Refused {}
 #[derive(Debug)]
 pub struct Session {
     frozen_screen: Vec<Photo>,
+    /// What Dimensions measures around the cursor.
+    live: Option<Measurement>,
     /// Set by the effect that closes the tools, after which events do nothing.
     closed: bool,
 }
@@ -82,6 +86,7 @@ impl Session {
         }
         Ok(Session {
             frozen_screen,
+            live: None,
             closed: false,
         })
     }
@@ -117,6 +122,7 @@ impl Session {
         Scene {
             frozen_screen: &self.frozen_screen,
             cursor: Cursor::Cross,
+            live: self.live.as_ref(),
         }
     }
 }
