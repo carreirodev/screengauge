@@ -29,6 +29,10 @@ const BAR_GAP: u32 = 7;
 const BAR_WIDTH: u32 = 1;
 const BAR_HEIGHT: u32 = 11;
 const BAR_DROP: u32 = 1;
+/// A pinned label's border (prototype CSS `border: 1px solid`, with `border-left: 3px solid` in cyan): a ring on its
+/// top, right and bottom sides, and a wider strip on its left.
+pub const RING: u32 = 1;
+const STRIP: u32 = 3;
 
 /// `logical` pixels on a monitor of `dpi` (96 is 100%), in whole physical pixels, halves up.
 pub fn scaled(logical: u32, dpi: u32) -> i32 {
@@ -194,6 +198,37 @@ pub fn pill_size(text_width: i32, dpi: u32) -> Size {
     Size {
         width: text_width + 2 * scaled(PAD_X, dpi),
         height: scaled(TEXT, dpi) + 2 * scaled(PAD_Y, dpi),
+    }
+}
+
+/// The widths of a pinned label's border, in physical pixels. Each is scaled on its own, as every other size is, so the
+/// ring is the same width on its three sides whatever the scale, and the pinned pill is `strip + ring` wider and
+/// `2 * ring` taller than the live pill around the same text. Scaling the sum in one go would give `scaled(4)` and
+/// `scaled(2)`, which differ by a pixel at some scales (at 150%, a strip of 5 and a ring of 2 are 7 wide against 6) and
+/// would make the ring uneven.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Border {
+    /// The cyan strip on the label's left side.
+    pub strip: i32,
+    /// The ring on its other three sides.
+    pub ring: i32,
+}
+
+pub fn border(dpi: u32) -> Border {
+    Border {
+        strip: scaled(STRIP, dpi),
+        ring: scaled(RING, dpi),
+    }
+}
+
+/// The pinned pill around a label whose text is `text_width` pixels wide: the live pill's size, with the border added
+/// outside its padding (CSS `border-box` with the padding inside the border).
+pub fn pinned_size(text_width: i32, dpi: u32) -> Size {
+    let live = pill_size(text_width, dpi);
+    let border = border(dpi);
+    Size {
+        width: live.width + border.strip + border.ring,
+        height: live.height + 2 * border.ring,
     }
 }
 
@@ -587,6 +622,45 @@ mod tests {
             Size {
                 width: 78,
                 height: 39
+            }
+        );
+    }
+
+    #[test]
+    fn the_pinned_borders_widths_scale_on_their_own() {
+        // A strip of 3 and a ring of 1, at 100%, 125%, 150% and 175%: 4.5 and 1.5 round up at 150%.
+        let widths = [96, 120, 144, 168].map(|dpi| {
+            let border = border(dpi);
+            (border.strip, border.ring)
+        });
+        assert_eq!(widths, [(3, 1), (4, 1), (5, 2), (5, 2)]);
+    }
+
+    #[test]
+    fn the_pinned_pill_is_the_live_pill_with_the_border_around_its_padding() {
+        for dpi in [96, 120, 144, 168] {
+            let live = pill_size(37, dpi);
+            let pinned = pinned_size(37, dpi);
+            let border = border(dpi);
+            // The strip and the ring on the right add to the width, the ring above and below to the height.
+            assert_eq!(
+                pinned.width - live.width,
+                scaled(3, dpi) + scaled(1, dpi),
+                "at {dpi} DPI"
+            );
+            assert_eq!(
+                pinned.height - live.height,
+                2 * scaled(1, dpi),
+                "at {dpi} DPI"
+            );
+            assert_eq!(pinned.width - live.width, border.strip + border.ring);
+        }
+        // 3 + 1 wide and 1 + 1 tall at 100%.
+        assert_eq!(
+            pinned_size(30, 96),
+            Size {
+                width: 50,
+                height: 24
             }
         );
     }

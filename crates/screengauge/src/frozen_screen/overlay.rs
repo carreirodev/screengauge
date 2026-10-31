@@ -1,8 +1,13 @@
-//! Dimensions' live measurement drawn over a window's photo: the cyan line with its ticks and outline, and the label in
-//! a pill. Everything about where it goes is in `geometry`, which needs no Windows; this draws it onto any Direct2D
-//! render target at 96 DPI, so a test can render it on a bitmap and count pixels.
+//! Dimensions' measurements drawn over a window's photo: the cyan line with its ticks and outline, and the label in a
+//! pill, for the pinned measurements and the live one, and the notice. Everything about where they go is in `geometry`
+//! and `notice`, which need no Windows; this draws them onto any Direct2D render target at 96 DPI, so a test can render
+//! them on a bitmap and count pixels.
 
 mod geometry;
+mod notice;
+mod palette;
+#[cfg(test)]
+mod panel_tests;
 
 use std::cell::RefCell;
 
@@ -10,9 +15,11 @@ use screengauge_core::session::{Measurement, Notice, Rect, Scale};
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{D2D_RECT_F, D2D1_COLOR_F};
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_DRAW_TEXT_OPTIONS_NONE,
-    D2D1_ELLIPSE, D2D1_ROUNDED_RECT, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1RenderTarget,
-    ID2D1SolidColorBrush,
+    D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_CAP_STYLE_ROUND,
+    D2D1_COMBINE_MODE_EXCLUDE, D2D1_DASH_STYLE_SOLID, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
+    D2D1_LINE_JOIN_ROUND, D2D1_ROUNDED_RECT, D2D1_STROKE_STYLE_PROPERTIES,
+    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1Brush, ID2D1Factory, ID2D1RenderTarget,
+    ID2D1RoundedRectangleGeometry, ID2D1SolidColorBrush, ID2D1StrokeStyle,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_FEATURE, DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES,
@@ -24,7 +31,8 @@ use windows::Win32::Graphics::DirectWrite::{
 use windows::core::{BOOL, Error, PCWSTR, w};
 
 use crate::theme::Mode;
-use geometry::scaled;
+use geometry::{Parts, scaled};
+use palette::Surfaces;
 
 /// The label's font. Its digits differ in width unless asked for tabular figures (a 1 is two pixels narrower than a 0
 /// at this size), which the label does, so the pill keeps its width while the number keeps its length.
@@ -144,15 +152,25 @@ pub fn release_fonts() {
     drop(FONTS.with_borrow_mut(Option::take));
 }
 
-/// What draws the live measurement on one monitor's window: brushes and a text format made for its render target and
-/// its scale. A render target that is lost takes its brushes with it, so this is made again with everything else.
+/// How flat Direct2D makes the curves of a shape it combines with another: well under a pixel.
+const FLATTENING: f32 = 0.1;
+
+/// What draws the measurements and the notice on one monitor's window: brushes and a text format made for its render
+/// target and its scale. A render target that is lost takes its brushes with it, so this is made again with everything
+/// else.
 pub struct Overlay {
     cyan: ID2D1SolidColorBrush,
     /// Black. Each fill sets its opacity first: the outline's, then each layer of the shadow's.
     shade: ID2D1SolidColorBrush,
-    /// The label's ink. Each use sets its opacity first, because the brush outlives a frame: full for the physical
-    /// text, then the bar's and the logical text's.
+    /// The live label's ink. Each use sets its opacity first, because the brush outlives a frame: full for the
+    /// physical text, then the bar's and the logical text's.
     ink: ID2D1SolidColorBrush,
+    /// The brushes of the palette the pinned labels and the notice are drawn in.
+    surfaces: Surfaces,
+    /// Makes the shapes that are cut out of others.
+    factory: ID2D1Factory,
+    /// Round caps and joins, for the strokes of the notice's sign.
+    stroke: ID2D1StrokeStyle,
     /// The physical text's: Segoe UI semibold.
     format: IDWriteTextFormat,
     /// The logical text's: the same family, size and wrapping, asked for the medium weight.
@@ -165,8 +183,18 @@ pub struct Overlay {
     dpi: u32,
 }
 
+/// Which of the two looks a label has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Look {
+    /// The live measurement's: a cyan pill.
+    Live,
+    /// A pinned measurement's: the palette's panel, with a ring around it and a cyan strip on its left.
+    Pinned,
+}
+
 /// A label ready to draw.
 struct PlacedLabel {
+    look: Look,
     /// The pill's place in the virtual screen.
     pill: RECT,
     physical: PlacedText,
@@ -197,18 +225,19 @@ struct Typeset {
     width: i32,
     /// The distance from the layout's top to its baseline.
     baseline: f32,
+    /// The line's height, which the notice centers in its own line.
+    line_height: f32,
 }
 
 impl Overlay {
     /// For a window over `monitor`, whose scale is `scale`, drawing on `target`, with ScreenGauge's own surfaces (the
-    /// pinned measurements' labels and the notices) in the palette of `_mode`.
-    // TODO(WPC-308 builder): keep `mode` and draw the pinned labels and the notices in its palette.
+    /// pinned measurements' labels and the notices) in the palette of `mode`.
     pub fn new(
         target: &ID2D1RenderTarget,
         fonts: &Fonts,
         monitor: Rect,
         scale: Scale,
-        _mode: Mode,
+        mode: Mode,
     ) -> windows::core::Result<Overlay> {
         let dpi = scale.dpi();
         let brush = |[r, g, b]: [u8; 3]| {
@@ -230,12 +259,28 @@ impl Overlay {
                 parameter: 1,
             })
         }?;
+        // SAFETY: no arguments; the factory comes back as an owned interface.
+        let factory = unsafe { target.GetFactory() }?;
+        let round = D2D1_STROKE_STYLE_PROPERTIES {
+            startCap: D2D1_CAP_STYLE_ROUND,
+            endCap: D2D1_CAP_STYLE_ROUND,
+            dashCap: D2D1_CAP_STYLE_ROUND,
+            lineJoin: D2D1_LINE_JOIN_ROUND,
+            miterLimit: 1.0,
+            dashStyle: D2D1_DASH_STYLE_SOLID,
+            dashOffset: 0.0,
+        };
+        // SAFETY: `round` outlives the call, which keeps nothing of it; a solid line has no dashes to give.
+        let stroke = unsafe { factory.CreateStrokeStyle(&round, None) }?;
         Ok(Overlay {
             // #22d3ee, the same cyan whatever the Windows theme.
             cyan: brush([0x22, 0xd3, 0xee])?,
             shade: brush([0, 0, 0])?,
             // #04161b
             ink: brush([0x04, 0x16, 0x1b])?,
+            surfaces: Surfaces::new(target, mode)?,
+            factory,
+            stroke,
             format: fonts.text_format(DWRITE_FONT_WEIGHT_SEMI_BOLD, dpi)?,
             logical_format: fonts.text_format(LOGICAL_WEIGHT, dpi)?,
             figures,
@@ -247,10 +292,13 @@ impl Overlay {
 
     /// Draws the pinned measurements, oldest first, and then the live one over what `target` holds, between its
     /// BeginDraw and EndDraw. The pinned labels are in the palette, with a cyan strip on their left; the live one is
-    /// cyan.
-    // TODO(WPC-308 builder): draw in layers across every measurement (every label's shadow, every outline, every cyan
-    // pixel, then the pills, pinned oldest first and the live one last), so nothing darkens a cyan pixel of another
-    // measurement, and give the pinned labels their palette and strip.
+    /// cyan, and over the others.
+    ///
+    /// Order matters, and it is across the measurements, not within each: every label's shadow, which is faint and
+    /// reaches toward the lines; every outline; every cyan pixel, so nothing darkens one, whichever measurement it
+    /// belongs to; then the pills with their text. A pill never touches its own line, being further from it than a
+    /// tick reaches, but it covers another measurement's. A label that can't be laid out doesn't stop the others; the
+    /// first failure is returned once everything else is drawn.
     pub fn draw(
         &self,
         target: &ID2D1RenderTarget,
@@ -258,69 +306,80 @@ impl Overlay {
         live: Option<&Measurement>,
     ) -> windows::core::Result<()> {
         let mut drawn = Ok(());
-        for measurement in pinned.iter().copied().chain(live) {
-            let one = self.draw_one(target, measurement);
-            drawn = drawn.and(one);
+        let mut parts = Vec::new();
+        let mut labels = Vec::new();
+        let pinned = pinned.iter().map(|&m| (m, Look::Pinned));
+        for (measurement, look) in pinned.chain(live.map(|m| (m, Look::Live))) {
+            parts.push(geometry::parts(measurement, self.dpi));
+            match self.label(measurement, look) {
+                Ok(Some(label)) => labels.push(label),
+                // No span, so nothing to label.
+                Ok(None) => {}
+                Err(e) => drawn = drawn.and(Err(e)),
+            }
+        }
+        for label in &labels {
+            drawn = drawn.and(self.draw_shadow(target, label));
+        }
+        self.draw_outlines(target, &parts);
+        self.draw_cyan(target, &parts);
+        for label in &labels {
+            self.draw_pill(target, label);
         }
         drawn
     }
 
     /// Draws `notice` over everything else, inside the window's monitor, between BeginDraw and EndDraw: the palette's
     /// panel with its border and shadow, the sign and the text, above and to the right of where it appeared.
-    // TODO(WPC-308 builder): draw it.
     pub fn draw_notice(
         &self,
-        _target: &ID2D1RenderTarget,
-        _notice: &Notice,
-    ) -> windows::core::Result<()> {
-        Ok(())
-    }
-
-    /// Draws `measurement` over what `target` holds, between its BeginDraw and EndDraw. Order matters, and every step
-    /// only draws over the one before: the label's shadow, which is faint and reaches toward the line; every outline;
-    /// every cyan pixel, so nothing darkens one, whatever is under it; then the pill and its text, which never touch
-    /// the line, being further from it than a tick reaches. A failure to lay the label out is returned once the line
-    /// is drawn.
-    fn draw_one(
-        &self,
         target: &ID2D1RenderTarget,
-        measurement: &Measurement,
+        notice: &Notice,
     ) -> windows::core::Result<()> {
-        let label = self.label(measurement);
-        if let Ok(Some(label)) = &label {
-            self.draw_shadow(target, &label.pill);
-        }
-        self.draw_lines(target, measurement);
-        if let Ok(Some(label)) = &label {
-            self.draw_pill(target, label);
-        }
-        label.map(|_| ())
+        self.show_notice(
+            target,
+            notice.at,
+            notice.message.text(),
+            notice.message.sign(),
+        )
     }
 
-    /// The outline, then the line and the ticks.
-    fn draw_lines(&self, target: &ID2D1RenderTarget, measurement: &Measurement) {
-        let parts = geometry::parts(measurement, self.dpi);
+    /// The outlines of every measurement.
+    fn draw_outlines(&self, target: &ID2D1RenderTarget, parts: &[Parts]) {
         // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
         // Direct2D only fails the frame at EndDraw. Aliased fills of rectangles on whole pixels cover exactly those
-        // pixels, and the target is at 96 DPI, so one unit is one physical pixel. DrawLine is never used: on whole
-        // coordinates it straddles two pixels.
+        // pixels, and the target is at 96 DPI, so one unit is one physical pixel.
         unsafe {
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
             self.shade.SetOpacity(OUTLINE_OPACITY);
-            for outline in &parts.outline {
+            for outline in parts.iter().flat_map(|parts| &parts.outline) {
                 target.FillRectangle(&self.in_window(outline), &self.shade);
             }
-            for line in &parts.line {
+            // Back to Direct2D's default, which the pills' corners need.
+            target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        }
+    }
+
+    /// The line and the ticks of every measurement.
+    fn draw_cyan(&self, target: &ID2D1RenderTarget, parts: &[Parts]) {
+        // SAFETY: as in `draw_outlines`. DrawLine is never used: on whole coordinates it straddles two pixels.
+        unsafe {
+            target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+            for line in parts.iter().flat_map(|parts| &parts.line) {
                 target.FillRectangle(&self.in_window(line), &self.cyan);
             }
-            // Back to Direct2D's default, which the pill's corners need.
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         }
     }
 
     /// The label's size and place, and where its text goes. `None` when the measurement has no span, so there is
-    /// nothing to label.
-    fn label(&self, measurement: &Measurement) -> windows::core::Result<Option<PlacedLabel>> {
+    /// nothing to label. A pinned label is as wide and as tall as its border makes it, and its text starts inside the
+    /// border, so it sits further right and down than a live label's at the same place.
+    fn label(
+        &self,
+        measurement: &Measurement,
+        look: Look,
+    ) -> windows::core::Result<Option<PlacedLabel>> {
         let label = &measurement.label;
         let physical = self.typeset(&label.physical, &self.format)?;
         // The logical text, if the label has one, with where the bar and that text start along the label.
@@ -339,7 +398,13 @@ impl Overlay {
         let text_width = after
             .as_ref()
             .map_or(physical.width, |(columns, _)| columns.width);
-        let size = geometry::pill_size(text_width, self.dpi);
+        let (size, inset) = match look {
+            Look::Live => (geometry::pill_size(text_width, self.dpi), 0),
+            Look::Pinned => (
+                geometry::pinned_size(text_width, self.dpi),
+                geometry::border(self.dpi).strip,
+            ),
+        };
         let Some(pill) = geometry::place_label(measurement, size, self.monitor, self.dpi) else {
             return Ok(None);
         };
@@ -350,11 +415,11 @@ impl Overlay {
         let window = self.in_window(&pill);
         let middle = (window.top + window.bottom) / 2.0;
         let baseline = whole((middle + self.fonts.cap_height * font / 2.0).round());
-        let text_left = window.left + px(scaled(geometry::PAD_X, self.dpi));
+        let text_left = window.left + px(inset + scaled(geometry::PAD_X, self.dpi));
         let logical = after.map(|(columns, text)| {
             // The bar is placed in the virtual screen like the pill and then moved into the window. Its bottom side is
             // measured from the baseline, which is the same one for both parts.
-            let left = pill.left + scaled(geometry::PAD_X, self.dpi) + columns.bar;
+            let left = pill.left + inset + scaled(geometry::PAD_X, self.dpi) + columns.bar;
             let bar = geometry::bar(left, baseline + self.monitor.top, self.dpi);
             PlacedLogical {
                 bar: self.in_window(&bar),
@@ -367,6 +432,7 @@ impl Overlay {
             }
         });
         Ok(Some(PlacedLabel {
+            look,
             pill,
             physical: PlacedText {
                 layout: physical.layout,
@@ -392,23 +458,40 @@ impl Overlay {
             layout,
             width: whole_up(metrics.width),
             baseline: line.baseline,
+            line_height: line.height,
         })
     }
 
-    /// The pill's shadow, which the line is drawn over.
-    fn draw_shadow(&self, target: &ID2D1RenderTarget, pill: &RECT) {
+    /// The pill's shadow, which the lines are drawn over. A pinned pill is a little see-through, and CSS never paints an
+    /// outer shadow inside the box it belongs to, so there the shadow is cut out where the pill is; the live pill is
+    /// opaque, so under it the shadow is not worth the trouble.
+    fn draw_shadow(
+        &self,
+        target: &ID2D1RenderTarget,
+        label: &PlacedLabel,
+    ) -> windows::core::Result<()> {
         let drop = scaled(geometry::SHADOW_DROP, self.dpi);
-        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
-        // Direct2D only fails the frame at EndDraw. The shapes are on whole pixels, so their straight sides are crisp;
-        // the corners are antialiased.
-        unsafe {
-            target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            for (grow, opacity) in SHADOW {
-                self.shade.SetOpacity(opacity);
-                let shape = self.rounded(pill, scaled(grow, self.dpi), drop);
-                target.FillRoundedRectangle(&shape, &self.shade);
+        let pill = &label.pill;
+        // SAFETY: a drawing call on a live render target. Out of BeginDraw and EndDraw, Direct2D only fails the frame
+        // at EndDraw. The shapes are on whole pixels, so their straight sides are crisp; the corners are antialiased.
+        unsafe { target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };
+        let cut_out = match label.look {
+            Look::Live => None,
+            Look::Pinned => Some(self.hollow(&self.rounded(pill, 0, 0))?),
+        };
+        for (grow, opacity) in SHADOW {
+            // SAFETY: as above.
+            unsafe { self.shade.SetOpacity(opacity) };
+            let shape = self.rounded(pill, scaled(grow, self.dpi), drop);
+            match &cut_out {
+                None => {
+                    // SAFETY: as above.
+                    unsafe { target.FillRoundedRectangle(&shape, &self.shade) };
+                }
+                Some(hole) => self.fill_except(target, &shape, hole, &self.shade)?,
             }
         }
+        Ok(())
     }
 
     /// The pill and the text on it: the physical part in full ink, then, when the label has one, the bar and the
@@ -422,37 +505,114 @@ impl Overlay {
             origin.Y = text.top;
             origin
         };
-        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
-        // Direct2D only fails the frame at EndDraw.
+        let ink = match label.look {
+            Look::Live => &self.ink,
+            Look::Pinned => &self.surfaces.ink,
+        };
+        match label.look {
+            Look::Live => {
+                // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw
+                // and EndDraw, Direct2D only fails the frame at EndDraw.
+                unsafe {
+                    target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+                    target.FillRoundedRectangle(&self.rounded(&label.pill, 0, 0), &self.cyan);
+                }
+            }
+            Look::Pinned => self.draw_panel(target, &label.pill),
+        }
+        // SAFETY: drawing calls on a live render target with arguments that outlive them, as for the background.
         unsafe {
-            target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            target.FillRoundedRectangle(&self.rounded(&label.pill, 0, 0), &self.cyan);
-            // Grayscale, not ClearType: color fringes would show on the cyan.
+            // Grayscale, not ClearType: color fringes would show on the cyan and on the see-through panel.
             target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
-            // The brush keeps the opacity of the last label's logical part, so the physical text sets it back.
-            self.ink.SetOpacity(1.0);
+            // The brushes keep the opacity of the last label's logical part, so the physical text sets it back.
+            ink.SetOpacity(1.0);
             target.DrawTextLayout(
                 origin(&label.physical),
                 &label.physical.layout,
-                &self.ink,
+                ink,
                 D2D1_DRAW_TEXT_OPTIONS_NONE,
             );
             if let Some(logical) = &label.logical {
                 // The bar is a fill of whole pixels, so it is exactly its width however the scale rounds; then the
                 // default comes back.
                 target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-                self.ink.SetOpacity(BAR_OPACITY);
-                target.FillRectangle(&logical.bar, &self.ink);
+                ink.SetOpacity(BAR_OPACITY);
+                target.FillRectangle(&logical.bar, ink);
                 target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-                self.ink.SetOpacity(LOGICAL_OPACITY);
+                ink.SetOpacity(LOGICAL_OPACITY);
                 target.DrawTextLayout(
                     origin(&logical.text),
                     &logical.text.layout,
-                    &self.ink,
+                    ink,
                     D2D1_DRAW_TEXT_OPTIONS_NONE,
                 );
             }
         }
+    }
+
+    /// A pinned label's background: the panel, a ring of the palette's border around it, and over the ring's left side
+    /// a cyan strip. The strip is the pill's own rounded rectangle cut to its first columns, so its outer side follows
+    /// the pill's corners.
+    fn draw_panel(&self, target: &ID2D1RenderTarget, pill: &RECT) {
+        let border = geometry::border(self.dpi);
+        let outer = self.rounded(pill, 0, 0);
+        let window = self.in_window(pill);
+        let strip = D2D_RECT_F {
+            right: window.left + px(border.strip),
+            ..window
+        };
+        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
+        // Direct2D only fails the frame at EndDraw. The clip is popped right after it is pushed, with nothing between
+        // that could return early, so the frame is never left with a clip pushed.
+        unsafe {
+            target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            target.FillRoundedRectangle(&outer, &self.surfaces.panel);
+            target.DrawRoundedRectangle(
+                &ring(&outer, px(border.ring)),
+                &self.surfaces.border,
+                px(border.ring),
+                None::<&ID2D1StrokeStyle>,
+            );
+            // The strip's sides are on whole pixels, so an aliased clip loses nothing.
+            target.PushAxisAlignedClip(&strip, D2D1_ANTIALIAS_MODE_ALIASED);
+            target.FillRoundedRectangle(&outer, &self.cyan);
+            target.PopAxisAlignedClip();
+        }
+    }
+
+    /// `shape` as a geometry, which can be cut out of another.
+    fn hollow(
+        &self,
+        shape: &D2D1_ROUNDED_RECT,
+    ) -> windows::core::Result<ID2D1RoundedRectangleGeometry> {
+        // SAFETY: `shape` outlives the call, which keeps nothing of it.
+        unsafe { self.factory.CreateRoundedRectangleGeometry(shape) }
+    }
+
+    /// Fills `shape` in `brush` everywhere except where `hole` is.
+    fn fill_except(
+        &self,
+        target: &ID2D1RenderTarget,
+        shape: &D2D1_ROUNDED_RECT,
+        hole: &ID2D1RoundedRectangleGeometry,
+        brush: &ID2D1SolidColorBrush,
+    ) -> windows::core::Result<()> {
+        let shape = self.hollow(shape)?;
+        // SAFETY: no arguments.
+        let cut = unsafe { self.factory.CreatePathGeometry() }?;
+        // SAFETY: no arguments.
+        let sink = unsafe { cut.Open() }?;
+        // SAFETY: the geometries and the sink outlive the call, which keeps nothing of them. No transform: both are
+        // already in the window's pixels.
+        unsafe {
+            shape.CombineWithGeometry(hole, D2D1_COMBINE_MODE_EXCLUDE, None, FLATTENING, &sink)
+        }?;
+        // SAFETY: closes the sink opened above, once.
+        unsafe { sink.Close() }?;
+        // SAFETY: a drawing call on a live render target with arguments that outlive it. Out of BeginDraw and EndDraw,
+        // Direct2D only fails the frame at EndDraw.
+        unsafe { target.FillGeometry(&cut, brush, None::<&ID2D1Brush>) };
+        Ok(())
     }
 
     /// `label` laid out on one line in `format`, with tabular figures.
@@ -496,17 +656,39 @@ impl Overlay {
 
     /// The pill's rounded rectangle, grown by `grow` pixels on every side and moved `down` pixels.
     fn rounded(&self, pill: &RECT, grow: i32, down: i32) -> D2D1_ROUNDED_RECT {
-        let mut rect = self.in_window(pill);
+        self.shaped(pill, scaled(geometry::RADIUS, self.dpi), grow, down)
+    }
+
+    /// `rect` with corners of `radius` pixels, grown by `grow` pixels on every side (or smaller, should it be negative)
+    /// and moved `down` pixels. The corners grow with it, as a CSS shadow's do.
+    fn shaped(&self, rect: &RECT, radius: i32, grow: i32, down: i32) -> D2D1_ROUNDED_RECT {
+        let mut rect = self.in_window(rect);
         rect.left -= px(grow);
         rect.right += px(grow);
         rect.top += px(down - grow);
         rect.bottom += px(down + grow);
-        let radius = px(scaled(geometry::RADIUS, self.dpi) + grow);
+        let radius = px(radius + grow);
         D2D1_ROUNDED_RECT {
             rect,
             radiusX: radius,
             radiusY: radius,
         }
+    }
+}
+
+/// The rounded rectangle to stroke with a line `width` pixels wide so the stroke covers the ring between `outer` and the
+/// same shape `width` smaller on every side: the line's middle runs half its width inside the outer edge.
+fn ring(outer: &D2D1_ROUNDED_RECT, width: f32) -> D2D1_ROUNDED_RECT {
+    let half = width / 2.0;
+    D2D1_ROUNDED_RECT {
+        rect: D2D_RECT_F {
+            left: outer.rect.left + half,
+            top: outer.rect.top + half,
+            right: outer.rect.right - half,
+            bottom: outer.rect.bottom - half,
+        },
+        radiusX: (outer.radiusX - half).max(0.0),
+        radiusY: (outer.radiusY - half).max(0.0),
     }
 }
 
@@ -561,8 +743,8 @@ mod tests {
     use super::geometry::Size;
     use super::*;
 
-    const CYAN: [u8; 3] = [0x22, 0xd3, 0xee];
-    const BACKGROUND: [u8; 3] = [200, 120, 60];
+    pub(super) const CYAN: [u8; 3] = [0x22, 0xd3, 0xee];
+    pub(super) const BACKGROUND: [u8; 3] = [200, 120, 60];
 
     /// Tests run on worker threads, where COM isn't started, and WIC needs it. Started for the thread by the first
     /// canvas and ended by the last object dropping, so every COM object is released before COM goes.
@@ -587,30 +769,30 @@ mod tests {
     }
 
     /// A bitmap a render target draws on in software, so no monitor or graphics card is needed.
-    struct Canvas {
-        target: ID2D1RenderTarget,
+    pub(super) struct Canvas {
+        pub(super) target: ID2D1RenderTarget,
         bitmap: IWICBitmap,
-        fonts: Fonts,
-        width: u32,
-        height: u32,
+        pub(super) fonts: Fonts,
+        pub(super) width: u32,
+        pub(super) height: u32,
         /// Last, so it drops last.
         _com: Com,
     }
 
     /// The canvas as rows of [r, g, b] pixels.
-    struct Picture {
-        width: usize,
-        pixels: Vec<[u8; 3]>,
+    pub(super) struct Picture {
+        pub(super) width: usize,
+        pub(super) pixels: Vec<[u8; 3]>,
     }
 
     impl Picture {
-        fn at(&self, x: usize, y: usize) -> [u8; 3] {
+        pub(super) fn at(&self, x: usize, y: usize) -> [u8; 3] {
             self.pixels[y * self.width + x]
         }
     }
 
     impl Canvas {
-        fn new(width: u32, height: u32) -> Canvas {
+        pub(super) fn new(width: u32, height: u32) -> Canvas {
             let com = Com::start();
             // SAFETY: COM is started for this thread.
             let wic: IWICImagingFactory =
@@ -655,17 +837,28 @@ mod tests {
             }
         }
 
-        /// Fills the canvas with `BACKGROUND`, lets `draw` draw over it for a window of `monitor` and `dpi`, and
-        /// reads the result back.
-        fn render(
+        /// Fills the canvas with `BACKGROUND`, lets `draw` draw over it for a window of `monitor` and `dpi` in the
+        /// dark palette, and reads the result back.
+        pub(super) fn render(
             &self,
             monitor: Rect,
             dpi: u32,
             draw: impl FnOnce(&Overlay, &ID2D1RenderTarget),
         ) -> Picture {
+            self.render_in(Mode::Dark, monitor, dpi, draw)
+        }
+
+        /// As `render`, in the palette of `mode`.
+        pub(super) fn render_in(
+            &self,
+            mode: Mode,
+            monitor: Rect,
+            dpi: u32,
+            draw: impl FnOnce(&Overlay, &ID2D1RenderTarget),
+        ) -> Picture {
             let scale = Scale::from_dpi(dpi).expect("a scale");
-            let overlay = Overlay::new(&self.target, &self.fonts, monitor, scale, Mode::Dark)
-                .expect("the overlay");
+            let overlay =
+                Overlay::new(&self.target, &self.fonts, monitor, scale, mode).expect("the overlay");
             let [r, g, b] = BACKGROUND;
             let background = D2D1_COLOR_F {
                 r: f32::from(r) / 255.0,
@@ -705,14 +898,14 @@ mod tests {
 
     /// The window of the tests: 480 by 320 pixels, over a monitor to the left of and below the main one, so
     /// coordinates in the virtual screen and in the window are different numbers.
-    const MONITOR: Rect = Rect {
+    pub(super) const MONITOR: Rect = Rect {
         left: -480,
         top: 200,
         width: 480,
         height: 320,
     };
 
-    fn point(x: i32, y: i32) -> screengauge_core::session::Point {
+    pub(super) fn point(x: i32, y: i32) -> screengauge_core::session::Point {
         screengauge_core::session::Point { x, y }
     }
 
@@ -731,7 +924,7 @@ mod tests {
         }
     }
 
-    fn horizontal(x0: i32, x1: i32, y: i32, label: &str) -> Measurement {
+    pub(super) fn horizontal(x0: i32, x1: i32, y: i32, label: &str) -> Measurement {
         Measurement {
             monitor: 0,
             horizontal: Some(span((x0, y), (x1, y))),
@@ -740,7 +933,7 @@ mod tests {
         }
     }
 
-    fn vertical(y0: i32, y1: i32, x: i32, label: &str) -> Measurement {
+    pub(super) fn vertical(y0: i32, y1: i32, x: i32, label: &str) -> Measurement {
         Measurement {
             monitor: 0,
             horizontal: None,
@@ -750,7 +943,7 @@ mod tests {
     }
 
     /// The Cross: a horizontal span along row `y` and a vertical one along column `x`.
-    fn cross(h: (i32, i32), v: (i32, i32), x: i32, y: i32, label: &str) -> Measurement {
+    pub(super) fn cross(h: (i32, i32), v: (i32, i32), x: i32, y: i32, label: &str) -> Measurement {
         Measurement {
             monitor: 0,
             horizontal: Some(span((h.0, y), (h.1, y))),
@@ -773,7 +966,7 @@ mod tests {
     }
 
     /// What a pixel is for a measurement's line: its cyan, its outline over the background, or the background.
-    fn expected(m: &Measurement, k: i32, x: i32, y: i32) -> [u8; 3] {
+    pub(super) fn expected(m: &Measurement, k: i32, x: i32, y: i32) -> [u8; 3] {
         let mut cyan = false;
         let mut outline = false;
         if let Some(h) = m.horizontal {
@@ -794,18 +987,25 @@ mod tests {
         }
     }
 
-    fn near(actual: [u8; 3], wanted: [u8; 3], tolerance: u8) -> bool {
+    pub(super) fn near(actual: [u8; 3], wanted: [u8; 3], tolerance: u8) -> bool {
         actual
             .iter()
             .zip(wanted)
             .all(|(&a, w)| a.abs_diff(w) <= tolerance)
     }
 
+    /// The lines of `m` alone: its outline, then its cyan pixels.
+    fn draw_lines(overlay: &Overlay, target: &ID2D1RenderTarget, m: &Measurement) {
+        let parts = [geometry::parts(m, overlay.dpi)];
+        overlay.draw_outlines(target, &parts);
+        overlay.draw_cyan(target, &parts);
+    }
+
     /// Checks every pixel of the window against the model, the line alone with no label.
     fn check_line(canvas: &Canvas, m: &Measurement, dpi: u32) {
         let k = scaled(4, dpi);
         let picture = canvas.render(MONITOR, dpi, |overlay, target| {
-            overlay.draw_lines(target, m);
+            draw_lines(overlay, target, m);
         });
         for y in 0..canvas.height as usize {
             for x in 0..canvas.width as usize {
@@ -884,7 +1084,7 @@ mod tests {
         let canvas = Canvas::new(480, 320);
         let m = horizontal(-400, -301, 350, "");
         let picture = canvas.render(MONITOR, 96, |overlay, target| {
-            overlay.draw_lines(target, &m)
+            draw_lines(overlay, target, &m)
         });
         // The window's pixel for (-400, 350) is (80, 150). The pixel diagonal to the span's first pixel is in the
         // outline of both the line and the tick.
@@ -909,7 +1109,7 @@ mod tests {
         for (dpi, k) in [(96, 4), (120, 5), (168, 7)] {
             let m = horizontal(-400, -301, 350, "");
             let picture = canvas.render(MONITOR, dpi, |overlay, target| {
-                overlay.draw_lines(target, &m)
+                draw_lines(overlay, target, &m)
             });
             // The first and last pixels' columns.
             for x in [80, 179] {
@@ -926,7 +1126,7 @@ mod tests {
         let canvas = Canvas::new(480, 320);
         let m = vertical(230, 480, -200, "");
         let picture = canvas.render(MONITOR, 120, |overlay, target| {
-            overlay.draw_lines(target, &m)
+            draw_lines(overlay, target, &m)
         });
         // Rows 30 and 280 of the window hold the first and last pixels.
         for y in [30, 280] {
@@ -940,7 +1140,7 @@ mod tests {
         let canvas = Canvas::new(480, 320);
         let m = horizontal(-400, -301, 350, "");
         let picture = canvas.render(MONITOR, 168, |overlay, target| {
-            overlay.draw_lines(target, &m)
+            draw_lines(overlay, target, &m)
         });
         // Column 130 of the window is in the middle of the span, and row 150 is its row.
         let column: Vec<[u8; 3]> = (0..320).map(|y| picture.at(130, y)).collect();
@@ -958,7 +1158,7 @@ mod tests {
         for dpi in [96, 168] {
             let m = cross((-350, -100), (230, 480), -230, 360, "");
             let picture = canvas.render(MONITOR, dpi, |overlay, target| {
-                overlay.draw_lines(target, &m)
+                draw_lines(overlay, target, &m)
             });
             // (-230, 360) in the window.
             assert_eq!(picture.at(250, 160), CYAN, "at {dpi} DPI");
@@ -967,8 +1167,8 @@ mod tests {
 
     /// The label alone, drawn as the whole measurement draws it, and where its pill went.
     fn draw_label(overlay: &Overlay, target: &ID2D1RenderTarget, m: &Measurement) -> Option<RECT> {
-        let label = overlay.label(m).expect("the label")?;
-        overlay.draw_shadow(target, &label.pill);
+        let label = overlay.label(m, Look::Live).expect("the label")?;
+        overlay.draw_shadow(target, &label).expect("the shadow");
         overlay.draw_pill(target, &label);
         Some(label.pill)
     }
@@ -1220,12 +1420,12 @@ mod tests {
         }
     }
 
-    const INK: [u8; 3] = [0x04, 0x16, 0x1b];
+    pub(super) const INK: [u8; 3] = [0x04, 0x16, 0x1b];
 
-    const SCALES: [u32; 4] = [96, 120, 144, 168];
+    pub(super) const SCALES: [u32; 4] = [96, 120, 144, 168];
 
     /// `m` with `logical` as the logical part of its label.
-    fn with_logical(mut m: Measurement, logical: &str) -> Measurement {
+    pub(super) fn with_logical(mut m: Measurement, logical: &str) -> Measurement {
         m.label.logical = Some(logical.to_owned());
         m
     }
@@ -1239,7 +1439,7 @@ mod tests {
     }
 
     /// The width of `text` laid out in `format`, in whole pixels, as the label counts it.
-    fn text_width(overlay: &Overlay, text: &str, format: &IDWriteTextFormat) -> i32 {
+    pub(super) fn text_width(overlay: &Overlay, text: &str, format: &IDWriteTextFormat) -> i32 {
         let layout = overlay.layout(text, format).expect("a layout");
         let mut metrics = DWRITE_TEXT_METRICS::default();
         // SAFETY: fills a local.
@@ -1467,7 +1667,10 @@ mod tests {
             let m = with_logical(horizontal(-400, -301, 350, "24"), "13.7");
             let mut found = None;
             canvas.render(MONITOR, dpi, |overlay, _| {
-                let label = overlay.label(&m).expect("the label").expect("a pill");
+                let label = overlay
+                    .label(&m, Look::Live)
+                    .expect("the label")
+                    .expect("a pill");
                 let physical_width = text_width(overlay, "24", &overlay.format);
                 found = Some((label, physical_width));
             });
