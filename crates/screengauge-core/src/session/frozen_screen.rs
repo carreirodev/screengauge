@@ -19,6 +19,35 @@ pub struct Rect {
     pub height: u32,
 }
 
+impl Rect {
+    /// Whether `point` is one of the rectangle's pixels.
+    pub fn contains(self, point: Point) -> bool {
+        let (x, y) = (i64::from(point.x), i64::from(point.y));
+        let (left, top) = (i64::from(self.left), i64::from(self.top));
+        (left..left + i64::from(self.width)).contains(&x)
+            && (top..top + i64::from(self.height)).contains(&y)
+    }
+
+    /// The rightmost column. Windows keeps the virtual screen in i32 coordinates, so a monitor's never overflows.
+    pub fn right(self) -> i32 {
+        self.left.saturating_add_unsigned(self.width) - 1
+    }
+
+    /// The bottom row.
+    pub fn bottom(self) -> i32 {
+        self.top.saturating_add_unsigned(self.height) - 1
+    }
+
+    /// The rectangle's pixel nearest to `point`: `point` itself when it is in the rectangle.
+    pub fn nearest(self, point: Point) -> Point {
+        // `max` keeps an empty rectangle from making `clamp` panic.
+        Point {
+            x: point.x.clamp(self.left, self.right().max(self.left)),
+            y: point.y.clamp(self.top, self.bottom().max(self.top)),
+        }
+    }
+}
+
 /// A monitor's scale, kept as the DPI Windows reports for it (96 is 100%, 168 is 175%), so dividing by it stays exact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Scale {

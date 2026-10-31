@@ -5,6 +5,7 @@
 //! [`Event`] while the tools are open, draws its [`Scene`] and carries out the [`Effect`]s it returns. The session
 //! never calls Windows and never reads the clock: the local time comes with each event.
 
+mod dimensions;
 mod event;
 mod frozen_screen;
 mod output;
@@ -15,7 +16,7 @@ pub use output::{Cursor, Effect, Measurement, Scene, Span};
 
 use std::fmt;
 
-use crate::settings::{Options, Remembered};
+use crate::settings::{DimensionsMode, Options, Remembered, Tolerance, Tool};
 
 /// What the session opens with.
 #[derive(Debug, Clone)]
@@ -59,6 +60,14 @@ impl std::error::Error for Refused {}
 #[derive(Debug)]
 pub struct Session {
     frozen_screen: Vec<Photo>,
+    /// Where the cursor is, as far as the session knows: the last event's place, or where the arrow keys put it.
+    cursor: Point,
+    /// The default tolerance from Settings, until the mouse wheel adjusts it (WPC-309).
+    tolerance: Tolerance,
+    /// The remembered state as the tools opened, and as they will leave it: the Windows layer keeps it only when the
+    /// two differ.
+    remembered_at_opening: Remembered,
+    remembered: Remembered,
     /// What Dimensions measures around the cursor.
     live: Option<Measurement>,
     /// Set by the effect that closes the tools, after which events do nothing.
@@ -67,10 +76,12 @@ pub struct Session {
 
 impl Session {
     pub fn open(opening: Opening) -> Result<Session, Refused> {
-        // No rule reads the options or the remembered state yet; the tools that do will keep them (the default
-        // tolerance with WPC-309, the last tool with WPC-310), and the remembered state goes back to the Windows layer
-        // only when one of them changes it.
-        let Opening { frozen_screen, .. } = opening;
+        let Opening {
+            frozen_screen,
+            cursor,
+            options,
+            remembered,
+        } = opening;
         if frozen_screen.is_empty() {
             return Err(Refused::NoMonitor);
         }
@@ -84,11 +95,17 @@ impl Session {
         }) {
             return Err(Refused::PhotoSize(monitor));
         }
-        Ok(Session {
+        let mut session = Session {
             frozen_screen,
+            cursor,
+            tolerance: options.default_tolerance,
+            remembered_at_opening: remembered.clone(),
+            remembered,
             live: None,
             closed: false,
-        })
+        };
+        session.measure();
+        Ok(session)
     }
 
     /// What `event` makes happen.
@@ -108,13 +125,83 @@ impl Session {
             // nothing (v1 spec WPC-296, "abrir pelo menu Iniciar com a toolbar na tela não muda nada"), and the photo
             // isn't taken again.
             Input::Called => Vec::new(),
+            Input::KeyDown(Key::H) => self.switch_mode(DimensionsMode::Horizontal),
+            Input::KeyDown(Key::V) => self.switch_mode(DimensionsMode::Vertical),
+            Input::KeyDown(Key::C) => self.switch_mode(DimensionsMode::Cross),
+            Input::KeyDown(Key::Left) => self.step(-1, 0, event.held),
+            Input::KeyDown(Key::Right) => self.step(1, 0, event.held),
+            Input::KeyDown(Key::Up) => self.step(0, -1, event.held),
+            Input::KeyDown(Key::Down) => self.step(0, 1, event.held),
+            Input::Move => {
+                self.cursor = event.cursor;
+                self.measure();
+                Vec::new()
+            }
             _ => Vec::new(),
         }
     }
 
+    /// Dimensions measures in `mode` from now on, and the next call starts in it.
+    fn switch_mode(&mut self, mode: DimensionsMode) -> Vec<Effect> {
+        self.remembered.dimensions_mode = mode;
+        self.measure();
+        Vec::new()
+    }
+
+    /// Moves the cursor one pixel the arrow's way, or ten with Shift, and measures there (v1 spec WPC-296, Dimensions).
+    /// The step goes on from where the session last put the cursor, never from the event's place: a key held down
+    /// repeats, and a repeat may carry the cursor's place from before Windows carried out the last move. A step that
+    /// would leave every monitor stops at the current monitor's limit.
+    fn step(&mut self, right: i32, down: i32, held: Held) -> Vec<Effect> {
+        let pixels = if held.shift { 10 } else { 1 };
+        let ahead = Point {
+            x: self.cursor.x.saturating_add(right * pixels),
+            y: self.cursor.y.saturating_add(down * pixels),
+        };
+        let on_a_monitor = self
+            .frozen_screen
+            .iter()
+            .any(|photo| photo.rect.contains(ahead));
+        let to = match self
+            .frozen_screen
+            .iter()
+            .find(|photo| photo.rect.contains(self.cursor))
+        {
+            Some(current) if !on_a_monitor => current.rect.nearest(ahead),
+            _ => ahead,
+        };
+        if to == self.cursor {
+            return Vec::new();
+        }
+        self.cursor = to;
+        self.measure();
+        vec![Effect::MoveCursor(to)]
+    }
+
+    /// Measures again around the cursor. Only Dimensions measures yet: the other tools come with their own tickets, and
+    /// the active tool is the last one used until the toolbar switches it (WPC-310).
+    fn measure(&mut self) {
+        if self.remembered.last_tool != Tool::Dimensions {
+            self.live = None;
+            return;
+        }
+        self.live = dimensions::measure(
+            &self.frozen_screen,
+            self.cursor,
+            self.remembered.dimensions_mode,
+            self.tolerance,
+        );
+    }
+
+    /// Closes the tools, and has the remembered state kept when the session changed it. Closing comes first, so the
+    /// screen is back before the settings file is written.
     fn close(&mut self) -> Vec<Effect> {
         self.closed = true;
-        vec![Effect::Close]
+        let mut effects = vec![Effect::Close];
+        if self.remembered != self.remembered_at_opening {
+            effects.push(Effect::SaveRemembered(self.remembered.clone()));
+        }
+        effects
     }
 
     /// What to draw now.

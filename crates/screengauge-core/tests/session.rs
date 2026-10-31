@@ -285,7 +285,14 @@ fn moving_clicking_turning_the_wheel_and_other_keys_leave_the_tools_open() {
     .chain(keys.iter().map(|&key| Input::KeyDown(key)))
     .chain(keys.iter().map(|&key| Input::KeyUp(key)));
     for input in inputs {
-        assert_eq!(session.handle(event(input.clone())), [], "{input:?}");
+        // The arrow keys move the cursor (tests/dimensions.rs); nothing else here has an effect, and none closes.
+        let effects = session.handle(event(input.clone()));
+        assert!(
+            effects
+                .iter()
+                .all(|effect| matches!(effect, Effect::MoveCursor(_))),
+            "{input:?}: {effects:?}"
+        );
         assert_eq!(session.scene().cursor, Cursor::Cross, "{input:?}");
     }
     assert_eq!(
