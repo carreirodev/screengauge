@@ -310,11 +310,10 @@ pub fn place_label(
         }
         (Some(horizontal), None) => {
             let y = horizontal.first.y;
-            let over = y - above - label.height;
             (
                 centered(horizontal.first.x, horizontal.last.x, label.width),
-                if over >= monitor.top {
-                    over
+                if fits_above(y, label.height, monitor, dpi) {
+                    y - above - label.height
                 } else {
                     y + 1 + above
                 },
@@ -342,6 +341,24 @@ pub fn place_label(
         right: left + label.width,
         bottom: top + label.height,
     })
+}
+
+/// Whether a label `height` pixels tall has room above a horizontal line on row `y`, `ABOVE_GAP` from it, inside the
+/// monitor.
+fn fits_above(y: i32, height: i32, monitor: RECT, dpi: u32) -> bool {
+    y - scaled(ABOVE_GAP, dpi) - height >= monitor.top
+}
+
+/// Whether `live`, the measurement Dimensions makes now, runs along the cursor's row alone, with its label above the
+/// line, as [`place_label`] puts it: the horizontal mode away from the monitor's top.
+pub fn label_above_row(live: &Measurement, monitor: RECT, dpi: u32) -> bool {
+    match (live.horizontal, live.vertical) {
+        // A live label is as tall as its pill, whatever its text.
+        (Some(horizontal), None) => {
+            fits_above(horizontal.first.y, pill_size(0, dpi).height, monitor, dpi)
+        }
+        _ => false,
+    }
 }
 
 /// Where a label `length` pixels long starts to be centered on the pixels `first` to `last`, whose middle is

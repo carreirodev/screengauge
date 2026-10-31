@@ -89,7 +89,7 @@ fn render_indicator(canvas: &Canvas, mode: Mode, dpi: u32, cursor: Point, value:
     let mut found = None;
     let picture = canvas.render_in(mode, MONITOR, dpi, |overlay, target| {
         overlay
-            .show_tolerance(target, cursor, value)
+            .show_tolerance(target, cursor, value, None)
             .expect("the indicator");
         // The word has no digits to align, so it is laid out without the tabular figures, which would take its kerning.
         let word = overlay
@@ -568,11 +568,82 @@ fn the_public_indicator_is_the_one_that_shows_the_tolerance_at_the_cursor() {
         };
         let drawn = canvas.render_in(mode, MONITOR, 120, |overlay, target| {
             overlay
-                .draw_tolerance(target, &indicator)
+                .draw_tolerance(target, &indicator, None)
                 .expect("the indicator");
         });
         let by_hand = render_indicator(&canvas, mode, 120, CURSOR, 33);
         assert!(drawn.pixels == by_hand.picture.pixels, "{mode:?}");
+    }
+}
+
+#[test]
+fn in_the_horizontal_mode_the_indicator_goes_below_the_cursor_and_leaves_the_label_above_the_line_uncovered()
+ {
+    // The owner's choice in WPC-309: the label of a span along the cursor's row sits above the line, where the panel
+    // would hide the number the wheel is changing, so the panel takes the line's other side.
+    let canvas = Canvas::new(480, 320);
+    let bounds = geometry::bounds(MONITOR).expect("the monitor");
+    let live = horizontal(CURSOR.x - 24, CURSOR.x + 24, CURSOR.y, "49");
+    let indicator = ToleranceIndicator {
+        tolerance: Tolerance::new(8).expect("a tolerance"),
+        at: CURSOR,
+        monitor: 0,
+    };
+    for mode in MODES {
+        let t = tokens(mode);
+        for dpi in [96, 144] {
+            let mut found = None;
+            let picture = canvas.render_in(mode, MONITOR, dpi, |overlay, target| {
+                overlay
+                    .draw_tolerance(target, &indicator, Some(&live))
+                    .expect("the indicator");
+                let word = overlay
+                    .typeset_plain("Tolerance", &overlay.word_format)
+                    .expect("the word")
+                    .width;
+                let number = text_width(overlay, "8", &overlay.number_format);
+                let label = text_width(overlay, "49", &overlay.format);
+                found = Some((tolerance::size(word, number, dpi), label));
+            });
+            let (size, label_width) = found.expect("the indicator was drawn");
+            let panel = tolerance::place_for(CURSOR, size, Some(&live), bounds, dpi);
+            // Below the cursor, its top the reach of 14 under it, and its right side as ever.
+            let reach = scaled(14, dpi);
+            assert_eq!(
+                (panel.top, panel.right),
+                (CURSOR.y + reach, CURSOR.x - reach),
+                "{mode:?} at {dpi}"
+            );
+            // The panel is drawn there: its middle is the panel over the background.
+            let middle = at(
+                &picture,
+                (panel.left + panel.right) / 2,
+                (panel.top + panel.bottom) / 2,
+            );
+            assert!(
+                near(middle, t.panel_over(BACKGROUND), 2),
+                "{mode:?} at {dpi}: {middle:?}"
+            );
+            // Nothing is drawn where the panel would sit above the cursor, which the label now has to itself.
+            let above = tolerance::place(CURSOR, size, bounds, dpi);
+            for y in above.top..above.bottom {
+                for x in above.left..above.right {
+                    assert_eq!(
+                        at(&picture, x, y),
+                        BACKGROUND,
+                        "{mode:?} at {dpi}: ({x}, {y})"
+                    );
+                }
+            }
+            // And the label of the live measurement, above the line, is clear of the panel.
+            let label =
+                geometry::place_label(&live, geometry::pill_size(label_width, dpi), bounds, dpi)
+                    .expect("a span");
+            assert!(
+                label.bottom <= CURSOR.y && panel.top > CURSOR.y,
+                "{mode:?} at {dpi}: label {label:?}, panel {panel:?}"
+            );
+        }
     }
 }
 
@@ -594,7 +665,7 @@ fn the_ink_has_its_full_strength_whatever_opacity_the_brush_was_left_at_and_leav
                     .draw(target, &[&first], None)
                     .expect("the first label");
                 overlay
-                    .show_tolerance(target, CURSOR, Tolerance::MAX)
+                    .show_tolerance(target, CURSOR, Tolerance::MAX, None)
                     .expect("the indicator");
                 overlay.draw(target, &[&later], None).expect("the label");
                 overlay

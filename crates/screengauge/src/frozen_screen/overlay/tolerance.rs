@@ -1,14 +1,15 @@
 //! The tolerance indicator: "Tolerance", the tolerance as a number and a bar of ten segments on a small panel above and
-//! to the left of the cursor, which follows the cursor (the prototype's variant A, WPC-279). Where it goes needs no
-//! Windows, so [`size`], [`place`] and [`lit_segments`] are tested without a monitor; the rest draws it onto the
-//! overlay's render target.
+//! to the left of the cursor, which follows the cursor (the prototype's variant A, WPC-279), or below and to the left of
+//! it in Dimensions' horizontal mode, whose label it would otherwise cover (the owner's choice in WPC-309). Where it
+//! goes needs no Windows, so [`size`], [`place_for`] and [`lit_segments`] are tested without a monitor; the rest draws
+//! it onto the overlay's render target.
 //!
 //! The prototype's markup is `Tolerance <b>N</b> <span class="meter">...</span>` in a flex row with an 8px gap. The
 //! word, the number and the bar are separate flex items, so the spaces between them collapse and the room between them
 //! is the gap alone (measured in Chromium: the word is 47.54px wide with or without its trailing space, and the number
 //! starts 8px after it).
 
-use screengauge_core::session::Point;
+use screengauge_core::session::{Measurement, Point};
 use screengauge_core::settings::Tolerance;
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
@@ -98,10 +99,10 @@ pub fn size(word_width: i32, number_width: i32, dpi: u32) -> Size {
     }
 }
 
-/// Where the panel goes: its rectangle in the virtual screen, right and bottom one past its last pixel. Its right side
-/// is `REACH` left of `at` and its bottom `REACH` above it, and it never goes to the other side of the cursor: where it
-/// would stick out it slides inside, `floating::MARGIN` from the monitor's sides; should the monitor be smaller than the
-/// panel, it starts that far inside the monitor's left and top sides.
+/// Where the panel goes above the cursor, as in the prototype: its rectangle in the virtual screen, right and bottom one
+/// past its last pixel. Its right side is `REACH` left of `at` and its bottom `REACH` above it, and it never goes to the
+/// other side of the cursor: where it would stick out it slides inside, `floating::MARGIN` from the monitor's sides;
+/// should the monitor be smaller than the panel, it starts that far inside the monitor's left and top sides.
 pub fn place(at: Point, size: Size, monitor: RECT, dpi: u32) -> RECT {
     let reach = scaled(REACH, dpi);
     floating::inside_monitor(
@@ -111,6 +112,31 @@ pub fn place(at: Point, size: Size, monitor: RECT, dpi: u32) -> RECT {
         monitor,
         dpi,
     )
+}
+
+/// Where the panel goes with `live` measured on its monitor. Above the cursor, by [`place`], except when Dimensions
+/// measures along the cursor's row alone with its label above the line, where the panel would hide the number the
+/// wheel is changing: then it takes the line's other side, its top `REACH` below `at`, its right side as ever (the
+/// owner's choice in WPC-309). Where the monitor has no room for it there, it stays above.
+pub fn place_for(
+    at: Point,
+    size: Size,
+    live: Option<&Measurement>,
+    monitor: RECT,
+    dpi: u32,
+) -> RECT {
+    let above = place(at, size, monitor, dpi);
+    let top = at.y + scaled(REACH, dpi);
+    let room_below = top + size.height <= monitor.bottom - scaled(floating::MARGIN, dpi);
+    if live.is_some_and(|live| geometry::label_above_row(live, monitor, dpi)) && room_below {
+        RECT {
+            top,
+            bottom: top + size.height,
+            ..above
+        }
+    } else {
+        above
+    }
 }
 
 // The bar divides by the highest tolerance; should the calibration ever make it 0, this stops the build.
@@ -127,19 +153,21 @@ pub fn lit_segments(tolerance: Tolerance) -> i32 {
 }
 
 impl Overlay {
-    /// Draws the tolerance indicator for `tolerance`, for the cursor being at `at`: the floating panel, "Tolerance",
-    /// the number and the bar.
+    /// Draws the tolerance indicator for `tolerance`, for the cursor being at `at` with `live` measured there: the
+    /// floating panel, "Tolerance", the number and the bar.
     pub(super) fn show_tolerance(
         &self,
         target: &ID2D1RenderTarget,
         at: Point,
         tolerance: Tolerance,
+        live: Option<&Measurement>,
     ) -> windows::core::Result<()> {
         let word = self.typeset_plain(WORD, &self.word_format)?;
         let number = self.typeset(&tolerance.get().to_string(), &self.number_format)?;
-        let panel = place(
+        let panel = place_for(
             at,
             size(word.width, number.width, self.dpi),
+            live,
             self.monitor,
             self.dpi,
         );
@@ -221,6 +249,7 @@ impl Overlay {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use screengauge_core::session::{Label, Span};
 
     fn point(x: i32, y: i32) -> Point {
         Point { x, y }
@@ -300,6 +329,89 @@ mod tests {
         assert_eq!(bar_offset(120), 1);
         assert_eq!(bar_offset(144), 1);
         assert_eq!(bar_offset(168), 1);
+    }
+
+    /// What Dimensions measures along row `y` only, from `x0` to `x1`: the horizontal mode.
+    fn along_row(x0: i32, x1: i32, y: i32) -> Measurement {
+        Measurement {
+            monitor: 0,
+            horizontal: Some(Span {
+                first: point(x0, y),
+                last: point(x1, y),
+            }),
+            vertical: None,
+            label: Label::default(),
+        }
+    }
+
+    /// What Dimensions measures along column `x` only, from `y0` to `y1`: the vertical mode.
+    fn along_column(y0: i32, y1: i32, x: i32) -> Measurement {
+        Measurement {
+            monitor: 0,
+            horizontal: None,
+            vertical: Some(Span {
+                first: point(x, y0),
+                last: point(x, y1),
+            }),
+            label: Label::default(),
+        }
+    }
+
+    #[test]
+    fn with_the_horizontal_modes_label_above_the_line_the_indicator_goes_below_the_cursor() {
+        // The label sits above the row the cursor is on, where the panel would cover it, so the panel takes the line's
+        // other side: its right side 14 left of the cursor, as ever, and its top 14 below it.
+        let at = point(2500, 600);
+        let live = along_row(2476, 2524, 600);
+        assert_eq!(
+            place_for(at, PANEL, Some(&live), MONITOR, 96),
+            rect(2500 - 14 - 156, 600 + 14, 2500 - 14, 600 + 14 + 25)
+        );
+        let panel = size(48, 14, 144);
+        let placed = place_for(at, panel, Some(&live), MONITOR, 144);
+        assert_eq!((placed.right, placed.top), (2500 - 21, 600 + 21), "at 150%");
+    }
+
+    #[test]
+    fn with_any_other_measurement_or_none_the_indicator_stays_above_the_cursor() {
+        let at = point(2500, 600);
+        let above = place(at, PANEL, MONITOR, 96);
+        let column = along_column(576, 624, 2500);
+        let mut cross = along_row(2476, 2524, 600);
+        cross.vertical = column.vertical;
+        for live in [None, Some(&column), Some(&cross)] {
+            assert_eq!(place_for(at, PANEL, live, MONITOR, 96), above, "{live:?}");
+        }
+    }
+
+    #[test]
+    fn near_the_monitors_top_the_horizontal_label_goes_below_the_line_and_the_indicator_stays_above()
+     {
+        // 10 below the monitor's top there is no room above the line for the label, which goes below it; the panel
+        // keeps its own place, slid inside the monitor.
+        let at = point(2500, MONITOR.top + 10);
+        let live = along_row(2476, 2524, MONITOR.top + 10);
+        assert_eq!(
+            place_for(at, PANEL, Some(&live), MONITOR, 96),
+            place(at, PANEL, MONITOR, 96)
+        );
+    }
+
+    #[test]
+    fn with_no_room_below_the_cursor_the_indicator_stays_above() {
+        let at = point(2500, MONITOR.bottom - 30);
+        let live = along_row(2476, 2524, MONITOR.bottom - 30);
+        assert_eq!(
+            place_for(at, PANEL, Some(&live), MONITOR, 96),
+            place(at, PANEL, MONITOR, 96)
+        );
+        // With just room for it, 14 below the cursor and 2 above the monitor's bottom, it goes below.
+        let at = point(2500, MONITOR.bottom - 2 - 25 - 14);
+        let live = along_row(2476, 2524, at.y);
+        assert_eq!(
+            place_for(at, PANEL, Some(&live), MONITOR, 96).top,
+            at.y + 14
+        );
     }
 
     #[test]

@@ -750,7 +750,9 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
     // failure is returned once the frame is finished, and any later one is logged.
     let measured = ready.overlay.draw(&ready.target, &here.pinned, here.live);
     let indicated = match here.tolerance_indicator {
-        Some(indicator) => ready.overlay.draw_tolerance(&ready.target, indicator),
+        Some(indicator) => ready
+            .overlay
+            .draw_tolerance(&ready.target, indicator, here.live),
         None => Ok(()),
     };
     let noticed = match here.notice {
