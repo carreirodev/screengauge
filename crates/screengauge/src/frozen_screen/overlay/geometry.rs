@@ -1,6 +1,6 @@
-//! Where Dimensions' live measurement lands, as whole-pixel rectangles in physical pixels of the virtual screen. Nothing
-//! here calls Windows, so the pixel counts the owner checks by eye are tested without a monitor: [`parts`] gives the
-//! line, its ticks and their outline, and [`place_label`] gives the label's place.
+//! Where Dimensions' live measurement lands, as whole-pixel rectangles in physical pixels of the virtual screen.
+//! Nothing here calls Windows, so the pixel counts the owner checks by eye are tested without a monitor: [`parts`]
+//! gives the line, its ticks and their outline, and [`place_label`] gives the label's place.
 
 use screengauge_core::session::{Measurement, Rect, Span};
 use windows::Win32::Foundation::{E_FAIL, RECT};
@@ -30,7 +30,7 @@ pub fn scaled(logical: u32, dpi: u32) -> i32 {
     (logical.saturating_mul(dpi).saturating_add(48) / 96).cast_signed()
 }
 
-/// A monitor's rectangle, with its right and bottom edges one past its last pixel, as Windows has it.
+/// A monitor's rectangle, with its right and bottom sides one past its last pixel, as Windows has it.
 pub fn bounds(monitor: Rect) -> windows::core::Result<RECT> {
     let too_large = || Error::new(E_FAIL, "the monitor is too large to draw on");
     let width = i32::try_from(monitor.width).map_err(|_| too_large())?;
@@ -127,21 +127,21 @@ fn add_span(
     }
 }
 
-/// The same pixels as `rects` cover together, as rectangles that don't overlap: the edges of every rectangle cut the
+/// The same pixels as `rects` cover together, as rectangles that don't overlap: the sides of every rectangle cut the
 /// plane into cells, and each row of covered cells becomes one rectangle.
 fn disjoint(rects: &[RECT]) -> Vec<RECT> {
-    let edges = |of: fn(&RECT) -> [i32; 2]| {
-        let mut edges: Vec<i32> = rects.iter().flat_map(of).collect();
-        edges.sort_unstable();
-        edges.dedup();
-        edges
+    let cuts = |of: fn(&RECT) -> [i32; 2]| {
+        let mut cuts: Vec<i32> = rects.iter().flat_map(of).collect();
+        cuts.sort_unstable();
+        cuts.dedup();
+        cuts
     };
-    let columns = edges(|r| [r.left, r.right]);
-    let rows = edges(|r| [r.top, r.bottom]);
+    let columns = cuts(|r| [r.left, r.right]);
+    let rows = cuts(|r| [r.top, r.bottom]);
     let mut merged = Vec::new();
     for band in rows.windows(2) {
         let &[top, bottom] = band else { continue };
-        // The run of covered cells being extended, as its left and right edges.
+        // The run of covered cells being extended, as its left and right sides.
         let mut run: Option<(i32, i32)> = None;
         for cell in columns.windows(2) {
             let &[left, right] = cell else { continue };
@@ -192,16 +192,16 @@ pub fn pill_size(text_width: i32, dpi: u32) -> Size {
 }
 
 /// Where the pill goes: its rectangle in the virtual screen, right and bottom one past its last pixel, whole pixels so
-/// the text and the pill's edges are crisp. `None` when the measurement has no span. The label always lies inside
+/// the text and the pill's sides are crisp. `None` when the measurement has no span. The label always lies inside
 /// `monitor`, because the window covering it cuts off whatever sticks out.
 ///
 /// A horizontal span's label is centered on the span, `ABOVE_GAP` above the line, or below it when the monitor has no
 /// room above. A vertical span's is centered on the span, `SIDE_GAP` right of the line, or left of it when there is no
 /// room. The Cross label's corner sits `CROSS_OFFSET` below and right of the crossing. The spec doesn't say what
-/// happens near an edge, so this follows the other two modes: with no room on the right the label mirrors to the left
-/// of the crossing, its right edge `CROSS_OFFSET` from it, and with no room below it mirrors above. Where it would
-/// still stick out, because the monitor is smaller than the label, or the span is short next to an edge, it slides
-/// inside.
+/// happens near the monitor's limit, so this follows the other two modes: with no room on the right the label mirrors
+/// to the left of the crossing, its right side `CROSS_OFFSET` from it, and with no room below it mirrors above. Where
+/// it would still stick out, because the monitor is smaller than the label, or the span is short next to the monitor's
+/// limit, it slides inside.
 pub fn place_label(
     measurement: &Measurement,
     label: Size,
@@ -572,19 +572,19 @@ mod tests {
         assert_eq!(
             label,
             rect(2030, 40, 2070, 62),
-            "9 below the line's bottom edge"
+            "9 below the line's bottom side"
         );
-        // The top edge is the limit: one more row and it fits above.
+        // The top is the limit: one more row and it fits above.
         let label = place_label(&horizontal(2000, 2099, 31), PILL, MONITOR, 96).expect("a span");
         assert_eq!(label.top, 0);
     }
 
     #[test]
     fn a_horizontal_label_slides_inside_the_monitor() {
-        // A short span at the left edge, whose centered label would stick out.
+        // A short span at the left limit, whose centered label would stick out.
         let label = place_label(&horizontal(1920, 1925, 500), PILL, MONITOR, 96).expect("a span");
         assert_eq!((label.left, label.right), (1920, 1960));
-        // And at the right edge.
+        // And at the right limit.
         let label = place_label(&horizontal(3834, 3839, 500), PILL, MONITOR, 96).expect("a span");
         assert_eq!((label.left, label.right), (3800, 3840));
     }
@@ -595,7 +595,7 @@ mod tests {
         assert_eq!(
             label,
             rect(2511, 439, 2551, 461),
-            "10 right of the line's right edge"
+            "10 right of the line's right side"
         );
     }
 
@@ -606,13 +606,13 @@ mod tests {
         assert_eq!(
             label,
             rect(3740, 439, 3780, 461),
-            "10 left of the line's left edge"
+            "10 left of the line's left side"
         );
     }
 
     #[test]
     fn a_vertical_label_stays_right_when_it_just_fits() {
-        // Column 3789: the label's right edge lands on 3840 exactly.
+        // Column 3789: the label's right side lands on 3840 exactly.
         let label = place_label(&vertical(400, 499, 3789), PILL, MONITOR, 96).expect("a span");
         assert_eq!((label.left, label.right), (3800, 3840));
     }
@@ -636,7 +636,7 @@ mod tests {
     fn a_cross_label_mirrors_left_with_no_room_on_the_right() {
         let m = cross(3700, 3800, 400, 500, 3790, 450);
         let label = place_label(&m, PILL, MONITOR, 96).expect("spans");
-        // 3790 + 12 + 40 is past 3840, so the right edge goes 12 left of the crossing.
+        // 3790 + 12 + 40 is past 3840, so the right side goes 12 left of the crossing.
         assert_eq!((label.left, label.right), (3738, 3778));
         assert_eq!((label.top, label.bottom), (462, 484));
     }
@@ -649,7 +649,7 @@ mod tests {
         assert_eq!(
             (label.top, label.bottom),
             (1036, 1058),
-            "its bottom edge 12 above"
+            "its bottom side 12 above"
         );
     }
 

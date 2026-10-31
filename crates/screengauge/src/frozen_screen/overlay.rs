@@ -47,7 +47,7 @@ pub struct Fonts {
 
 impl Fonts {
     fn new() -> windows::core::Result<Fonts> {
-        // SAFETY: a shared factory, which DirectWrite shares with every other user in the process.
+        // SAFETY: no pointers; the factory comes back as an owned interface.
         let factory: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }?;
         let mut collection = None;
         // SAFETY: fills `collection` with the installed fonts; the cached list is good enough.
@@ -163,7 +163,7 @@ impl Overlay {
         // The label is one line, so the window's width is never the reason to break it.
         // SAFETY: plain value.
         unsafe { format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP) }?;
-        // SAFETY: plain values.
+        // SAFETY: no arguments.
         let figures = unsafe { fonts.factory.CreateTypography() }?;
         // SAFETY: plain values.
         unsafe {
@@ -210,9 +210,10 @@ impl Overlay {
     /// The outline, then the line and the ticks.
     fn draw_lines(&self, target: &ID2D1RenderTarget, measurement: &Measurement) {
         let parts = geometry::parts(measurement, self.dpi);
-        // SAFETY: drawing calls on a live render target, between its BeginDraw and EndDraw. Aliased fills of
-        // rectangles on whole pixels cover exactly those pixels, and the target is at 96 DPI, so one unit is one
-        // physical pixel. DrawLine is never used: on whole coordinates it straddles two pixels.
+        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
+        // Direct2D only fails the frame at EndDraw. Aliased fills of rectangles on whole pixels cover exactly those
+        // pixels, and the target is at 96 DPI, so one unit is one physical pixel. DrawLine is never used: on whole
+        // coordinates it straddles two pixels.
         unsafe {
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
             self.shade.SetOpacity(OUTLINE_OPACITY);
@@ -262,8 +263,9 @@ impl Overlay {
     /// The pill's shadow, which the line is drawn over.
     fn draw_shadow(&self, target: &ID2D1RenderTarget, pill: &RECT) {
         let drop = scaled(geometry::SHADOW_DROP, self.dpi);
-        // SAFETY: drawing calls on a live render target, between its BeginDraw and EndDraw. The shapes are on whole
-        // pixels, so their straight edges are crisp; the corners are antialiased.
+        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
+        // Direct2D only fails the frame at EndDraw. The shapes are on whole pixels, so their straight sides are crisp;
+        // the corners are antialiased.
         unsafe {
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             for (grow, opacity) in SHADOW {
@@ -281,7 +283,8 @@ impl Overlay {
         let mut origin = D2D1_ELLIPSE::default().point;
         origin.X = label.text_left;
         origin.Y = label.text_top;
-        // SAFETY: drawing calls on a live render target, between its BeginDraw and EndDraw.
+        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
+        // Direct2D only fails the frame at EndDraw.
         unsafe {
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             target.FillRoundedRectangle(&self.rounded(&label.pill, 0, 0), &self.cyan);
@@ -301,8 +304,8 @@ impl Overlay {
         let text: Vec<u16> = label.encode_utf16().collect();
         let length = u32::try_from(text.len())
             .map_err(|_| Error::new(E_FAIL, "the label is too long to lay out"))?;
-        // SAFETY: the layout copies the text and keeps the format. A width past any label and no height limit keep it
-        // on one line.
+        // SAFETY: the layout copies the text and keeps its own reference to the format. A width and height past any
+        // label keep it on one line.
         let layout = unsafe {
             self.fonts
                 .factory
@@ -350,12 +353,14 @@ impl Overlay {
 /// A whole number of pixels as the float Direct2D takes. Positions are far below 2^24, up to which `f32` holds every
 /// whole number, so nothing is lost.
 fn px(pixels: i32) -> f32 {
+    debug_assert!(pixels.unsigned_abs() < 1 << 24, "{pixels} pixels");
     pixels as f32
 }
 
 /// A measured width rounded up to whole pixels, so the pill never cuts into the text. Widths are a few hundred pixels
 /// at most, far inside `i32`.
 fn whole_up(width: f32) -> i32 {
+    debug_assert!((0.0..1e6).contains(&width), "a label {width} pixels wide");
     width.ceil() as i32
 }
 
@@ -686,7 +691,7 @@ mod tests {
     }
 
     #[test]
-    fn a_line_at_the_monitor_edge_is_cut_not_moved() {
+    fn a_line_at_the_monitors_limit_is_cut_not_moved() {
         let canvas = Canvas::new(480, 320);
         // From the monitor's first column to its last, and down its first row.
         check_line(&canvas, &horizontal(-480, -1, 350, ""), 96);
@@ -788,8 +793,9 @@ mod tests {
         Some(label.pill)
     }
 
-    /// The rows (top, bottom) and columns (left, right) of the text's pixels inside `pill`: those that are more than half
-    /// the text's near-black, which neither the cyan, nor the photo showing at the rounded corners, nor the shadow is.
+    /// The rows (top, bottom) and columns (left, right) of the text's pixels inside `pill`: those that are more than
+    /// half the text's near-black, which neither the cyan, nor the photo showing at the rounded corners, nor the shadow
+    /// is.
     fn ink(picture: &Picture, pill: &RECT) -> ((i32, i32), (i32, i32)) {
         let (mut top, mut bottom, mut left, mut right) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
         for y in pill.top..pill.bottom {
@@ -862,7 +868,7 @@ mod tests {
         let below = at(centre, pill.bottom + 1);
         assert!(below[0] < BACKGROUND[0], "{below:?}");
         assert!(below[0] > 150, "{below:?}");
-        // Eight pixels beyond the pill's bottom edge, 2 for the drop and 6 for the blur, nothing is left.
+        // Eight pixels beyond the pill's bottom side, 2 for the drop and 6 for the blur, nothing is left.
         assert_eq!(at(centre, pill.bottom + 9), BACKGROUND);
         assert_eq!(at(pill.left - 7, (pill.top + pill.bottom) / 2), BACKGROUND);
     }
@@ -902,7 +908,7 @@ mod tests {
     }
 
     #[test]
-    fn the_label_stays_in_the_window_at_the_monitors_edge() {
+    fn the_label_stays_in_the_window_at_the_monitors_limit() {
         let canvas = Canvas::new(480, 320);
         // A short span in the corner: the label would stick out on two sides without sliding in.
         let m = horizontal(-480, -478, 202, "3");
@@ -918,7 +924,8 @@ mod tests {
     #[test]
     fn the_labels_digits_are_as_wide_as_each_other() {
         // Without tabular figures Segoe UI's 1 is 4.8 pixels wide at this size and its 0 is 6.7, so the pill would
-        // jump as the number changed. With them the widths agree to a fraction of a pixel (the font's 7 is 0.2 narrower).
+        // jump as the number changed. With them the widths agree to a fraction of a pixel (the font's 7 is 0.2
+        // narrower).
         let canvas = Canvas::new(8, 8);
         let overlay = Overlay::new(
             &canvas.target,

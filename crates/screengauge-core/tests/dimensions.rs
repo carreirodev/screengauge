@@ -518,8 +518,8 @@ fn an_arrow_takes_the_cursor_onto_the_next_monitor_and_dimensions_measures_there
 
 #[test]
 fn an_arrow_never_takes_the_cursor_off_every_monitor() {
-    // Left of the 4K monitor below row 1079 there is no monitor: the Full HD one is only 1080 rows high. The cursor stops
-    // at the 4K monitor's limit, which a step of ten reaches after five.
+    // Left of the 4K monitor below row 1079 there is no monitor: the Full HD one is only 1080 rows high. The cursor
+    // stops at the 4K monitor's limit, which a step of ten reaches after five.
     let monitors = vec![
         Canvas::new(AOC, WHITE).photo(168),
         Canvas::new(ARZOPA, WHITE).photo(120),
@@ -551,4 +551,21 @@ fn only_dimensions_measures() {
         assert_eq!(live(&session), None, "{last_tool:?}");
     }
     assert!(live(&open_remembering(Remembered::default())).is_some());
+}
+
+#[test]
+fn h_v_and_c_change_nothing_while_another_tool_is_active() {
+    // The mode buttons show only with Dimensions on (v1 spec WPC-296, Toolbar), and the keys follow them: with Inspect
+    // the last tool used, the remembered mode stays as it was, so there is nothing to save.
+    let mut session = open_remembering(Remembered {
+        last_tool: Tool::Inspect,
+        ..remembered_in_cross()
+    });
+    for key in [Key::H, Key::V] {
+        assert_eq!(session.handle(event(at(900, 600), Input::KeyDown(key))), []);
+    }
+    assert_eq!(
+        session.handle(event(at(900, 600), Input::KeyDown(Key::Esc))),
+        [Effect::Close]
+    );
 }

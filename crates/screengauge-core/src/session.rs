@@ -141,8 +141,12 @@ impl Session {
         }
     }
 
-    /// Dimensions measures in `mode` from now on, and the next call starts in it.
+    /// Dimensions measures in `mode` from now on, and the next call starts in it. The keys do nothing with another
+    /// tool active, as the mode buttons show only with Dimensions on (v1 spec WPC-296, Toolbar).
     fn switch_mode(&mut self, mode: DimensionsMode) -> Vec<Effect> {
+        if !self.dimensions_is_active() {
+            return Vec::new();
+        }
         self.remembered.dimensions_mode = mode;
         self.measure();
         Vec::new()
@@ -178,10 +182,14 @@ impl Session {
         vec![Effect::MoveCursor(to)]
     }
 
-    /// Measures again around the cursor. Only Dimensions measures yet: the other tools come with their own tickets, and
-    /// the active tool is the last one used until the toolbar switches it (WPC-310).
+    /// Whether Dimensions is the active tool: the last one used, until the toolbar switches tools (WPC-310).
+    fn dimensions_is_active(&self) -> bool {
+        self.remembered.last_tool == Tool::Dimensions
+    }
+
+    /// Measures again around the cursor. Only Dimensions measures yet: the other tools come with their own tickets.
     fn measure(&mut self) {
-        if self.remembered.last_tool != Tool::Dimensions {
+        if !self.dimensions_is_active() {
             self.live = None;
             return;
         }

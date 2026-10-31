@@ -28,14 +28,19 @@ impl Rect {
             && (top..top + i64::from(self.height)).contains(&y)
     }
 
-    /// The rightmost column. Windows keeps the virtual screen in i32 coordinates, so a monitor's never overflows.
+    /// The rightmost column. Windows keeps the virtual screen in i32 coordinates, so for a monitor this never
+    /// saturates; it only keeps a made-up rectangle from overflowing.
     pub fn right(self) -> i32 {
-        self.left.saturating_add_unsigned(self.width) - 1
+        self.left
+            .saturating_add_unsigned(self.width)
+            .saturating_sub(1)
     }
 
-    /// The bottom row.
+    /// The bottom row, as [`Rect::right`] is the rightmost column.
     pub fn bottom(self) -> i32 {
-        self.top.saturating_add_unsigned(self.height) - 1
+        self.top
+            .saturating_add_unsigned(self.height)
+            .saturating_sub(1)
     }
 
     /// The rectangle's pixel nearest to `point`: `point` itself when it is in the rectangle.

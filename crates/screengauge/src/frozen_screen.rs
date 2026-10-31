@@ -11,7 +11,9 @@ use std::cell::{OnceCell, RefCell};
 use std::ffi::c_void;
 use std::rc::Rc;
 
-use screengauge_core::session::{Cursor, Effect, Event, Input, Measurement, Photo, Rect, Session};
+use screengauge_core::session::{
+    Cursor, Effect, Event, Input, Measurement, Photo, Point, Rect, Session,
+};
 use windows::Win32::Foundation::{
     D2DERR_RECREATE_TARGET, E_FAIL, ERROR_SUCCESS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT,
     POINT, SetLastError, WPARAM,
@@ -202,7 +204,12 @@ impl FrozenScreen {
         let mut cursor = POINT::default();
         // SAFETY: fills a local.
         let under_cursor = match unsafe { GetCursorPos(&mut cursor) } {
-            Ok(()) => rects.iter().position(|&rect| contains(rect, cursor)),
+            Ok(()) => rects.iter().position(|rect| {
+                rect.contains(Point {
+                    x: cursor.x,
+                    y: cursor.y,
+                })
+            }),
             Err(e) => {
                 log::failure("frozen screen: finding the cursor", &e);
                 None
@@ -373,14 +380,6 @@ fn monitors_to_draw_again(before: Option<&Measurement>, after: Option<&Measureme
         monitors.extend(after);
     }
     monitors
-}
-
-/// Whether `point`, in physical pixels of the virtual screen, is in `rect`.
-fn contains(rect: Rect, point: POINT) -> bool {
-    let (x, y) = (i64::from(point.x), i64::from(point.y));
-    let (left, top) = (i64::from(rect.left), i64::from(rect.top));
-    (left..left + i64::from(rect.width)).contains(&x)
-        && (top..top + i64::from(rect.height)).contains(&y)
 }
 
 /// Destroys one of the frozen screen's windows, from outside its window procedure.
@@ -598,9 +597,8 @@ fn paint(hwnd: HWND, window: &Window) {
 /// Draws the window's part of the scene: its monitor's photo, and over it what Dimensions measures when that is on this
 /// monitor.
 fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
-    // A copy, taken before drawing so the core isn't borrowed across Direct2D calls, which can wait on other threads
-    // while a message such as the monitors changing arrives.
-    let live = window.live()?;
+    // A copy, so the session is borrowed only for a moment.
+    let live = window.live();
     let mut drawing = window
         .drawing
         .try_borrow_mut()
@@ -730,19 +728,12 @@ impl Window {
         Ok(f(photo))
     }
 
-    /// A copy of the measurement to draw over this window's photo: `None` while no tool measures, and when it is on
-    /// another monitor. A copy, so the session isn't borrowed while drawing.
-    fn live(&self) -> windows::core::Result<Option<Measurement>> {
-        let session = self
-            .session
-            .core
-            .try_borrow()
-            .map_err(|_| Error::new(E_FAIL, "drawing started while an event was handled"))?;
-        Ok(session
-            .scene()
-            .live
+    /// The measurement to draw over this window's photo: `None` while no tool measures, and when it is on another
+    /// monitor.
+    fn live(&self) -> Option<Measurement> {
+        self.session
+            .live()
             .filter(|measurement| measurement.monitor == self.monitor)
-            .cloned())
     }
 }
 
