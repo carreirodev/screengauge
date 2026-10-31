@@ -134,37 +134,38 @@ fn a_pinned_label_is_the_panel_in_a_ring_with_a_cyan_strip_on_its_left() {
             let m = horizontal(-400, -301, 350, "240");
             let (picture, labels) = render_scene(&canvas, mode, dpi, &[&m], None);
             let pill = labels[0].pill;
-            let border = geometry::border(dpi);
+            // The prototype's 3px strip and 1px ring, scaled: not read back from the geometry that is being tested.
+            let (strip, ring) = (scaled(3, dpi), scaled(1, dpi));
             let middle = (pill.top + pill.bottom) / 2;
             let across = (pill.left + pill.right) / 2;
             let context = format!("{mode:?} at {dpi} DPI");
 
             // The strip: opaque cyan, as wide as scaled, over the left side's ring.
-            for x in pill.left + 1..pill.left + border.strip {
+            for x in pill.left + 1..pill.left + strip {
                 assert_eq!(at(&picture, x, middle), CYAN, "strip column {x}, {context}");
             }
             assert!(
-                near(at(&picture, pill.left + border.strip, middle), panel, 2),
+                near(at(&picture, pill.left + strip, middle), panel, 1),
                 "the column after the strip is the panel, {context}: {:?}",
-                at(&picture, pill.left + border.strip, middle)
+                at(&picture, pill.left + strip, middle)
             );
 
             // The panel, as it composites over the photo, with no shadow showing through it.
             for (x, y) in [
-                (pill.left + border.strip + 2, middle),
-                (pill.right - border.ring - 2, middle),
-                (across, pill.top + border.ring),
-                (across, pill.bottom - border.ring - 1),
+                (pill.left + strip + 2, middle),
+                (pill.right - ring - 2, middle),
+                (across, pill.top + ring),
+                (across, pill.bottom - ring - 1),
             ] {
                 assert!(
-                    near(at(&picture, x, y), panel, 2),
+                    near(at(&picture, x, y), panel, 1),
                     "({x}, {y}) is {:?}, the panel is {panel:?}, {context}",
                     at(&picture, x, y)
                 );
             }
 
             // The ring: the border's color over the panel, as thick as scaled, on the top, bottom and right sides.
-            for k in 0..border.ring {
+            for k in 0..ring {
                 for (x, y, side) in [
                     (across, pill.top + k, "top"),
                     (across, pill.bottom - 1 - k, "bottom"),
