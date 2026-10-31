@@ -51,7 +51,7 @@ pub fn render(layers: &[Layer], size: u32) -> windows::core::Result<Image> {
 }
 
 /// Makes COM ready on this thread, once. WIC needs it; the multithreaded apartment is shared by every thread.
-pub fn ensure_com() -> windows::core::Result<()> {
+fn ensure_com() -> windows::core::Result<()> {
     thread_local! {
         static READY: Cell<bool> = const { Cell::new(false) };
     }

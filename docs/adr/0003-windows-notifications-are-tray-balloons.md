@@ -12,7 +12,7 @@ ScreenGauge's Windows notifications are balloons on its own tray icon: `Shell_No
 
 Measured on the owner's computer with a one-off probe and the real build (Windows 11 build 26300, 2026-10-30):
 
-- The notification shows the executable's name, "ScreenGauge.exe", with the generic icon: the `.exe` has no version resource yet. Giving it one, with the app icon (WPC-304), should show "ScreenGauge" (expected, not confirmed).
+- Without a version resource, the notification's header showed the executable's name, "ScreenGauge.exe", with the generic icon. Since WPC-304 gave the `.exe` a version resource ("ScreenGauge", by WPC Solutions) and the app icon, it shows "ScreenGauge" with the set square (seen on 2026-10-31).
 - It stays about 6 seconds and is **not kept** in the notification center (Win + N), even while ScreenGauge runs.
 - A click delivers `NIN_BALLOONUSERCLICK` and nothing else, so it never calls ScreenGauge as a click on the icon would. Going away delivers `NIN_BALLOONTIMEOUT`, sometimes twice.
 - With "Do not disturb" on, or with a full-screen window in front (`SHQueryUserNotificationState` says `QUNS_BUSY`), Windows drops it: `NIN_BALLOONTIMEOUT` arrives 40 ms after `NIN_BALLOONSHOW`, and nothing shows or is kept, with or without `NIF_REALTIME`. The frozen screen counts as such a window, so every notification waits while the tools are open and shows once they close. Until WPC-347, the spec's two "never in silence" rules, for a failed capture and for a settings file gone back to its defaults, don't hold while Windows drops notifications this way.

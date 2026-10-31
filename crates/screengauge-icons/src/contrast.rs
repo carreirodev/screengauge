@@ -9,15 +9,17 @@ use crate::image::{Image, Rgba};
 /// The backgrounds an app icon sits on: the taskbar and the window background of Windows 11's dark and light themes,
 /// as the WPC-291 prototype drew them.
 pub const THEME_BACKGROUNDS: [(&str, Rgba); 4] = [
-    ("dark taskbar", Rgba::hex(0x1C1C1C)),
+    ("dark taskbar", DARK_TASKBAR),
     ("dark window", Rgba::hex(0x202020)),
-    ("light taskbar", Rgba::hex(0xEEEFF1)),
+    ("light taskbar", LIGHT_TASKBAR),
     ("light window", Rgba::hex(0xF3F3F3)),
 ];
+pub const DARK_TASKBAR: Rgba = Rgba::hex(0x1C1C1C);
+pub const LIGHT_TASKBAR: Rgba = Rgba::hex(0xEEEFF1);
 
 /// The share of `image`, from 0 to 1, that has at least 3:1 contrast against `background`.
 pub fn passing_share(image: &Image, background: Rgba) -> f64 {
-    let back = luminance(background.r, background.g, background.b);
+    let back = luminance(background);
     let (mut counted, mut passing) = (0u32, 0u32);
     for p in image.pixels().filter(|p| p.a >= 128) {
         let alpha = f64::from(p.a) / 255.0;
@@ -40,13 +42,13 @@ pub fn passing_share(image: &Image, background: Rgba) -> f64 {
 }
 
 /// WCAG's contrast ratio between two relative luminances.
-pub fn ratio(a: f64, b: f64) -> f64 {
+fn ratio(a: f64, b: f64) -> f64 {
     (a.max(b) + 0.05) / (a.min(b) + 0.05)
 }
 
 /// WCAG's relative luminance of an sRGB color.
-pub fn luminance(r: u8, g: u8, b: u8) -> f64 {
-    linear_luminance(f64::from(r), f64::from(g), f64::from(b))
+fn luminance(color: Rgba) -> f64 {
+    linear_luminance(f64::from(color.r), f64::from(color.g), f64::from(color.b))
 }
 
 fn linear_luminance(r: f64, g: f64, b: f64) -> f64 {
@@ -65,22 +67,21 @@ fn linear_luminance(r: f64, g: f64, b: f64) -> f64 {
 mod tests {
     use super::*;
 
-    fn lum(color: Rgba) -> f64 {
-        luminance(color.r, color.g, color.b)
-    }
-
     #[test]
     fn black_on_white_is_21_to_1() {
-        let r = ratio(lum(Rgba::hex(0x000000)), lum(Rgba::hex(0xFFFFFF)));
+        let r = ratio(
+            luminance(Rgba::hex(0x000000)),
+            luminance(Rgba::hex(0xFFFFFF)),
+        );
         assert!((r - 21.0).abs() < 1e-9, "{r}");
     }
 
     #[test]
     fn the_middle_orange_fails_on_light_and_passes_on_dark() {
         // The values measured in the prototype for WPC-304.
-        let orange = lum(Rgba::hex(0xF97316));
-        assert!((ratio(orange, lum(Rgba::hex(0xEEEFF1))) - 2.44).abs() < 0.01);
-        assert!((ratio(orange, lum(Rgba::hex(0x1C1C1C))) - 6.08).abs() < 0.01);
+        let orange = luminance(Rgba::hex(0xF97316));
+        assert!((ratio(orange, luminance(Rgba::hex(0xEEEFF1))) - 2.44).abs() < 0.01);
+        assert!((ratio(orange, luminance(Rgba::hex(0x1C1C1C))) - 6.08).abs() < 0.01);
     }
 
     #[test]

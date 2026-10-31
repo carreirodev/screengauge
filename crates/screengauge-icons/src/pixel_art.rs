@@ -15,8 +15,8 @@ pub const LEGEND: [(char, Rgba); 8] = [
     ('O', color::OUTLINE),
     ('h', color::HOLE_OUTLINE),
     ('l', color::ORANGE_LIGHT),
-    ('p', Rgba::hex(0xFDBA74)),
-    ('q', Rgba::hex(0xFB923C)),
+    ('p', color::ORANGE_STEP_1),
+    ('q', color::ORANGE_STEP_2),
     ('f', color::ORANGE),
     ('t', color::GRAPHITE),
 ];

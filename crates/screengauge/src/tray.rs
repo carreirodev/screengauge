@@ -123,11 +123,7 @@ pub fn add(hwnd: HWND) -> windows::core::Result<()> {
 /// taskbar takes the new scale (measured in WPC-304). So the icon follows the taskbar for a few seconds, every
 /// `SCALE_CHECK_MS`: once the taskbar has held a new size for `SETTLE_CHECKS` checks, the icon is added again at it.
 pub fn follow_scale(hwnd: HWND) -> windows::core::Result<()> {
-    let started = Following {
-        checks_left: SCALE_CHECKS,
-        settled: 0,
-    };
-    if FOLLOWING.replace(Some(started)).is_none() {
+    if FOLLOWING.replace(Some(Following::START)).is_none() {
         // SAFETY: our own window, on the thread that created it; with no callback, WM_TIMER comes to the window.
         if unsafe { SetTimer(Some(hwnd), SCALE_TIMER, SCALE_CHECK_MS, None) } == 0 {
             FOLLOWING.set(None);
@@ -149,18 +145,21 @@ pub fn on_scale_timer(hwnd: HWND) -> windows::core::Result<()> {
     };
     let taskbar = match icon_size() {
         Ok(size) => size,
-        Err(e) => {
-            stop_following(hwnd)?;
-            return Err(e);
-        }
+        Err(e) => return stop_following_after(hwnd, Err(e)),
     };
     let next = following.check(shown, taskbar);
     FOLLOWING.set(Some(following));
     match next {
         Next::Wait => Ok(()),
         Next::Stop => stop_following(hwnd),
-        // A failure keeps following, so the next check tries again until the checks run out.
-        Next::AddAgain => add_again(hwnd).and_then(|()| stop_following(hwnd)),
+        Next::AddAgain => {
+            let added = add_again(hwnd);
+            // A failure keeps following, so the next check tries again, until the checks run out.
+            if added.is_err() && !following.is_last() {
+                return added;
+            }
+            stop_following_after(hwnd, added)
+        }
     }
 }
 
@@ -169,7 +168,7 @@ pub fn on_scale_timer(hwnd: HWND) -> windows::core::Result<()> {
 struct Following {
     checks_left: u32,
     /// How many checks in a row saw the taskbar at another size than the icon's.
-    settled: u32,
+    checks_at_new_size: u32,
 }
 
 /// What follows a check of the taskbar's size.
@@ -181,21 +180,32 @@ enum Next {
 }
 
 impl Following {
+    /// Following from the start, as when Windows announces a change.
+    const START: Following = Following {
+        checks_left: SCALE_CHECKS,
+        checks_at_new_size: 0,
+    };
+
     /// Counts a check that found the icon at `shown` pixels and the taskbar at `taskbar`.
     fn check(&mut self, shown: i32, taskbar: i32) -> Next {
         self.checks_left = self.checks_left.saturating_sub(1);
-        self.settled = if taskbar == shown {
+        self.checks_at_new_size = if taskbar == shown {
             0
         } else {
-            self.settled + 1
+            self.checks_at_new_size + 1
         };
-        if self.settled >= SETTLE_CHECKS {
+        if self.checks_at_new_size >= SETTLE_CHECKS {
             Next::AddAgain
         } else if self.checks_left == 0 {
             Next::Stop
         } else {
             Next::Wait
         }
+    }
+
+    /// Whether the check just counted was the last one.
+    fn is_last(&self) -> bool {
+        self.checks_left == 0
     }
 }
 
@@ -205,6 +215,21 @@ fn stop_following(hwnd: HWND) -> windows::core::Result<()> {
     }
     // SAFETY: the timer `follow_scale` set on our own window.
     unsafe { KillTimer(Some(hwnd), SCALE_TIMER) }
+}
+
+/// Stops following and returns `outcome`, whose error comes first: a failure to stop as well is logged.
+fn stop_following_after(
+    hwnd: HWND,
+    outcome: windows::core::Result<()>,
+) -> windows::core::Result<()> {
+    match (outcome, stop_following(hwnd)) {
+        (Err(e), Err(stopping)) => {
+            log::failure("tray icon: stopping the scale timer", &stopping);
+            Err(e)
+        }
+        (Err(e), Ok(())) => Err(e),
+        (Ok(()), stopped) => stopped,
+    }
 }
 
 /// Removes the icon and adds it at the taskbar's size, so Explorer draws it afresh (see the module's notes). A Windows
@@ -375,16 +400,9 @@ mod tests {
         assert_eq!(buffer, [97, 98, 99, 0]);
     }
 
-    fn following() -> Following {
-        Following {
-            checks_left: SCALE_CHECKS,
-            settled: 0,
-        }
-    }
-
     #[test]
     fn the_icon_is_added_again_once_a_new_taskbar_size_held_for_a_second() {
-        let mut state = following();
+        let mut state = Following::START;
         // The announcement comes before the taskbar changes: the first checks still see the old size.
         assert_eq!(state.check(20, 20), Next::Wait);
         assert_eq!(state.check(20, 20), Next::Wait);
@@ -396,7 +414,7 @@ mod tests {
 
     #[test]
     fn a_size_that_goes_back_starts_settling_again() {
-        let mut state = following();
+        let mut state = Following::START;
         for _ in 1..SETTLE_CHECKS {
             state.check(20, 24);
         }
@@ -406,11 +424,23 @@ mod tests {
 
     #[test]
     fn following_stops_when_the_checks_run_out_without_a_new_size() {
-        let mut state = following();
+        let mut state = Following::START;
         for _ in 1..SCALE_CHECKS {
             assert_eq!(state.check(28, 28), Next::Wait);
         }
         assert_eq!(state.check(28, 28), Next::Stop);
+    }
+
+    #[test]
+    fn the_last_check_is_known_even_when_the_new_size_asks_to_add_the_icon_again() {
+        // Adding the icon again can keep failing; the timer must still stop when the checks run out.
+        let mut state = Following::START;
+        for _ in 1..SCALE_CHECKS {
+            state.check(20, 24);
+            assert!(!state.is_last());
+        }
+        assert_eq!(state.check(20, 24), Next::AddAgain);
+        assert!(state.is_last());
     }
 
     #[test]

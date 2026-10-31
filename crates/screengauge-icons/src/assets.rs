@@ -21,6 +21,9 @@ pub const ICO_SIZES: [u32; 15] = [16, 20, 24, 28, 30, 32, 36, 40, 48, 60, 64, 72
 /// The target sizes of the app list images.
 pub const TARGET_SIZES: [u32; 14] = [16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256];
 
+/// The theme variants of each app list image: plain, dark theme, light theme.
+pub const THEME_VARIANTS: [&str; 3] = ["", "_altform-unplated", "_altform-lightunplated"];
+
 /// The display scales, in percent, of the scaled package images.
 pub const SCALES: [u32; 5] = [100, 125, 150, 200, 400];
 
@@ -51,7 +54,7 @@ impl Picture {
 pub fn package_files() -> BTreeMap<String, Picture> {
     let mut files = BTreeMap::new();
     for size in TARGET_SIZES {
-        for variant in ["", "_altform-unplated", "_altform-lightunplated"] {
+        for variant in THEME_VARIANTS {
             files.insert(
                 format!("{PACKAGE_DIR}/AppList.targetsize-{size}{variant}.png"),
                 Picture::AppIcon(size),
@@ -171,7 +174,7 @@ mod tests {
     fn every_target_size_has_its_three_theme_variants() {
         let files = package_files();
         for size in TARGET_SIZES {
-            for variant in ["", "_altform-unplated", "_altform-lightunplated"] {
+            for variant in THEME_VARIANTS {
                 let name = format!("package/AppList.targetsize-{size}{variant}.png");
                 assert_eq!(files.get(&name), Some(&Picture::AppIcon(size)), "{name}");
             }

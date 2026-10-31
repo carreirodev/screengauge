@@ -151,7 +151,7 @@ fn the_package_holds_exactly_its_images_each_at_its_size_and_as_drawn() {
 fn the_theme_variants_of_each_target_size_are_the_same_picture() {
     for size in assets::TARGET_SIZES {
         let plain = read(&format!("package/AppList.targetsize-{size}.png"));
-        for variant in ["_altform-unplated", "_altform-lightunplated"] {
+        for variant in &assets::THEME_VARIANTS[1..] {
             let other = read(&format!("package/AppList.targetsize-{size}{variant}.png"));
             assert_eq!(plain, other, "{size}{variant}");
         }

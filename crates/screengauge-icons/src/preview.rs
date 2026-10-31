@@ -3,25 +3,24 @@
 use std::fs;
 use std::path::Path;
 
-use crate::contrast::THEME_BACKGROUNDS;
+use crate::contrast::{DARK_TASKBAR, LIGHT_TASKBAR};
 use crate::image::{Image, Rgba};
-use crate::{assets, png};
+use crate::{assets, pixel_art, png};
 
-/// The tray icon's sizes at 100, 125, 150, 175 and 200%.
-const SIZES: [u32; 5] = [16, 20, 24, 28, 32];
-/// How many screen pixels show one icon pixel.
-const ZOOM: u32 = 12;
+/// How many screen pixels wide each icon pixel is drawn.
+const PIXEL_SIDE: u32 = 12;
 const GAP: u32 = 8;
 
 /// Writes `tray-sizes.png` in `folder`: each tray size at real size and enlarged, on the dark taskbar on the left and
 /// the light one on the right.
 pub fn write(folder: &Path) -> Result<(), String> {
-    let backgrounds = [THEME_BACKGROUNDS[0].1, THEME_BACKGROUNDS[2].1];
-    let largest = SIZES[SIZES.len() - 1];
-    let cell = GAP + largest + GAP + largest * ZOOM + GAP;
-    let row_height = largest * ZOOM + 2 * GAP;
-    let mut sheet = Image::new(cell * 2, row_height * 5);
-    for (row, size) in (0..).zip(SIZES) {
+    let backgrounds = [DARK_TASKBAR, LIGHT_TASKBAR];
+    let largest = pixel_art::SIZES[pixel_art::SIZES.len() - 1];
+    let cell = GAP + largest + GAP + largest * PIXEL_SIDE + GAP;
+    let row_height = largest * PIXEL_SIDE + 2 * GAP;
+    let rows = u32::try_from(pixel_art::SIZES.len()).map_err(|e| e.to_string())?;
+    let mut sheet = Image::new(cell * 2, row_height * rows);
+    for (row, size) in (0..).zip(pixel_art::SIZES) {
         let icon = assets::app_icon(size)?;
         for (column, background) in (0..).zip(backgrounds) {
             let left = column * cell;
@@ -33,7 +32,7 @@ pub fn write(folder: &Path) -> Result<(), String> {
                 &icon,
                 left + GAP + largest + GAP,
                 top + GAP,
-                ZOOM,
+                PIXEL_SIDE,
                 background,
             );
         }
@@ -52,12 +51,12 @@ fn fill(sheet: &mut Image, left: u32, top: u32, width: u32, height: u32, color: 
     }
 }
 
-/// `icon` laid over `background`, each pixel a `zoom` × `zoom` square.
-fn draw(sheet: &mut Image, icon: &Image, left: u32, top: u32, zoom: u32, background: Rgba) {
+/// `icon` laid over `background`, each pixel a `side` × `side` square.
+fn draw(sheet: &mut Image, icon: &Image, left: u32, top: u32, side: u32, background: Rgba) {
     for y in 0..icon.height() {
         for x in 0..icon.width() {
             let color = over(icon.pixel(x, y), background);
-            fill(sheet, left + x * zoom, top + y * zoom, zoom, zoom, color);
+            fill(sheet, left + x * side, top + y * side, side, side, color);
         }
     }
 }

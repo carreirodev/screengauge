@@ -1,8 +1,8 @@
 //! The drawings: the app icon and the Store icon as shapes in pixels, for a given size.
 //!
 //! Both are the set square of WPC-291, on Microsoft's 48 × 48 icon grid, as the prototype on the branch
-//! `prototype/app-icon` drew it (`prototypes/app-icon/index.html`, shape D, palette 1, strong outline, Store icon
-//! "3D 2 · Acrílico"). One change in the app icon, measured in WPC-304: the hole's outline is `HOLE_OUTLINE`, lighter
+//! `prototype/app-icon` drew it (`prototypes/app-icon/index.html`, shape D, palette 1, strong outline, and for the Store
+//! icon the option labelled "3D 2 · Acrílico", acrylic). One change in the app icon, measured in WPC-304: the hole's outline is `HOLE_OUTLINE`, lighter
 //! than the outer one, and a little thicker, so that at least half of every size has a 3:1 contrast on the dark
 //! taskbar as well as on the light one (`contrast`). The approved drawing passed on the light taskbar only.
 
@@ -14,6 +14,9 @@ pub mod color {
 
     /// The light end of the orange, the top left of the set square.
     pub const ORANGE_LIGHT: Rgba = Rgba::hex(0xFED7AA);
+    /// Two steps of the orange between its light end and its middle, for the hand-drawn sizes' gradient.
+    pub const ORANGE_STEP_1: Rgba = Rgba::hex(0xFDBA74);
+    pub const ORANGE_STEP_2: Rgba = Rgba::hex(0xFB923C);
     /// The middle of the orange, the bottom right of the set square.
     pub const ORANGE: Rgba = Rgba::hex(0xF97316);
     /// The dark end of the orange, the Store icon's thickness.

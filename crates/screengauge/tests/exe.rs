@@ -160,7 +160,7 @@ fn tray_sizes_load_the_icos_own_image_pixel_for_pixel() {
                 .find(|f| i32::from(f.width) == size && i32::from(f.height) == size)
                 .unwrap_or_else(|| panic!("{ICO} has no {size}-pixel image"));
             let icon = load_icon(module, size);
-            let (width, height, drawn) = color_bitmap(icon);
+            let (width, height, drawn) = into_color_bitmap(icon);
             assert_eq!((width, height), (size, size), "size of the {size} icon");
             assert_same_pixels(size, &drawn, &top_down_pixels(frame, size));
         }
@@ -319,7 +319,10 @@ unsafe extern "system" fn collect_resource_name(
     names.push(match u16::try_from(name.0.addr()) {
         Ok(id) => ResourceName::Id(id),
         // SAFETY: any other name is a null-terminated string that lives as long as the module.
-        Err(_) => ResourceName::Text(unsafe { name.to_string() }.unwrap_or_default()),
+        Err(_) => ResourceName::Text(
+            unsafe { name.to_string() }
+                .unwrap_or_else(|e| format!("<a name that isn't UTF-16: {e}>")),
+        ),
     });
     true.into()
 }
@@ -423,7 +426,7 @@ fn load_icon(module: HMODULE, size: i32) -> HICON {
 }
 
 /// The width, height and top-down BGRA pixels of the icon's color bitmap. Destroys the icon.
-fn color_bitmap(icon: HICON) -> (i32, i32, Vec<u8>) {
+fn into_color_bitmap(icon: HICON) -> (i32, i32, Vec<u8>) {
     let mut info = ICONINFO::default();
     // SAFETY: a valid icon, and an ICONINFO to fill. The two bitmaps it creates are deleted below.
     unsafe { GetIconInfo(icon, &mut info) }.expect("GetIconInfo");

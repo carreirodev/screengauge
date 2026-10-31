@@ -4,9 +4,9 @@
 //! - the app icon, from `assets/ScreenGauge.ico`;
 //! - a version resource, which is what Windows reads to name the program, for one, in the header of its notifications.
 //!
-//! The icon and the version resource go in a `.res` file this script writes itself, because the owner asked for no
-//! resource compiler (rc.exe, embed-resource, winresource) in the build. link.exe takes a `.res` as an input file and
-//! converts it on its own. The manifest stays out of the `.res`: the linker embeds it, and a second RT_MANIFEST would
+//! The icon and the version resource go in a `.res` file this script writes itself: a resource compiler (rc.exe) or a
+//! new crate (embed-resource, winresource) would have gone back to the owner first (WPC-303's note on WPC-304), and
+//! writing the file needs neither. link.exe takes a `.res` as an input file and converts it on its own. The manifest stays out of the `.res`: the linker embeds it, and a second RT_MANIFEST would
 //! collide with it.
 
 use std::env;
@@ -203,8 +203,8 @@ fn invalid_ico(path: &str, why: &str) -> ! {
 // ---------------------------------------------------------------------------------------------------------------------
 
 /// The numbers and texts Windows shows for the program: the file's Details tab, Task Manager and, as the owner noted in
-/// WPC-303, the header of Windows notifications, which should read "ScreenGauge" instead of "ScreenGauge.exe" once this
-/// resource is in. That is for a hardware check to confirm; the tests only prove what the resource holds.
+/// WPC-303, the header of Windows notifications, which reads "ScreenGauge" instead of "ScreenGauge.exe" with this
+/// resource in (seen on the owner's computer in WPC-304); the tests prove what the resource holds.
 fn version_resource() -> Resource {
     let version = var("CARGO_PKG_VERSION");
     let part = |name: &str| {
