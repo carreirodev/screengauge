@@ -139,10 +139,7 @@ impl Session {
             return Err(Refused::PhotoSize(monitor));
         }
         // The cursor is always on a monitor; should it not be, the toolbar goes on the first one.
-        let toolbar_monitor = frozen_screen
-            .iter()
-            .position(|photo| photo.rect.contains(cursor))
-            .unwrap_or(0);
+        let toolbar_monitor = frozen_screen::monitor_at(&frozen_screen, cursor).unwrap_or(0);
         let mut session = Session {
             frozen_screen,
             cursor,
@@ -184,6 +181,9 @@ impl Session {
             self.indicator_until = None;
         }
         match event.input {
+            // The second click of the double-click that called ScreenGauge does nothing, on the toolbar as on the tool
+            // (WPC-308): it would act on a button the user never aimed at.
+            Input::Toolbar(_) if self.is_second_click(event.uptime) => Vec::new(),
             // Esc closes the tools whatever tool is active (v1 spec WPC-296, derived rule 3), and so do the toolbar's
             // close button and the global shortcut pressed again. Alt+F4 closes them as a whole, never one monitor's
             // window alone.
@@ -233,7 +233,7 @@ impl Session {
     /// "Copied" where the click was (v1 spec WPC-296, Dimensions). A click with nothing measured does nothing, and so
     /// does the second click of the double-click that called ScreenGauge (WPC-308).
     fn pin(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
-        if self.second_click_until.is_some_and(|until| uptime < until) {
+        if self.is_second_click(uptime) {
             return Vec::new();
         }
         let Some(measurement) = self.live.clone() else {
@@ -249,6 +249,12 @@ impl Session {
         let mut effects = vec![Effect::CopyText(text)];
         effects.extend(self.show(Message::Copied, monitor, uptime));
         effects
+    }
+
+    /// Whether a click when Windows has been running `uptime` is the second click of the double-click that called
+    /// ScreenGauge, as on its tray icon (WPC-308).
+    fn is_second_click(&self, uptime: Duration) -> bool {
+        self.second_click_until.is_some_and(|until| uptime < until)
     }
 
     /// Takes away the newest pinned measurement, as an undo. Dimensions' and Bounds' pins are one stack, and the keys
@@ -423,10 +429,7 @@ impl Session {
     /// The tolerance indicator where the cursor is, while it shows.
     fn tolerance_indicator(&self) -> Option<ToleranceIndicator> {
         self.indicator_until?;
-        let monitor = self
-            .frozen_screen
-            .iter()
-            .position(|photo| photo.rect.contains(self.cursor))?;
+        let monitor = frozen_screen::monitor_at(&self.frozen_screen, self.cursor)?;
         Some(ToleranceIndicator {
             tolerance: self.tolerance,
             at: self.cursor,

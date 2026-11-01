@@ -13,9 +13,7 @@ pub(super) fn measure(
     tolerance: Tolerance,
     also_show_logical_pixels: bool,
 ) -> Option<Measurement> {
-    let monitor = frozen_screen
-        .iter()
-        .position(|photo| photo.rect.contains(cursor))?;
+    let monitor = super::frozen_screen::monitor_at(frozen_screen, cursor)?;
     let photo = &frozen_screen[monitor];
     let along = |axis| span(photo, cursor, axis, tolerance);
     let (horizontal, vertical) = match mode {

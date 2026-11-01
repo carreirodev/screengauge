@@ -378,7 +378,14 @@ impl SharedSession {
         if scene.toolbar.monitor != monitor {
             return None;
         }
-        let photo = scene.frozen_screen.get(monitor)?;
+        let Some(photo) = scene.frozen_screen.get(monitor) else {
+            // Can't happen: the toolbar is on a monitor of the frozen screen.
+            log::failure(
+                "frozen screen",
+                &"the toolbar is on a monitor with no photo",
+            );
+            return None;
+        };
         match toolbar::on_monitor(photo.rect, photo.scale) {
             Ok(layout) => layout.hit(at, scene.toolbar.mode.is_some()),
             Err(e) => {
@@ -668,6 +675,8 @@ extern "system" fn window_proc(
             },
             // The button acts when the mouse comes up on it, as a Windows button does, so moving off it first cancels.
             // Neither the press nor its release reaches the tool.
+            // `pressed` is taken before the mouse is given back: ReleaseCapture sends WM_CAPTURECHANGED to this window at
+            // once, which clears it.
             WM_LBUTTONUP => match window.pressed.take() {
                 Some(pressed) => {
                     // SAFETY: gives back the mouse this window took at the press, on its thread.

@@ -92,6 +92,14 @@ pub struct Photo {
     pub image: Image,
 }
 
+/// The monitor `point` is on, as an index in `frozen_screen`'s order: the current monitor when `point` is the cursor.
+/// `None` off every monitor.
+pub(crate) fn monitor_at(frozen_screen: &[Photo], point: Point) -> Option<usize> {
+    frozen_screen
+        .iter()
+        .position(|photo| photo.rect.contains(point))
+}
+
 /// An opaque 8-bit sRGB image: `height` rows of `width` pixels from the top, with no gap between rows. Each pixel is
 /// four bytes, blue, green, red and one that says nothing: the order Windows captures and draws in, so the photo is
 /// never converted on its way in or out.

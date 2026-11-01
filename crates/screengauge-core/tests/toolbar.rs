@@ -258,6 +258,34 @@ fn ending_on_the_tool_it_opened_with_writes_nothing() {
 }
 
 #[test]
+fn a_toolbar_button_clicked_as_the_second_click_of_the_calling_double_click_does_nothing() {
+    // Called with a double-click on the tray icon: until Windows has run 500 ms, a click is that double-click's second
+    // click (WPC-308's guard), on the toolbar as anywhere else.
+    let mut session = Session::open(Opening {
+        frozen_screen: owners_monitors().into_iter().map(Some).collect(),
+        cursor: BETWEEN_CARDS,
+        options: Options::default(),
+        remembered: Remembered::default(),
+        second_click_until: Some(Duration::from_millis(500)),
+    })
+    .expect("a frozen screen the session takes");
+    let early = |button| event(Point { x: 1920, y: 40 }, 300, Input::Toolbar(button));
+    assert_eq!(session.handle(early(ToolbarButton::Close)), []);
+    assert_eq!(session.handle(early(ToolbarButton::Tool(Tool::Bounds))), []);
+    assert_eq!(toolbar(&session).active, Tool::Dimensions);
+    // A key is no click: 2 switches at once.
+    session.handle(event(BETWEEN_CARDS, 300, Input::KeyDown(Key::Digit2)));
+    assert_eq!(toolbar(&session).active, Tool::Bounds);
+    // Once the double-click's time is over, the buttons act.
+    let later = event(
+        Point { x: 1920, y: 40 },
+        500,
+        Input::Toolbar(ToolbarButton::Close),
+    );
+    assert_eq!(session.handle(later).first(), Some(&Effect::Close));
+}
+
+#[test]
 fn the_gear_minimize_and_restore_do_nothing_yet() {
     let mut session = open(Tool::Dimensions, DimensionsMode::Horizontal, BETWEEN_CARDS);
     session.handle(event(BETWEEN_CARDS, 1000, Input::Press));
