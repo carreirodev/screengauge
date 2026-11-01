@@ -222,13 +222,17 @@ fn a_drag_over_nothing_but_the_reference_color_shows_no_content_found_and_pins_a
             monitor: 0,
         })
     );
-    // What the user asked for wasn't done, so the notice has the alert sign, not Copied's check mark.
+    // What the user asked for wasn't done, so the notice has the alert sign, not Copied's check mark, and it tells of Alt,
+    // which measures the drawn rectangle itself (the owner's choice in WPC-314).
     assert_eq!(
         (
             Message::NoContentFound.text(),
             Message::NoContentFound.sign()
         ),
-        ("No content found", Sign::Alert)
+        (
+            "No content found · Hold Alt to measure the rectangle",
+            Sign::Alert
+        )
     );
 }
 
@@ -493,12 +497,12 @@ fn a_drag_counts_once_the_cursor_goes_more_than_4_pixels_from_the_press_along_ei
         ),
         []
     );
-    // 5 pixels along one axis counts, whichever way.
+    // 5 pixels along one axis counts, whichever way: what is copied, or the notice's message when nothing is.
     for (to, shown_after) in [
         (at(1002, 601), "3 x 2"),
         (at(1001, 602), "2 x 3"),
-        (at(992, 597), "No content found"),
-        (at(997, 592), "No content found"),
+        (at(992, 597), "NoContentFound"),
+        (at(997, 592), "NoContentFound"),
     ] {
         let mut session = open(vec![button()], at(997, 597));
         let effects = drag_through(&mut session, at(997, 597), &[to], Held::default(), 1000);
@@ -509,7 +513,7 @@ fn a_drag_counts_once_the_cursor_goes_more_than_4_pixels_from_the_press_along_ei
                 session
                     .scene()
                     .notice
-                    .map(|notice| notice.message.text().to_owned())
+                    .map(|notice| format!("{:?}", notice.message))
             });
         assert_eq!(shown.as_deref(), Some(shown_after), "{to:?}");
     }

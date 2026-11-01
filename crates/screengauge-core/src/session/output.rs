@@ -103,6 +103,8 @@ pub enum Message {
     /// A copy to the clipboard was made.
     Copied,
     /// A drawn rectangle held nothing but the reference color, so nothing was pinned or copied (v1 spec WPC-296, Bounds).
+    /// It says how to measure the drawn rectangle itself, since nothing else on screen tells of Alt (the owner's choice
+    /// in WPC-314).
     NoContentFound,
 }
 
@@ -111,7 +113,7 @@ impl Message {
     pub fn text(self) -> &'static str {
         match self {
             Message::Copied => "Copied",
-            Message::NoContentFound => "No content found",
+            Message::NoContentFound => "No content found · Hold Alt to measure the rectangle",
         }
     }
 

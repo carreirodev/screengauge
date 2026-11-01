@@ -20,8 +20,8 @@ use std::time::Duration;
 
 use screengauge_core::session::toolbar::Hit;
 use screengauge_core::session::{
-    Cursor, DrawnRectangle, Effect, Event, Input, Measurement, Notice, Photo, Point, Rect, Session,
-    ToleranceIndicator, Toolbar,
+    Cursor, DrawnRectangle, Effect, Event, Input, Key, Measurement, Notice, Photo, Point, Rect,
+    Session, ToleranceIndicator, Toolbar,
 };
 use windows::Win32::Foundation::{
     D2DERR_RECREATE_TARGET, E_FAIL, ERROR_SUCCESS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT,
@@ -44,13 +44,15 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, PAINTSTRUCT};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    MOD_ALT, MOD_NOREPEAT, RegisterHotKey, ReleaseCapture, SetCapture, UnregisterHotKey, VK_ESCAPE,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos,
     GetWindowLongPtrW, HTCLIENT, IDC_ARROW, IDC_CROSS, KillTimer, LoadCursorW, PostMessageW,
     RegisterClassExW, SW_SHOWNA, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
     ShowWindow, USER_TIMER_MAXIMUM, USER_TIMER_MINIMUM, WM_APP, WM_CAPTURECHANGED, WM_CLOSE,
-    WM_DISPLAYCHANGE, WM_ERASEBKGND, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_DISPLAYCHANGE, WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP,
     WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SYSKEYDOWN,
     WM_SYSKEYUP, WM_TIMER, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
@@ -71,6 +73,13 @@ pub const EFFECTS_READY: u32 = WM_APP + 2;
 /// What a frozen screen window posts to itself when Windows says the monitors changed. WM_APP + 4 is taken by the
 /// notifications waiting to show (`notification::SHOW_WAITING`).
 const MONITORS_CHANGED: u32 = WM_APP + 5;
+
+/// The first window's hot key while the tools are open: Alt+Esc. Windows acts on Alt+Esc itself, before any window gets
+/// the key, and brings another program to the front, which closes the tools; held by the first window, it reaches the
+/// session core as Esc instead, so Esc pressed with Alt held, as to cancel a drag Bounds draws exactly with Alt, cancels
+/// it (seen in WPC-314; the owner's choice there). A hot key's ID belongs to its window, so this one can't clash with the
+/// global shortcut's, which the resident window holds.
+const ALT_ESC: i32 = 1;
 
 /// The first window's timer that wakes the session core at the moment it asked for (`Effect::WakeAt`). Each window has
 /// its own timers, so the number is apart from the resident window's, and the timer goes with the window.
@@ -127,6 +136,9 @@ pub struct FrozenScreen {
     /// Tells the first window when another program comes to the front, from the moment the frozen screen asked for the
     /// keyboard. `None` before, and when Windows refused it.
     watch: Option<foreground::Watch>,
+    /// Whether the first window holds Alt+Esc ([`ALT_ESC`]): from the moment the frozen screen asked for the keyboard,
+    /// unless another program already held it.
+    holds_alt_esc: bool,
 }
 
 /// The session, as the windows and the resident window share it.
@@ -170,6 +182,7 @@ impl FrozenScreen {
                 resident,
             }),
             watch: None,
+            holds_alt_esc: false,
         };
         for (monitor, &rect) in rects.iter().enumerate() {
             let window = create_window(instance, monitor, rect, mode, &factory, &frozen.session)?;
@@ -190,6 +203,7 @@ impl FrozenScreen {
         }
         frozen.take_keyboard(&rects);
         frozen.watch_the_front();
+        frozen.hold_alt_esc();
         Ok(frozen)
     }
 
@@ -282,6 +296,28 @@ impl FrozenScreen {
             Err(e) => log::failure("frozen screen: watching for another program in front", &e),
         }
     }
+
+    /// Has the first window hold Alt+Esc while the tools are open ([`ALT_ESC`]). Should another program hold it already,
+    /// Alt+Esc does what Windows does with it and closes the tools, as Alt+Tab does, and the call goes on.
+    fn hold_alt_esc(&mut self) {
+        // Can't happen: the session core refuses a frozen screen without monitors.
+        let Some(&window) = self.windows.first() else {
+            return;
+        };
+        // With MOD_NOREPEAT, Alt+Esc held down comes once.
+        // SAFETY: our own window, on the thread that created it.
+        match unsafe {
+            RegisterHotKey(
+                Some(window),
+                ALT_ESC,
+                MOD_ALT | MOD_NOREPEAT,
+                u32::from(VK_ESCAPE.0),
+            )
+        } {
+            Ok(()) => self.holds_alt_esc = true,
+            Err(e) => log::failure("frozen screen: holding Alt+Esc", &e),
+        }
+    }
 }
 
 impl Drop for FrozenScreen {
@@ -289,6 +325,15 @@ impl Drop for FrozenScreen {
         // The watch goes before the window it tells: closing the window in front hands the front to another program,
         // which isn't one coming to the front while the tools are open.
         self.watch = None;
+        // Alt+Esc is Windows' again once the tools close.
+        if self.holds_alt_esc
+            && let Some(&window) = self.windows.first()
+        {
+            // SAFETY: our own window, on its thread, which holds the hot key.
+            if let Err(e) = unsafe { UnregisterHotKey(Some(window), ALT_ESC) } {
+                log::failure("frozen screen: giving back Alt+Esc", &e);
+            }
+        }
         for window in self.windows.drain(..) {
             destroy(window);
         }
@@ -773,6 +818,10 @@ extern "system" fn window_proc(
                 // Alt, and keys pressed with it, come as system keys. Windows handles them afterwards as before, so
                 // Alt+F4 still turns into WM_CLOSE.
                 matches!(message, WM_KEYDOWN | WM_KEYUP).then_some(LRESULT(0))
+            }
+            // Alt+Esc, which the first window holds while the tools are open: the tools' Esc.
+            WM_HOTKEY if i32::try_from(wparam.0) == Ok(ALT_ESC) => {
+                deliver(Input::KeyDown(Key::Esc))
             }
             // Alt+F4: the core closes the tools as a whole, never one monitor's window alone.
             WM_CLOSE => deliver(Input::CloseAsked),
