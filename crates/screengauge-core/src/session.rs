@@ -309,7 +309,8 @@ impl Session {
     /// Moves the held toolbar so the cursor keeps holding it where it was picked up, as near as the margins of its own
     /// monitor let it go: it never leaves that monitor (v1 spec WPC-296, Toolbar), and stops 14 logical pixels short
     /// of each side, where the remembered place puts it at the next call (the owner's choice in WPC-312). The place it
-    /// takes is the remembered state's, kept when the tools close.
+    /// takes is the remembered state's, kept when the tools close, even by Esc in the middle of the drag: the toolbar
+    /// stays where the user had it (the owner's choice in WPC-312).
     fn drag(&mut self) {
         let Some(grab) = self.toolbar_grab else {
             return;
@@ -475,12 +476,13 @@ impl Session {
     }
 
     /// Whether the tool pauses with the cursor at `at`: on the toolbar, and anywhere while the toolbar is dragged, as the
-    /// cursor may leave it where it stops at a margin.
+    /// cursor may leave it where it stops at a margin, the other monitor included (the owner's choice in WPC-312).
     fn pauses_at(&self, at: Point) -> bool {
         self.toolbar_grab.is_some() || self.toolbar_hit(at).is_some()
     }
 
-    /// Puts the cursor at `to`, the dragged toolbar following it, and measures there.
+    /// Puts the cursor at `to`, the dragged toolbar following it, and measures there. The arrow keys come here too, so
+    /// they nudge a held toolbar a pixel at a time, or ten with Shift (the owner's choice in WPC-312).
     fn move_cursor(&mut self, to: Point) {
         self.cursor = to;
         self.drag();
