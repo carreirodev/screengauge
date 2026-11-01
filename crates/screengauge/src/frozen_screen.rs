@@ -360,7 +360,7 @@ impl SharedSession {
                 );
                 continue;
             };
-            redraw(window);
+            redraw_window(window);
         }
     }
 
@@ -512,7 +512,7 @@ fn monitors_to_draw_again(before: &Shown, after: &Shown) -> Vec<usize> {
 }
 
 /// Marks `window` for drawing.
-fn redraw(window: HWND) {
+fn redraw_window(window: HWND) {
     // SAFETY: our own window. WM_ERASEBKGND is handled, so nothing is erased first.
     if !unsafe { InvalidateRect(Some(window), None, false) }.as_bool() {
         log::failure(
@@ -667,7 +667,7 @@ extern "system" fn window_proc(
                     // the mouse before, which needs nothing.
                     let _ = unsafe { SetCapture(hwnd) };
                     // The button under the cursor looks pressed.
-                    redraw(hwnd);
+                    redraw_window(hwnd);
                     Some(LRESULT(0))
                 }
                 None => deliver(Input::Press),
@@ -684,7 +684,7 @@ extern "system" fn window_proc(
                     }
                     let released = window.session.toolbar_hit(event::message_cursor());
                     // The button no longer looks pressed, whatever the click does.
-                    redraw(hwnd);
+                    redraw_window(hwnd);
                     match pressed {
                         Hit::Button(button) if released == Some(pressed) => {
                             deliver(Input::Toolbar(button))
@@ -697,7 +697,7 @@ extern "system" fn window_proc(
             // Another window took the mouse while a toolbar button was held, so its release will never come here.
             WM_CAPTURECHANGED => {
                 if window.pressed.take().is_some() {
-                    redraw(hwnd);
+                    redraw_window(hwnd);
                 }
                 Some(LRESULT(0))
             }

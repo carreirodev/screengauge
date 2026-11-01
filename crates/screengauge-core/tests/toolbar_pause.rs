@@ -323,10 +323,14 @@ fn an_arrow_key_that_steps_onto_the_toolbar_pauses_the_tool_too() {
     assert_eq!(up, [Effect::MoveCursor(onto)]);
     assert_eq!(session.scene().cursor, Cursor::Arrow);
     assert_eq!(live(&session), before);
-    // Back down, off the toolbar: it measures there again.
+    // Two rows down, off the toolbar and past where it paused: it measures where the keys put the cursor.
     session.handle(event(onto, 1000, Input::KeyDown(Key::Down)));
+    session.handle(event(below, 1000, Input::KeyDown(Key::Down)));
     assert_eq!(session.scene().cursor, Cursor::Cross);
-    assert_eq!(live(&session), before);
+    let row = live(&session)
+        .and_then(|measurement| measurement.horizontal)
+        .map(|span| span.first.y);
+    assert_eq!(row, Some(below.y + 1));
 }
 
 #[test]
@@ -492,13 +496,36 @@ fn every_call_opens_the_toolbar_whole_and_minimizing_is_never_kept() {
     let mut session = open(DimensionsMode::Cross, BETWEEN_CARDS);
     click(&mut session, ToolbarButton::Minimize, BETWEEN_CARDS);
     assert!(session.scene().toolbar.minimized);
-    // Nothing remembered changed, so nothing is written.
+    // Minimizing alone changes nothing remembered, so nothing is written.
     assert_eq!(
         session.handle(event(BETWEEN_CARDS, 1000, Input::KeyDown(Key::Esc))),
         [Effect::Close]
     );
-    let next = open(DimensionsMode::Cross, BETWEEN_CARDS);
-    assert!(!next.scene().toolbar.minimized);
+    // Minimized with another mode, what is written is the mode, and the next call opens the toolbar whole.
+    let mut session = open(DimensionsMode::Cross, BETWEEN_CARDS);
+    click(&mut session, ToolbarButton::Minimize, BETWEEN_CARDS);
+    session.handle(event(BETWEEN_CARDS, 1000, Input::KeyDown(Key::V)));
+    let effects = session.handle(event(BETWEEN_CARDS, 1000, Input::KeyDown(Key::Esc)));
+    let kept = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::SaveRemembered(remembered) => Some(remembered.clone()),
+            _ => None,
+        })
+        .expect("the mode changed");
+    let next = Session::open(Opening {
+        frozen_screen: owners_monitors().into_iter().map(Some).collect(),
+        cursor: BETWEEN_CARDS,
+        options: Options::default(),
+        remembered: kept,
+        second_click_until: None,
+    })
+    .expect("a frozen screen the session takes");
+    let toolbar = next.scene().toolbar;
+    assert_eq!(
+        (toolbar.minimized, toolbar.mode),
+        (false, Some(DimensionsMode::Vertical))
+    );
 }
 
 #[test]

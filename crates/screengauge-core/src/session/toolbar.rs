@@ -65,7 +65,7 @@ pub struct Layout {
     /// The gear, minimize and close's group.
     pub controls: Rect,
     /// Each button of [`BUTTONS`], in the same order.
-    pub buttons: [(ToolbarButton, Rect); 10],
+    pub buttons: [(ToolbarButton, Rect); BUTTONS.len()],
     /// The button the minimized toolbar becomes ([`ToolbarButton::Restore`]), in the same place: at the toolbar's top
     /// left corner. While the toolbar is minimized, it is all there is of it.
     pub minimized: Rect,

@@ -241,7 +241,7 @@ impl Session {
             Input::Press if self.toolbar_hit(event.cursor).is_some() => Vec::new(),
             Input::Press => self.pin(event.held, event.uptime),
             Input::KeyDown(Key::Backspace | Key::Delete) => self.unpin(),
-            Input::Wheel(delta) => self.turn_wheel(delta, event.uptime),
+            Input::Wheel(delta) => self.turn_wheel(delta, event.cursor, event.uptime),
             // What was due has gone above. A timer may also come a little early: what was due then stays, and the
             // session asks again for the moment left. Either way it asks for whatever is due next.
             Input::Wake => self.wake().into_iter().collect(),
@@ -308,10 +308,10 @@ impl Session {
     /// and measures again at once (v1 spec WPC-296, Tolerance). A precision touchpad turns it a part of a notch at a
     /// time, so the parts add up until they make a notch, and turning the other way starts counting again. Any turn
     /// shows the tolerance indicator, which goes a second after the wheel stops. Dimensions, Bounds and Snip share the
-    /// tolerance; with Inspect active, which uses none, the wheel leaves it alone. On the toolbar, where the tool pauses,
-    /// the wheel does nothing (the owner's choice in WPC-311).
-    fn turn_wheel(&mut self, delta: i32, uptime: Duration) -> Vec<Effect> {
-        if self.remembered.last_tool == Tool::Inspect || self.toolbar_hit(self.cursor).is_some() {
+    /// tolerance; with Inspect active, which uses none, the wheel leaves it alone. Turned at `at` on the toolbar, where
+    /// the tool pauses, the wheel does nothing (the owner's choice in WPC-311).
+    fn turn_wheel(&mut self, delta: i32, at: Point, uptime: Duration) -> Vec<Effect> {
+        if self.remembered.last_tool == Tool::Inspect || self.toolbar_hit(at).is_some() {
             return Vec::new();
         }
         if self.wheel_turned.signum() == -delta.signum() {

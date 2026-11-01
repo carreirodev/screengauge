@@ -72,26 +72,26 @@ fn style(palette: &Palette, kind: ButtonKind) -> (&Surface, u32) {
     }
 }
 
-/// How a button reacting to the mouse is moved and shrunk, as its CSS `transform`: `scale` around its middle, then
+/// How a button reacting to the mouse moves and shrinks, as its CSS `transform`: `scale` around its middle, then
 /// `down` logical pixels down (up when below zero).
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Moved {
+struct Motion {
     scale: f32,
     down: i32,
 }
 
-/// How a button of `kind` reacting as `reaction` is moved, or `None` when it stays where it is.
-fn moved(kind: ButtonKind, reaction: Reaction) -> Option<Moved> {
+/// How a button of `kind` reacting as `reaction` moves, or `None` when it stays where it is.
+fn motion(kind: ButtonKind, reaction: Reaction) -> Option<Motion> {
     match (kind, reaction) {
-        (ButtonKind::Tool, Reaction::Hovered) => Some(Moved {
+        (ButtonKind::Tool, Reaction::Hovered) => Some(Motion {
             scale: 1.0,
             down: -LIFT,
         }),
-        (ButtonKind::Tool, Reaction::Pressed) => Some(Moved {
+        (ButtonKind::Tool, Reaction::Pressed) => Some(Motion {
             scale: TOOL_PRESSED,
             down: SINK,
         }),
-        (ButtonKind::Control, Reaction::Pressed) => Some(Moved {
+        (ButtonKind::Control, Reaction::Pressed) => Some(Motion {
             scale: SMALL_PRESSED,
             down: 0,
         }),
@@ -308,8 +308,10 @@ impl Painter<'_> {
         {
             let reacts = reaction(toolbar, held, *button);
             let lit = is_lit(toolbar, *button);
-            match moved(members, reacts) {
-                Some(how) => self.moved(place, how, || self.button(button, place, lit, reacts))?,
+            match motion(members, reacts) {
+                Some(motion) => {
+                    self.in_motion(place, motion, || self.button(button, place, lit, reacts))?;
+                }
                 None => self.button(button, place, lit, reacts)?,
             }
         }
@@ -326,24 +328,21 @@ impl Painter<'_> {
         reacts: Reaction,
     ) -> windows::core::Result<()> {
         let pointed = reacts != Reaction::Rest;
-        let (surface, radius) = match button {
-            ToolbarButton::Close if pointed => (&CLOSE_HOVER, SMALL_RADIUS),
-            _ => style(self.palette, kind(*button)),
+        let kind = kind(*button);
+        let (style, radius) = style(self.palette, kind);
+        let (surface, ink) = match (button, kind) {
+            (ToolbarButton::Close, _) if pointed => (&CLOSE_HOVER, CLOSE_INK_HOVER),
+            (_, ButtonKind::Control) if pointed => (style, self.palette.small_ink_hover),
+            (_, ButtonKind::Control) => (style, self.palette.small_ink),
+            (_, ButtonKind::Tool | ButtonKind::Mode) => (style, self.palette.ink),
+            (_, ButtonKind::Minimized) => (style, self.palette.ink_on),
         };
         self.surface(surface, place, radius, 0, false)?;
         if lit {
             self.surface(&self.palette.lit, place, radius, 0, false)?;
         }
         // The icon is over the lit box, in the lit ink.
-        let ink = match (lit, kind(*button)) {
-            (true, _) | (false, ButtonKind::Minimized) => self.palette.ink_on,
-            (false, ButtonKind::Tool | ButtonKind::Mode) => self.palette.ink,
-            (false, ButtonKind::Control) if !pointed => self.palette.small_ink,
-            (false, ButtonKind::Control) => match button {
-                ToolbarButton::Close => CLOSE_INK_HOVER,
-                _ => self.palette.small_ink_hover,
-            },
-        };
+        let ink = if lit { self.palette.ink_on } else { ink };
         match toolbar_icons::icon_for(button) {
             Some(icon) => self.icon(icon, place, ink),
             None => Ok(()),
@@ -373,12 +372,12 @@ impl Painter<'_> {
         self.icon(&toolbar_icons::OPEN, &corner, OPEN_INK)
     }
 
-    /// Runs `paint` with the target moved and shrunk as `how` says, around the middle of `place`, as CSS transforms a
-    /// box and all it draws, shadows included. The target's own transform is put back afterwards, whatever `paint` did.
-    fn moved(
+    /// Runs `paint` with the target moved and shrunk as `motion` says, around the middle of `place`, as CSS transforms
+    /// a box and all it draws, shadows included. The target's own transform is put back afterwards, whatever `paint` did.
+    fn in_motion(
         &self,
         place: &RECT,
-        how: Moved,
+        motion: Motion,
         paint: impl FnOnce() -> windows::core::Result<()>,
     ) -> windows::core::Result<()> {
         let area = in_surface(self.origin, place);
@@ -391,18 +390,19 @@ impl Painter<'_> {
         let mut before = Default::default();
         // SAFETY: fills a local.
         unsafe { self.target.GetTransform(&mut before) };
-        let mut around = before;
+        let mut moving = before;
         // A point p goes to (x, y) + scale × (p − (x, y)), then `down` pixels down. Direct2D multiplies a row vector by
         // the matrix, so the last row is the move.
-        around.M11 = how.scale;
-        around.M12 = 0.0;
-        around.M21 = 0.0;
-        around.M22 = how.scale;
-        around.M31 = x * (1.0 - how.scale);
-        around.M32 = y * (1.0 - how.scale) + px(self.signed(how.down));
-        let both = around * before;
+        moving.M11 = motion.scale;
+        moving.M12 = 0.0;
+        moving.M21 = 0.0;
+        moving.M22 = motion.scale;
+        moving.M31 = x * (1.0 - motion.scale);
+        moving.M32 = y * (1.0 - motion.scale) + px(self.signed(motion.down));
+        // The button's own motion first, then whatever the target was already doing.
+        let moved_then_before = moving * before;
         // SAFETY: the matrix outlives the call, which copies it.
-        unsafe { self.target.SetTransform(&both) };
+        unsafe { self.target.SetTransform(&moved_then_before) };
         let painted = paint();
         // SAFETY: as above.
         unsafe { self.target.SetTransform(&before) };

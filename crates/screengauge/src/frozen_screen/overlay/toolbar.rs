@@ -4,7 +4,7 @@
 //! Where the toolbar and each button are is the core's ([`screengauge_core::session::toolbar`]), which also says what a
 //! point is on, so the window's clicks, the cursor's arrow, the pause of the tool and what is drawn here never disagree.
 
-use screengauge_core::session::toolbar::{self as place, Hit};
+use screengauge_core::session::toolbar::{self as core_toolbar, BUTTONS, Hit};
 use screengauge_core::session::{Rect, Scale, Toolbar, ToolbarButton};
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Direct2D::ID2D1RenderTarget;
@@ -12,7 +12,7 @@ use windows::Win32::Graphics::Direct2D::ID2D1RenderTarget;
 use super::Overlay;
 use super::geometry;
 
-pub use place::RING;
+pub use core_toolbar::RING;
 
 /// How a button is styled and which group it is in: the tools' big buttons, the modes (H, V and C), the small buttons
 /// that act on the toolbar itself (the gear, minimize and close), and the button the minimized toolbar becomes.
@@ -75,7 +75,7 @@ pub(super) fn reaction(toolbar: &Toolbar, held: Option<Hit>, button: ToolbarButt
 }
 
 /// Where the toolbar's parts are, in physical pixels of the virtual screen, each rectangle's right and bottom one past
-/// its last pixel: the core's [`place::Layout`], as Windows has rectangles.
+/// its last pixel: the core's [`core_toolbar::Layout`], as Windows has rectangles.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
     /// The whole toolbar, the room between its groups included.
@@ -87,7 +87,7 @@ pub struct Layout {
     /// The gear, minimize and close's group.
     pub controls: RECT,
     /// Each button of [`BUTTONS`], in the same order.
-    pub buttons: [(ToolbarButton, RECT); 10],
+    pub buttons: [(ToolbarButton, RECT); BUTTONS.len()],
     /// The button the minimized toolbar becomes, at the toolbar's top left corner.
     pub minimized: RECT,
 }
@@ -95,7 +95,7 @@ pub struct Layout {
 impl Layout {
     /// Where the core puts the toolbar on `monitor`, at `scale`.
     pub fn of(monitor: Rect, scale: Scale) -> windows::core::Result<Layout> {
-        let core = place::layout(monitor, scale);
+        let core = core_toolbar::layout(monitor, scale);
         let mut buttons = core.buttons.map(|(button, _)| (button, RECT::default()));
         for ((_, slot), (_, rect)) in buttons.iter_mut().zip(core.buttons) {
             *slot = geometry::bounds(rect)?;
@@ -142,7 +142,7 @@ mod tests {
             height: 1080,
         };
         let scale = Scale::from_dpi(120).expect("a scale");
-        let core = place::layout(monitor, scale);
+        let core = core_toolbar::layout(monitor, scale);
         let layout = Layout::of(monitor, scale).expect("a monitor's size");
         let edges = |rect: Rect| (rect.left, rect.top, rect.right() + 1, rect.bottom() + 1);
         let sides = |rect: RECT| (rect.left, rect.top, rect.right, rect.bottom);

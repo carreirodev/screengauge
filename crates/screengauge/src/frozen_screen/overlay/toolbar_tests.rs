@@ -1705,3 +1705,60 @@ fn the_bitmap_cuts_off_no_shadow_of_a_button_risen_held_red_or_minimized() {
         }
     }
 }
+
+#[test]
+fn a_held_small_button_shrinks_around_its_middle_where_it_is() {
+    let canvas = canvas();
+    let toolbar = scene(Tool::Snip, None);
+    for mode in MODES {
+        for dpi in [96, 168] {
+            for button in [ToolbarButton::Settings, ToolbarButton::Close] {
+                let hovered = draw(&canvas, mode, dpi, &hovering(toolbar, button));
+                let pressed = draw_held(
+                    &canvas,
+                    mode,
+                    dpi,
+                    &hovering(toolbar, button),
+                    Some(Hit::Button(button)),
+                );
+                let context = format!("{button:?}: {mode:?} at {dpi} DPI");
+                let place = hovered.place(button);
+                // Shrunk to 0.92 around its middle, it neither rises nor sinks: its middle row, left of the icon, is the
+                // same color, and its top edge is no longer the button's.
+                let (x, y) = (
+                    (place.left + place.right) / 2,
+                    (place.top + place.bottom) / 2,
+                );
+                let side = place.bottom - place.top;
+                let edge_row = place.top + scaled(1, dpi);
+                assert!(
+                    near(
+                        pressed.at(x - side * 3 / 8, y),
+                        hovered.at(x - side * 3 / 8, y),
+                        6
+                    ),
+                    "{context}"
+                );
+                assert!(
+                    !near(pressed.at(x, edge_row), hovered.at(x, edge_row), 6),
+                    "the top edge at ({x}, {edge_row}) is {:?} pressed and {:?} hovered: {context}",
+                    pressed.at(x, edge_row),
+                    hovered.at(x, edge_row)
+                );
+                // And nothing changed away from it and its shadow.
+                let reach = scaled(12, dpi);
+                let window = bounds();
+                for y in window.top..window.bottom {
+                    for x in window.left..window.right {
+                        let changed = !near(pressed.at(x, y), hovered.at(x, y), 1);
+                        let near_it = x >= place.left - reach
+                            && x < place.right + reach
+                            && y >= place.top - reach
+                            && y < place.bottom + reach;
+                        assert!(!changed || near_it, "({x}, {y}) changed: {context}");
+                    }
+                }
+            }
+        }
+    }
+}
