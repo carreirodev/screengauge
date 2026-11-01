@@ -133,6 +133,7 @@ fn horizontal_measures_the_gap_between_two_cards_from_any_point_in_it() {
                 monitor: 0,
                 horizontal: Some(row(600, 1000, 1023)),
                 vertical: None,
+                content: None,
                 label: label("24", "13.7"),
             }),
             "cursor at x = {x}"
@@ -150,6 +151,7 @@ fn vertical_measures_a_card_from_its_top_row_to_its_bottom_row() {
             monitor: 0,
             horizontal: None,
             vertical: Some(column(900, 500, 700)),
+            content: None,
             label: label("201", "114.9"),
         })
     );
@@ -169,6 +171,7 @@ fn cross_measures_width_and_height_at_once_with_no_distance_to_each_edge() {
             monitor: 0,
             horizontal: Some(row(1250, 2000, 2239)),
             vertical: Some(column(2010, 1200, 1379)),
+            content: None,
             label: label("240 × 180", "137.1 × 102.9"),
         })
     );
@@ -187,6 +190,7 @@ fn an_item_of_one_pixel_measures_one() {
             monitor: 0,
             horizontal: Some(row(900, 1500, 1500)),
             vertical: Some(column(1500, 0, 2159)),
+            content: None,
             label: label("1 × 2160", "0.6 × 1234.3"),
         })
     );
@@ -206,6 +210,7 @@ fn with_no_edge_before_the_monitors_limit_the_span_runs_to_its_last_pixel_which_
             monitor: 0,
             horizontal: Some(row(2000, 3000, 3839)),
             vertical: Some(column(3500, 1800, 2159)),
+            content: None,
             label: label("840 × 360", "480 × 205.7"),
         })
     );
@@ -245,6 +250,7 @@ fn in_a_gradient_the_edge_is_the_first_pixel_too_far_from_the_reference_color_no
             monitor: 0,
             horizontal: Some(row(1000, 144, 156)),
             vertical: None,
+            content: None,
             label: label("13", "7.4"),
         })
     );
@@ -313,6 +319,7 @@ fn moving_to_another_monitor_measures_there_on_that_monitor_alone() {
             monitor: 0,
             horizontal: Some(row(500, 0, 3839)),
             vertical: Some(column(0, 0, 2159)),
+            content: None,
             label: label("3840 × 2160", "2194.3 × 1234.3"),
         }),
         "on the 4K monitor's first column"
@@ -324,6 +331,7 @@ fn moving_to_another_monitor_measures_there_on_that_monitor_alone() {
             monitor: 1,
             horizontal: Some(row(1079, -1920, -1)),
             vertical: Some(column(-1, 0, 1079)),
+            content: None,
             label: label("1920 × 1080", "1536 × 864"),
         }),
         "on the Full HD monitor's last column and last row"
@@ -557,8 +565,9 @@ fn an_arrow_never_takes_the_cursor_off_every_monitor() {
 }
 
 #[test]
-fn only_dimensions_measures() {
-    // The other tools come with their own tickets; until then, when one of them was the last used, nothing measures.
+fn with_another_tool_active_nothing_measures_around_the_cursor() {
+    // Bounds measures only while a rectangle is drawn, and Inspect and Snip come with their own tickets: opened with one
+    // of them the last used, nothing measures yet.
     for last_tool in [Tool::Bounds, Tool::Inspect, Tool::Snip] {
         let session = open_remembering(Remembered {
             last_tool,

@@ -1,6 +1,7 @@
 //! Dimensions: the span of pixels around the cursor, from the edge on one side to the edge on the other, along the
 //! cursor's row, its column or both (v1 spec WPC-296, Dimensions).
 
+use super::pixels::{color, differs};
 use super::{Label, Measurement, Photo, Point, Span, units};
 use crate::settings::{DimensionsMode, Tolerance};
 
@@ -25,6 +26,7 @@ pub(super) fn measure(
         monitor,
         horizontal,
         vertical,
+        content: None,
         label: Label::default(),
     };
     measurement.label = units::label(
@@ -77,25 +79,4 @@ fn span(photo: &Photo, cursor: Point, axis: Axis, tolerance: Tolerance) -> Span 
         first: point(first),
         last: point(last),
     }
-}
-
-/// The red, green and blue of the pixel at `point`, which must be on the monitor. The fourth byte says nothing.
-fn color(photo: &Photo, point: Point) -> [u8; 3] {
-    // `point` is on the monitor, so both differences are its place in the photo. u32 to usize is lossless on x64, the
-    // only target ScreenGauge builds for.
-    let column = point.x.abs_diff(photo.rect.left) as usize;
-    let row = point.y.abs_diff(photo.rect.top) as usize;
-    let at = (row * photo.rect.width as usize + column) * 4;
-    let bgra = &photo.image.bgra()[at..at + 4];
-    [bgra[2], bgra[1], bgra[0]]
-}
-
-/// Whether `pixel` differs from `reference` by more than `tolerance`: one of its red, green or blue differs by more
-/// than three times the tolerance. The prototype's rule, provisional until the calibration (WPC-332).
-fn differs(reference: [u8; 3], pixel: [u8; 3], tolerance: Tolerance) -> bool {
-    let limit = u16::from(tolerance.get()) * 3;
-    reference
-        .iter()
-        .zip(pixel)
-        .any(|(&a, b)| u16::from(a.abs_diff(b)) > limit)
 }

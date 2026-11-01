@@ -360,6 +360,7 @@ mod tests {
                 last: point(x1, y),
             }),
             vertical: None,
+            content: None,
             label: Label::default(),
         }
     }
@@ -373,6 +374,7 @@ mod tests {
                 first: point(x, y0),
                 last: point(x, y1),
             }),
+            content: None,
             label: Label::default(),
         }
     }

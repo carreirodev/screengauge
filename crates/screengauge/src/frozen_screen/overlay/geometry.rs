@@ -1,8 +1,11 @@
-//! Where Dimensions' live measurement lands, as whole-pixel rectangles in physical pixels of the virtual screen.
-//! Nothing here calls Windows, so the pixel counts the owner checks by eye are tested without a monitor: [`parts`]
-//! gives the line, its ticks and their outline, and [`place_label`] gives the label's place.
+//! Where a measurement lands, as whole-pixel rectangles in physical pixels of the virtual screen. Nothing here calls
+//! Windows, so the pixel counts the owner checks by eye are tested without a monitor: [`parts`] gives Dimensions' line,
+//! its ticks and their outline, or the ring around Bounds' content and its outline, and [`place_label`] gives the
+//! label's place.
 
 use screengauge_core::session::{Measurement, Rect, Span, toolbar};
+
+use super::bounds;
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::core::Error;
 
@@ -57,20 +60,27 @@ pub fn bounds(monitor: Rect) -> windows::core::Result<RECT> {
 /// What to fill for one measurement, all in whole pixels of the virtual screen.
 #[derive(Debug, PartialEq)]
 pub struct Parts {
-    /// The translucent outline: the pixels beside the line along its whole length and beside each tick, with no two
-    /// rectangles overlapping, so no pixel is darkened twice where an outline meets another.
+    /// The translucent outline: the pixels beside the line along its whole length and beside each tick, or the ring
+    /// just outside Bounds' cyan ring, with no two rectangles overlapping, so no pixel is darkened twice where an outline
+    /// meets another.
     pub outline: Vec<RECT>,
-    /// The opaque cyan pixels: each span and the tick through its first and last pixel. These may overlap.
+    /// The opaque cyan pixels: each span and the tick through its first and last pixel, or the ring just outside Bounds'
+    /// content. These may overlap.
     pub line: Vec<RECT>,
 }
 
 /// The line, ticks and outline of `measurement`, for a monitor of `dpi`. A span is exactly its pixels, one pixel thick
 /// whatever the scale; a tick is a perpendicular run of 2k + 1 pixels through the span's first pixel and another
-/// through its last, where k is the tick's reach scaled.
+/// through its last, where k is the tick's reach scaled. Bounds' content has a cyan ring one pixel wide just outside it,
+/// whatever the scale, and the outline as the ring outside that.
 pub fn parts(measurement: &Measurement, dpi: u32) -> Parts {
     let reach = scaled(TICK, dpi);
     let mut line = Vec::new();
     let mut outline = Vec::new();
+    if let Some(content) = measurement.content {
+        line.extend(bounds::ring(content, 1));
+        outline.extend(bounds::ring(content, 2));
+    }
     if let Some(Span { first, last }) = measurement.horizontal {
         add_span(
             first.x,
@@ -281,13 +291,16 @@ pub fn bar(left: i32, baseline: i32, dpi: u32) -> RECT {
 /// happens near the monitor's limit, so this follows the other two modes: with no room on the right the label mirrors
 /// to the left of the crossing, its right side `CROSS_OFFSET` from it, and with no room below it mirrors above. Where
 /// it would still stick out, because the monitor is smaller than the label, or the span is short next to the monitor's
-/// limit, it slides inside.
+/// limit, it slides inside. Bounds' label goes where [`bounds::place_label`] puts it, above the content.
 pub fn place_label(
     measurement: &Measurement,
     label: Size,
     monitor: RECT,
     dpi: u32,
 ) -> Option<RECT> {
+    if let Some(content) = measurement.content {
+        return Some(bounds::place_label(content, label, monitor, dpi));
+    }
     let (above, side, offset) = (
         scaled(ABOVE_GAP, dpi),
         scaled(SIDE_GAP, dpi),
@@ -370,7 +383,7 @@ fn centered(first: i32, last: i32, length: i32) -> i32 {
 
 /// `start` moved the least that puts `length` pixels from it between `low` and `high`. Should they not fit, they start
 /// at `low`.
-fn inside(start: i32, length: i32, low: i32, high: i32) -> i32 {
+pub fn inside(start: i32, length: i32, low: i32, high: i32) -> i32 {
     start.min(high - length).max(low)
 }
 
@@ -396,6 +409,7 @@ mod tests {
             monitor: 0,
             horizontal,
             vertical,
+            content: None,
             label: screengauge_core::session::Label::default(),
         }
     }

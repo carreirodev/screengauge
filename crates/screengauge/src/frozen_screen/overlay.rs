@@ -1,8 +1,12 @@
-//! Dimensions' measurements drawn over a window's photo: the cyan line with its ticks and outline, and the label in a
-//! pill, for the pinned measurements and the live one, the toolbar, the tolerance indicator and the notice. Everything
-//! about where they go is in `geometry`, `toolbar`, `tolerance` and `notice`, which need no Windows; this draws them onto
-//! any Direct2D render target at 96 DPI, so a test can render them on a bitmap and count pixels.
+//! The measurements drawn over a window's photo: Dimensions' cyan line with its ticks and outline, Bounds' drawn
+//! rectangle and the content it shrinks to, and the label in a pill, for the pinned measurements and the live one; the
+//! toolbar, the tolerance indicator and the notice. Everything about where they go is in `geometry`, `bounds`,
+//! `toolbar`, `tolerance` and `notice`, which need no Windows; this draws them onto any Direct2D render target at 96 DPI,
+//! so a test can render them on a bitmap and count pixels.
 
+mod bounds;
+#[cfg(test)]
+mod bounds_tests;
 mod floating;
 mod geometry;
 mod notice;
@@ -24,7 +28,9 @@ mod toolbar_tests;
 
 use std::cell::RefCell;
 
-use screengauge_core::session::{Measurement, Notice, Point, Rect, Scale, ToleranceIndicator};
+use screengauge_core::session::{
+    DrawnRectangle, Measurement, Notice, Point, Rect, Scale, ToleranceIndicator,
+};
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
 use windows::Win32::Graphics::Direct2D::{
@@ -175,8 +181,10 @@ const FLATTENING: f32 = 0.1;
 /// else.
 pub struct Overlay {
     cyan: ID2D1SolidColorBrush,
-    /// Black. Each fill sets its opacity first: the outline's, then each layer of the shadow's.
+    /// Black. Each fill sets its opacity first: the outline's, the drawn rectangle's, then each layer of the shadow's.
     shade: ID2D1SolidColorBrush,
+    /// The drawn rectangle's dashes.
+    white: ID2D1SolidColorBrush,
     /// The live label's ink. Each use sets its opacity first, because the brush outlives a frame: full for the
     /// physical text, then the bar's and the logical text's.
     ink: ID2D1SolidColorBrush,
@@ -313,6 +321,7 @@ impl Overlay {
             // #22d3ee, the same cyan whatever the Windows theme.
             cyan: brush(0x22, 0xd3, 0xee)?,
             shade: brush(0, 0, 0)?,
+            white: brush(255, 255, 255)?,
             // #04161b
             ink: brush(0x04, 0x16, 0x1b)?,
             surfaces: Surfaces::new(target, mode)?,
@@ -333,12 +342,12 @@ impl Overlay {
     }
 
     /// Draws the pinned measurements, oldest first, and then the live one over what `target` holds, between its
-    /// BeginDraw and EndDraw. The pinned labels are in the palette, with a cyan strip on their left; the live one is
-    /// cyan, and over the others.
+    /// BeginDraw and EndDraw, over the rectangle Bounds is drawing, `drawn`, when there is one here. The pinned labels
+    /// are in the palette, with a cyan strip on their left; the live one is cyan, and over the others.
     ///
-    /// Order matters, and it is across the measurements, not within each: every label's shadow, which is faint and
-    /// reaches toward the lines; every outline; every cyan pixel, so nothing darkens one, whichever measurement it
-    /// belongs to; then the pills with their text. A pill never touches its own line, being further from it than a
+    /// Order matters, and it is across the measurements, not within each: the drawn rectangle; every content's fill;
+    /// every label's shadow, which is faint and reaches toward the lines; every outline; every cyan pixel, so nothing
+    /// darkens one, whichever measurement it belongs to; then the pills with their text. A pill never touches its own line, being further from it than a
     /// tick reaches, but it covers another measurement's. A label that can't be laid out doesn't stop the others; the
     /// first failure is returned once everything else is drawn, and any later one is logged.
     pub fn draw(
@@ -346,6 +355,7 @@ impl Overlay {
         target: &ID2D1RenderTarget,
         pinned: &[&Measurement],
         live: Option<&Measurement>,
+        drawn: Option<&DrawnRectangle>,
     ) -> windows::core::Result<()> {
         let mut first_failure = None;
         let mut keep = |result: windows::core::Result<()>| {
@@ -358,10 +368,12 @@ impl Overlay {
             }
         };
         let mut parts = Vec::new();
+        let mut fills = Vec::new();
         let mut labels = Vec::new();
         let pinned = pinned.iter().map(|&m| (m, Look::Pinned));
         for (measurement, look) in pinned.chain(live.map(|m| (m, Look::Live))) {
             parts.push(geometry::parts(measurement, self.dpi));
+            fills.extend(measurement.content.map(|content| (content, look)));
             match self.label(measurement, look) {
                 Ok(Some(label)) => labels.push(label),
                 // No span, so nothing to label.
@@ -369,6 +381,10 @@ impl Overlay {
                 Err(e) => keep(Err(e)),
             }
         }
+        if let Some(drawn) = drawn {
+            self.draw_drawn_rectangle(target, drawn);
+        }
+        self.draw_fills(target, &fills);
         for label in &labels {
             keep(self.draw_shadow(target, label));
         }
@@ -1064,6 +1080,7 @@ mod tests {
             monitor: 0,
             horizontal: Some(span((x0, y), (x1, y))),
             vertical: None,
+            content: None,
             label: physical_only(label),
         }
     }
@@ -1073,6 +1090,7 @@ mod tests {
             monitor: 0,
             horizontal: None,
             vertical: Some(span((x, y0), (x, y1))),
+            content: None,
             label: physical_only(label),
         }
     }
@@ -1083,6 +1101,7 @@ mod tests {
             monitor: 0,
             horizontal: Some(span((h.0, y), (h.1, y))),
             vertical: Some(span((x, v.0), (x, v.1))),
+            content: None,
             label: physical_only(label),
         }
     }
@@ -1410,7 +1429,7 @@ mod tests {
             let k = scaled(4, dpi);
             let picture = canvas.render(MONITOR, dpi, |overlay, target| {
                 overlay
-                    .draw(target, &[], Some(&m))
+                    .draw(target, &[], Some(&m), None)
                     .expect("the measurement");
             });
             for x in 80..180 {
@@ -1510,7 +1529,9 @@ mod tests {
     fn check_cyan_after_the_label(canvas: &Canvas, m: &Measurement, dpi: u32) {
         let k = scaled(4, dpi);
         let picture = canvas.render(MONITOR, dpi, |overlay, target| {
-            overlay.draw(target, &[], Some(m)).expect("the measurement");
+            overlay
+                .draw(target, &[], Some(m), None)
+                .expect("the measurement");
         });
         for y in 0..canvas.height as usize {
             for x in 0..canvas.width as usize {

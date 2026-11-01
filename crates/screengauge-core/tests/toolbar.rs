@@ -3,8 +3,8 @@
 //! that do nothing yet, the last tool remembered, and what a switch keeps, on frozen screens drawn here, without a
 //! screen. They look only at the scene the session would draw and at the effects it returns.
 //!
-//! Only Dimensions measures yet. Bounds, Inspect and Snip can be made active, and then their button is lit and nothing
-//! is measured (the owner's choice in WPC-310); what each one does comes with its own ticket.
+//! Inspect and Snip can be made active, and then their button is lit and nothing is measured (the owner's choice in
+//! WPC-310); what each one does comes with its own ticket. Bounds measures only while a rectangle is drawn (WPC-313).
 
 use std::time::Duration;
 

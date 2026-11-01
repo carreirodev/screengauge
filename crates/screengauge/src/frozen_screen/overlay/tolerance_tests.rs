@@ -662,12 +662,14 @@ fn the_ink_has_its_full_strength_whatever_opacity_the_brush_was_left_at_and_leav
             let mut found = None;
             let picture = canvas.render_in(mode, MONITOR, dpi, |overlay, target| {
                 overlay
-                    .draw(target, &[&first], None)
+                    .draw(target, &[&first], None, None)
                     .expect("the first label");
                 overlay
                     .show_tolerance(target, CURSOR, Tolerance::MAX, None)
                     .expect("the indicator");
-                overlay.draw(target, &[&later], None).expect("the label");
+                overlay
+                    .draw(target, &[&later], None, None)
+                    .expect("the label");
                 overlay
                     .show_notice(target, notice_at, "Copied", Sign::Ok)
                     .expect("the notice");

@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use screengauge_core::session::toolbar::Hit;
 use screengauge_core::session::{
-    Cursor, Effect, Event, Input, Measurement, Notice, Photo, Point, Rect, Session,
+    Cursor, DrawnRectangle, Effect, Event, Input, Measurement, Notice, Photo, Point, Rect, Session,
     ToleranceIndicator, Toolbar,
 };
 use windows::Win32::Foundation::{
@@ -329,6 +329,7 @@ impl SharedSession {
                 let scene = session.scene();
                 Shown {
                     live: scene.live.cloned(),
+                    drawn_rectangle: scene.drawn_rectangle,
                     pinned: scene.pinned.to_vec(),
                     tolerance_indicator: scene.tolerance_indicator,
                     notice: scene.notice.copied(),
@@ -435,6 +436,7 @@ impl SharedSession {
 #[derive(Debug, Clone, PartialEq, Default)]
 struct Shown {
     live: Option<Measurement>,
+    drawn_rectangle: Option<DrawnRectangle>,
     pinned: Vec<Measurement>,
     tolerance_indicator: Option<ToleranceIndicator>,
     notice: Option<Notice>,
@@ -450,6 +452,7 @@ struct OnMonitor<'a> {
     /// Oldest first.
     pinned: Vec<&'a Measurement>,
     live: Option<&'a Measurement>,
+    drawn_rectangle: Option<&'a DrawnRectangle>,
     tolerance_indicator: Option<&'a ToleranceIndicator>,
     notice: Option<&'a Notice>,
     toolbar: Option<&'a Toolbar>,
@@ -467,6 +470,10 @@ impl Shown {
                 .live
                 .as_ref()
                 .filter(|measurement| measurement.monitor == monitor),
+            drawn_rectangle: self
+                .drawn_rectangle
+                .as_ref()
+                .filter(|drawn| drawn.monitor == monitor),
             tolerance_indicator: self
                 .tolerance_indicator
                 .as_ref()
@@ -488,7 +495,8 @@ impl Shown {
             .pinned
             .iter()
             .chain(&self.live)
-            .map(|measurement| measurement.monitor);
+            .map(|measurement| measurement.monitor)
+            .chain(self.drawn_rectangle.iter().map(|drawn| drawn.monitor));
         let indicated = self
             .tolerance_indicator
             .iter()
@@ -502,6 +510,7 @@ impl Shown {
 
 /// The monitors whose windows show something different from `before` to `after`, each once and in order: the one a
 /// measurement left, which must lose its line, the one it is on now, the one a measurement was pinned on or taken off,
+/// the one Bounds draws a rectangle on while it appears, changes or goes,
 /// the ones the tolerance indicator appeared on, followed the cursor between or went from, the one a notice appeared
 /// on or went from, and the toolbar's when another of its buttons lights up or it moves.
 fn monitors_to_draw_again(before: &Shown, after: &Shown) -> Vec<usize> {
@@ -558,11 +567,31 @@ struct Window {
     factory: ID2D1Factory,
     /// Made at the first draw, and again when Direct2D says the graphics device was lost.
     drawing: RefCell<Option<Drawing>>,
-    /// What on the toolbar the left button went down on, while it is held: the window has the mouse until it comes up,
-    /// and a button acts only when it comes up on the same button (WPC-310). The button looks pressed meanwhile while the
-    /// cursor is on it (WPC-311). Held on the background, the toolbar is being dragged, and its coming up lets it go
-    /// (WPC-312).
-    pressed: Cell<Option<Hit>>,
+    /// What the left button went down on, while it is held: the window has the mouse until it comes up, wherever that
+    /// is, so the release always reaches the core.
+    pressed: Cell<Option<Pressed>>,
+}
+
+/// What the left button went down on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pressed {
+    /// Something on the toolbar. A button acts only when the mouse comes up on the same button (WPC-310), and looks
+    /// pressed meanwhile while the cursor is on it (WPC-311). Held on the background, the toolbar is being dragged, and
+    /// the mouse coming up lets it go (WPC-312).
+    Toolbar(Hit),
+    /// The tool, off the toolbar: a click in Dimensions, or the corner a rectangle in Bounds is drawn from, whose drag
+    /// ends where the mouse comes up, on this monitor or another (WPC-313).
+    Tool,
+}
+
+impl Pressed {
+    /// What on the toolbar is held, which looks pressed while the cursor is on it.
+    fn on_toolbar(self) -> Option<Hit> {
+        match self {
+            Pressed::Toolbar(hit) => Some(hit),
+            Pressed::Tool => None,
+        }
+    }
 }
 
 /// The photo on the graphics card, ready to draw, with what draws the measurements and the notice over it. They belong
@@ -661,60 +690,74 @@ extern "system" fn window_proc(
             }
             WM_MOUSEMOVE => deliver(Input::Move),
             // A press anywhere on the toolbar is the toolbar's: it never reaches the tool, which would pin and copy what
-            // lies under the toolbar. The window keeps the mouse until the button comes up, wherever that is, so a drag
-            // of the toolbar goes on over the other monitors' windows.
-            WM_LBUTTONDOWN => match window.session.toolbar_hit(event::message_cursor()) {
-                Some(hit) => {
-                    window.pressed.set(Some(hit));
-                    // SAFETY: our own window, on its thread, with the left button down. It returns the window that had
-                    // the mouse before, which needs nothing.
-                    let _ = unsafe { SetCapture(hwnd) };
-                    // The button under the cursor looks pressed.
-                    redraw_window(hwnd);
-                    match hit {
-                        // On the background, the press picks the toolbar up, and the core drags it with the cursor.
-                        Hit::Background => deliver(Input::Press),
-                        Hit::Button(_) => Some(LRESULT(0)),
+            // lies under the toolbar. Wherever the press is, the window keeps the mouse until the button comes up, so a
+            // drag of the toolbar, or of a rectangle in Bounds, goes on over the other monitors' windows and its release
+            // comes here.
+            WM_LBUTTONDOWN => {
+                let hit = window.session.toolbar_hit(event::message_cursor());
+                window
+                    .pressed
+                    .set(Some(hit.map_or(Pressed::Tool, Pressed::Toolbar)));
+                // SAFETY: our own window, on its thread, with the left button down. It returns the window that had the
+                // mouse before, which needs nothing.
+                let _ = unsafe { SetCapture(hwnd) };
+                match hit {
+                    Some(hit) => {
+                        // The button under the cursor looks pressed.
+                        redraw_window(hwnd);
+                        match hit {
+                            // On the background, the press picks the toolbar up, and the core drags it with the cursor.
+                            Hit::Background => deliver(Input::Press),
+                            Hit::Button(_) => Some(LRESULT(0)),
+                        }
                     }
+                    None => deliver(Input::Press),
                 }
-                None => deliver(Input::Press),
-            },
-            // The button acts when the mouse comes up on it, as a Windows button does, so moving off it first cancels.
-            // Neither the press nor its release reaches the tool.
+            }
+            // A toolbar button acts when the mouse comes up on it, as a Windows button does, so moving off it first
+            // cancels. Neither the press nor its release reaches the tool.
             // `pressed` is taken before the mouse is given back: ReleaseCapture sends WM_CAPTURECHANGED to this window at
             // once, which clears it.
-            WM_LBUTTONUP => match window.pressed.take() {
-                Some(pressed) => {
+            WM_LBUTTONUP => {
+                let pressed = window.pressed.take();
+                if pressed.is_some() {
                     // SAFETY: gives back the mouse this window took at the press, on its thread.
                     if let Err(e) = unsafe { ReleaseCapture() } {
                         log::failure("frozen screen: giving back the mouse", &e);
                     }
-                    let released = window.session.toolbar_hit(event::message_cursor());
-                    // The button no longer looks pressed, whatever the click does.
-                    redraw_window(hwnd);
-                    match pressed {
-                        Hit::Button(button) if released == Some(pressed) => {
-                            deliver(Input::Toolbar(button))
-                        }
-                        Hit::Button(_) => Some(LRESULT(0)),
-                        // The dragged toolbar is let go where it is, whatever the cursor is on now.
-                        Hit::Background => deliver(Input::Release),
-                    }
                 }
-                None => deliver(Input::Release),
-            },
-            // Another window took the mouse while the toolbar was held, so its release will never come here: a button held
-            // down goes back to rest, and a dragged toolbar is let go where it is, or it would follow the cursor with
-            // the button up.
+                match pressed {
+                    Some(Pressed::Toolbar(held)) => {
+                        let released = window.session.toolbar_hit(event::message_cursor());
+                        // The button no longer looks pressed, whatever the click does.
+                        redraw_window(hwnd);
+                        match held {
+                            Hit::Button(button) if released == Some(held) => {
+                                deliver(Input::Toolbar(button))
+                            }
+                            Hit::Button(_) => Some(LRESULT(0)),
+                            // The dragged toolbar is let go where it is, whatever the cursor is on now.
+                            Hit::Background => deliver(Input::Release),
+                        }
+                    }
+                    // A rectangle in Bounds ends where the mouse comes up, on the toolbar too.
+                    Some(Pressed::Tool) | None => deliver(Input::Release),
+                }
+            }
+            // Another window took the mouse while the button was held, so its release will never come here: a toolbar
+            // button held down goes back to rest, and a dragged toolbar is let go where it is, or it would follow the
+            // cursor with the button up. A rectangle in Bounds ends where it is, as the release would end it there, which
+            // keeps the contract as it is (the finding from WPC-300, noted on WPC-313).
             WM_CAPTURECHANGED => match window.pressed.take() {
-                Some(Hit::Background) => {
+                Some(Pressed::Toolbar(Hit::Background)) => {
                     redraw_window(hwnd);
                     deliver(Input::Release)
                 }
-                Some(Hit::Button(_)) => {
+                Some(Pressed::Toolbar(Hit::Button(_))) => {
                     redraw_window(hwnd);
                     Some(LRESULT(0))
                 }
+                Some(Pressed::Tool) => deliver(Input::Release),
                 None => Some(LRESULT(0)),
             },
             WM_MOUSEWHEEL => deliver(Input::Wheel(event::wheel(wparam))),
@@ -854,11 +897,15 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
     }
     // A label, the indicator or a notice that can't be laid out leaves the photo and the lines as they are; the first
     // failure is returned once the frame is finished, and any later one is logged.
-    let measured = ready.overlay.draw(&ready.target, &here.pinned, here.live);
+    let measured = ready
+        .overlay
+        .draw(&ready.target, &here.pinned, here.live, here.drawn_rectangle);
     let toolbar = match here.toolbar {
-        Some(toolbar) => ready
-            .overlay
-            .draw_toolbar(&ready.target, toolbar, window.pressed.get()),
+        Some(toolbar) => ready.overlay.draw_toolbar(
+            &ready.target,
+            toolbar,
+            window.pressed.get().and_then(Pressed::on_toolbar),
+        ),
         None => Ok(()),
     };
     let indicated = match here.tolerance_indicator {
@@ -994,6 +1041,7 @@ mod tests {
             monitor,
             horizontal: None,
             vertical: None,
+            content: None,
             label: Label {
                 physical: text.to_owned(),
                 logical: None,
@@ -1036,6 +1084,37 @@ mod tests {
         assert_eq!(
             monitors_to_draw_again(&live(on(0, "24")), &live(on(2, "24"))),
             [0, 2]
+        );
+    }
+
+    fn drawing(monitor: usize, right: i32) -> Shown {
+        Shown {
+            drawn_rectangle: Some(DrawnRectangle {
+                monitor,
+                rect: Rect {
+                    left: 100,
+                    top: 100,
+                    width: right.abs_diff(100) + 1,
+                    height: 50,
+                },
+            }),
+            ..Shown::default()
+        }
+    }
+
+    #[test]
+    fn a_drawn_rectangle_that_appears_grows_or_goes_redraws_its_monitor_alone() {
+        // Over nothing but the background, Bounds measures nothing, and the drawn rectangle alone changes.
+        let nothing = Shown::default();
+        assert_eq!(monitors_to_draw_again(&nothing, &drawing(1, 300)), [1]);
+        assert_eq!(
+            monitors_to_draw_again(&drawing(1, 300), &drawing(1, 301)),
+            [1]
+        );
+        assert_eq!(monitors_to_draw_again(&drawing(1, 301), &nothing), [1]);
+        assert_eq!(
+            monitors_to_draw_again(&drawing(1, 301), &drawing(1, 301)),
+            Vec::<usize>::new()
         );
     }
 

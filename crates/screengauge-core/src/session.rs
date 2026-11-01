@@ -5,18 +5,20 @@
 //! [`Event`] while the tools are open, draws its [`Scene`] and carries out the [`Effect`]s it returns. The session
 //! never calls Windows and never reads the clock: the local time comes with each event.
 
+mod bounds;
 mod dimensions;
 mod event;
 mod frozen_screen;
 mod output;
+mod pixels;
 pub mod toolbar;
 mod units;
 
 pub use event::{Event, Held, Input, Key, LocalTime, ToolbarButton};
 pub use frozen_screen::{Colors, Image, Photo, Point, Rect, Scale};
 pub use output::{
-    Cursor, Effect, Label, Measurement, Message, Notice, Scene, Sign, Span, ToleranceIndicator,
-    Toolbar,
+    Cursor, DrawnRectangle, Effect, Label, Measurement, Message, Notice, Scene, Sign, Span,
+    ToleranceIndicator, Toolbar,
 };
 
 use std::fmt;
@@ -96,8 +98,10 @@ pub struct Session {
     /// two differ.
     remembered_at_opening: Remembered,
     remembered: Remembered,
-    /// What Dimensions measures around the cursor.
+    /// What the active tool measures now: Dimensions around the cursor, Bounds the content of the rectangle being drawn.
     live: Option<Measurement>,
+    /// The drag Bounds is drawing a rectangle with, from the press until the button comes up.
+    drag: Option<bounds::Drag>,
     /// The pinned measurements, oldest first.
     pinned: Vec<Measurement>,
     /// The notice on screen, and when it goes.
@@ -175,6 +179,7 @@ impl Session {
             remembered_at_opening: remembered.clone(),
             remembered,
             live: None,
+            drag: None,
             pinned: Vec::new(),
             notice: None,
             indicator_until: None,
@@ -254,9 +259,9 @@ impl Session {
             Input::Press => match self.toolbar_hit(event.cursor) {
                 Some(toolbar::Hit::Background) => self.grab(event.cursor, event.uptime),
                 Some(toolbar::Hit::Button(_)) => Vec::new(),
-                None => self.pin(event.held, event.uptime),
+                None => self.press(event.held, event.uptime),
             },
-            Input::Release => self.let_go(),
+            Input::Release => self.release(event.held, event.uptime),
             Input::KeyDown(Key::Backspace | Key::Delete) => self.unpin(),
             Input::Wheel(delta) => self.turn_wheel(delta, event.cursor, event.uptime),
             // What was due has gone above. A timer may also come a little early: what was due then stays, and the
@@ -264,6 +269,62 @@ impl Session {
             Input::Wake => self.wake().into_iter().collect(),
             _ => Vec::new(),
         }
+    }
+
+    /// What a press off the toolbar does with the active tool: Dimensions pins what it measures, and Bounds starts a
+    /// drag.
+    fn press(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
+        match self.remembered.last_tool {
+            Tool::Dimensions => self.pin(held, uptime),
+            Tool::Bounds => {
+                self.start_drag(uptime);
+                Vec::new()
+            }
+            Tool::Inspect | Tool::Snip => Vec::new(),
+        }
+    }
+
+    /// Starts drawing a rectangle from where the session last put the cursor, on the monitor there, as Dimensions' click
+    /// pins what it measures there. The second click of the double-click that called ScreenGauge starts none (WPC-308).
+    fn start_drag(&mut self, uptime: Duration) {
+        if self.is_second_click(uptime) {
+            return;
+        }
+        self.drag = frozen_screen::monitor_at(&self.frozen_screen, self.cursor).map(|monitor| {
+            bounds::Drag {
+                start: self.cursor,
+                monitor,
+            }
+        });
+        self.measure();
+    }
+
+    /// What the button coming up does: it lets go of the dragged toolbar, or ends the drag Bounds was drawing.
+    fn release(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
+        match self.drag.take() {
+            Some(drag) => self.finish_drag(drag, held, uptime),
+            None => self.let_go(),
+        }
+    }
+
+    /// Pins what Bounds measured as the drag ended, exactly as the preview showed it, and copies its physical pixels,
+    /// or its logical pixels with Shift held as the button comes up, whatever it was held for before (v1 spec WPC-296,
+    /// Bounds). The copy shows "Copied" where the drag ended. The drawn rectangle goes, there are no handles to adjust
+    /// it, and the tool is ready for the next drag.
+    fn finish_drag(&mut self, drag: bounds::Drag, held: Held, uptime: Duration) -> Vec<Effect> {
+        let measured = self.live.take();
+        self.measure();
+        let (Some(measurement), Some(photo)) = (measured, self.frozen_screen.get(drag.monitor))
+        else {
+            return Vec::new();
+        };
+        let text = units::clipboard_text(&measurement.lengths(), photo.scale, held.shift);
+        // The cursor may have gone on to another monitor; the drawn rectangle, and the notice, stop at the limit.
+        let ended = photo.rect.nearest(self.cursor);
+        self.pinned.push(measurement);
+        let mut effects = vec![Effect::CopyText(text)];
+        effects.extend(self.show(Message::Copied, ended, drag.monitor, uptime));
+        effects
     }
 
     /// Pins what Dimensions measures, as the user sees it at the click, and copies its physical pixels, or its logical
@@ -285,7 +346,7 @@ impl Session {
         let monitor = measurement.monitor;
         self.pinned.push(measurement);
         let mut effects = vec![Effect::CopyText(text)];
-        effects.extend(self.show(Message::Copied, monitor, uptime));
+        effects.extend(self.show(Message::Copied, self.cursor, monitor, uptime));
         effects
     }
 
@@ -362,15 +423,21 @@ impl Session {
         Vec::new()
     }
 
-    /// Shows `message` where the cursor is, on `monitor`, in place of any notice still on screen, until it is due to go,
-    /// and asks for the next wake, which is the tolerance indicator's when that goes first.
-    fn show(&mut self, message: Message, monitor: usize, uptime: Duration) -> Option<Effect> {
+    /// Shows `message` at `at`, on `monitor`, in place of any notice still on screen, until it is due to go, and asks for
+    /// the next wake, which is the tolerance indicator's when that goes first.
+    fn show(
+        &mut self,
+        message: Message,
+        at: Point,
+        monitor: usize,
+        uptime: Duration,
+    ) -> Option<Effect> {
         // Can't happen: Windows' uptime is milliseconds since it started, nowhere near Duration's limit.
         let until = uptime.checked_add(NOTICE_LASTS)?;
         self.notice = Some(TimedNotice {
             notice: Notice {
                 message,
-                at: self.cursor,
+                at,
                 monitor,
             },
             until,
@@ -435,9 +502,13 @@ impl Session {
 
     /// Makes `tool` the active tool, by its key or its button on the toolbar, and the next call starts with it (v1 spec
     /// WPC-296, Trocar de ferramenta). Switching isn't closing: the frozen screen, the pinned measurements and the
-    /// tolerance the wheel set all stay, and the new tool works on them from where the cursor is. Only Dimensions
-    /// measures yet; the others are active and do nothing until their own tickets (the owner's choice in WPC-310).
+    /// tolerance the wheel set all stay, and the new tool works on them from where the cursor is. Dimensions and Bounds
+    /// measure; Inspect and Snip are active and do nothing until their own tickets (the owner's choice in WPC-310).
     fn switch_tool(&mut self, tool: Tool) -> Vec<Effect> {
+        // A drag Bounds was drawing is dropped: the new tool has no use for it.
+        if tool != Tool::Bounds {
+            self.drag = None;
+        }
         self.remembered.last_tool = tool;
         self.measure();
         Vec::new()
@@ -476,9 +547,10 @@ impl Session {
     }
 
     /// Whether the tool pauses with the cursor at `at`: on the toolbar, and anywhere while the toolbar is dragged, as the
-    /// cursor may leave it where it stops at a margin, the other monitor included (the owner's choice in WPC-312).
+    /// cursor may leave it where it stops at a margin, the other monitor included (the owner's choice in WPC-312). While
+    /// Bounds draws a rectangle, nowhere: the rectangle may go over the toolbar, which the photo doesn't have.
     fn pauses_at(&self, at: Point) -> bool {
-        self.toolbar_grab.is_some() || self.toolbar_hit(at).is_some()
+        self.drag.is_none() && (self.toolbar_grab.is_some() || self.toolbar_hit(at).is_some())
     }
 
     /// Puts the cursor at `to`, the dragged toolbar following it, and measures there. The arrow keys come here too, so
@@ -524,27 +596,35 @@ impl Session {
         self.remembered.last_tool == Tool::Dimensions
     }
 
-    /// Measures again around the cursor, or, with the cursor on the toolbar, where the tool paused: there it measures as
-    /// before, so a mode switched from the toolbar shows at once where the user was measuring (v1 spec WPC-296, Toolbar;
-    /// the owner's choice in WPC-311). The photo has no toolbar and no pinned measurement in it, so the tool measures
-    /// through both. Only Dimensions measures yet: the other tools come with their own tickets.
+    /// Measures again: Dimensions around the cursor, or, with the cursor on the toolbar, where the tool paused, so a mode
+    /// switched from the toolbar shows at once where the user was measuring (v1 spec WPC-296, Toolbar; the owner's
+    /// choice in WPC-311); Bounds the content of the rectangle being drawn, up to the cursor. The photo has no toolbar and
+    /// no pinned measurement in it, so the tools measure through both. Inspect and Snip come with their own tickets.
     fn measure(&mut self) {
         if !self.pauses_at(self.cursor) {
             self.measured_at = Some(self.cursor);
         }
-        if !self.dimensions_is_active() {
-            self.live = None;
-            return;
-        }
-        self.live = self.measured_at.and_then(|at| {
-            dimensions::measure(
-                &self.frozen_screen,
-                at,
-                self.remembered.dimensions_mode,
-                self.tolerance,
-                self.also_show_logical_pixels,
-            )
-        });
+        self.live = match self.remembered.last_tool {
+            Tool::Dimensions => self.measured_at.and_then(|at| {
+                dimensions::measure(
+                    &self.frozen_screen,
+                    at,
+                    self.remembered.dimensions_mode,
+                    self.tolerance,
+                    self.also_show_logical_pixels,
+                )
+            }),
+            Tool::Bounds => self.drag.and_then(|drag| {
+                bounds::measure(
+                    &self.frozen_screen,
+                    drag,
+                    self.cursor,
+                    self.tolerance,
+                    self.also_show_logical_pixels,
+                )
+            }),
+            Tool::Inspect | Tool::Snip => None,
+        };
     }
 
     /// Closes the tools, erasing every pinned measurement, the notice and the tolerance indicator, and has the remembered
@@ -554,6 +634,7 @@ impl Session {
     fn close(&mut self) -> Vec<Effect> {
         self.closed = true;
         self.toolbar_grab = None;
+        self.drag = None;
         self.pinned.clear();
         self.notice = None;
         self.indicator_until = None;
@@ -575,6 +656,16 @@ impl Session {
         })
     }
 
+    /// The rectangle Bounds is drawing, while the button is held.
+    fn drawn_rectangle(&self) -> Option<DrawnRectangle> {
+        let drag = self.drag?;
+        let photo = self.frozen_screen.get(drag.monitor)?;
+        Some(DrawnRectangle {
+            monitor: drag.monitor,
+            rect: bounds::drawn_rectangle(photo, drag, self.cursor),
+        })
+    }
+
     /// What to draw now.
     pub fn scene(&self) -> Scene<'_> {
         Scene {
@@ -585,6 +676,7 @@ impl Session {
                 Cursor::Cross
             },
             live: self.live.as_ref(),
+            drawn_rectangle: self.drawn_rectangle(),
             pinned: &self.pinned,
             tolerance_indicator: self.tolerance_indicator(),
             notice: self.notice.as_ref().map(|timed| &timed.notice),
@@ -596,9 +688,12 @@ impl Session {
                     .dimensions_is_active()
                     .then_some(self.remembered.dimensions_mode),
                 minimized: self.toolbar_minimized,
-                // While the toolbar is held, no button reacts, whatever the cursor slides over where it stops.
+                // While the toolbar is held, or Bounds draws a rectangle, no button reacts, whatever the cursor slides
+                // over.
                 hovered: match self.toolbar_hit(self.cursor) {
-                    Some(toolbar::Hit::Button(button)) if self.toolbar_grab.is_none() => {
+                    Some(toolbar::Hit::Button(button))
+                        if self.toolbar_grab.is_none() && self.drag.is_none() =>
+                    {
                         Some(button)
                     }
                     Some(_) | None => None,

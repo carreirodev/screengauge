@@ -401,7 +401,7 @@ fn the_next_call_opens_with_nothing_pinned() {
 
 #[test]
 fn a_click_with_another_tool_active_pins_and_copies_nothing() {
-    // Only Dimensions measures yet; Inspect's copy comes with WPC-316.
+    // Inspect's copy comes with WPC-316.
     let mut session = Session::open(Opening {
         remembered: Remembered {
             last_tool: screengauge_core::settings::Tool::Inspect,

@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use super::{Image, Photo, Point, ToolbarButton};
+use super::{Image, Photo, Point, Rect, ToolbarButton};
 use crate::settings::{DimensionsMode, Folder, Remembered, Tolerance, Tool};
 
 /// What the Windows layer draws while the tools are open.
@@ -15,9 +15,12 @@ pub struct Scene<'a> {
     /// The cursor over the frozen screen: the normal arrow on the toolbar, and a thin cross everywhere else (v1 spec
     /// WPC-296, Toolbar).
     pub cursor: Cursor,
-    /// What Dimensions measures around the cursor right now, drawn over the photo of its monitor, over the pinned
-    /// measurements. `None` while no tool measures.
+    /// What the active tool measures right now, drawn over the photo of its monitor, over the pinned measurements:
+    /// Dimensions around the cursor, or Bounds the content of the rectangle being drawn. `None` while no tool measures.
     pub live: Option<&'a Measurement>,
+    /// The rectangle Bounds is drawing while the button is held, drawn under every measurement on its monitor. `None`
+    /// the rest of the time.
+    pub drawn_rectangle: Option<DrawnRectangle>,
     /// The pinned measurements, oldest first, each drawn over the photo of the monitor it was measured on, whichever
     /// monitor the cursor is on. Their labels are in the theme's colors, the live one's in cyan, so the one that still
     /// changes stands out (v1 spec WPC-296, Como as medidas aparecem).
@@ -30,6 +33,16 @@ pub struct Scene<'a> {
     /// The toolbar, on screen the whole time the tools are open, drawn over the measurements on its monitor and under
     /// the tolerance indicator and the notice.
     pub toolbar: Toolbar,
+}
+
+/// The rectangle the user drags out in Bounds, exactly as drawn, before any shrinking to the content: dashed in black
+/// and white on screen while the button is held (v1 spec WPC-296, Como as medidas aparecem).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawnRectangle {
+    /// The monitor the drag began on, as an index in the frozen screen's order. The rectangle never leaves it.
+    pub monitor: usize,
+    /// Its pixels, both corners included, in physical pixels of the virtual screen.
+    pub rect: Rect,
 }
 
 /// The toolbar (v1 spec WPC-296, Toolbar): the tools' buttons with the active tool's lit, then H, V and C in a room kept
@@ -123,15 +136,20 @@ pub enum Cursor {
     Arrow,
 }
 
-/// A Dimensions measurement: the span around the cursor along its row, its column or both (Cross), on one monitor.
+/// What a tool measures, on one monitor: Dimensions' span around the cursor along its row, its column or both (Cross),
+/// or the content Bounds shrinks a drawn rectangle to. A Dimensions measurement has no content, and a Bounds one has no
+/// span.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Measurement {
     /// The monitor it was measured on, as an index in the frozen screen's order.
     pub monitor: usize,
-    /// The span along the cursor's row, in the horizontal and Cross modes.
+    /// The span along the cursor's row, in Dimensions' horizontal and Cross modes.
     pub horizontal: Option<Span>,
-    /// The span along the cursor's column, in the vertical and Cross modes.
+    /// The span along the cursor's column, in Dimensions' vertical and Cross modes.
     pub vertical: Option<Span>,
+    /// Bounds' measurement: the smallest rectangle that holds the content of a drawn rectangle, each side on a pixel of
+    /// it, in physical pixels of the virtual screen.
+    pub content: Option<Rect>,
     /// What its label says.
     pub label: Label,
 }
@@ -158,13 +176,17 @@ pub struct Span {
 }
 
 impl Measurement {
-    /// How many pixels each span has, width before height, as the label shows them.
+    /// How many pixels each span has, or the content's width and height, width before height, as the label shows them.
     pub(crate) fn lengths(&self) -> Vec<u32> {
-        [self.horizontal, self.vertical]
-            .iter()
+        let spans = [self.horizontal, self.vertical]
+            .into_iter()
             .flatten()
-            .map(|span| span.length())
-            .collect()
+            .map(Span::length);
+        let content = self
+            .content
+            .into_iter()
+            .flat_map(|content| [content.width, content.height]);
+        spans.chain(content).collect()
     }
 }
 

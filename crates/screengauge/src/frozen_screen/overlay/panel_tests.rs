@@ -105,7 +105,7 @@ fn render_scene(
     let mut labels = Vec::new();
     let picture = canvas.render_in(mode, MONITOR, dpi, |overlay, target| {
         overlay
-            .draw(target, pinned, live)
+            .draw(target, pinned, live, None)
             .expect("the measurements");
         let looks = pinned
             .iter()
@@ -337,10 +337,10 @@ fn each_label_has_full_ink_whichever_look_the_one_before_it_had() {
             let mut labels = Vec::new();
             let picture = canvas.render_in(mode, MONITOR, dpi, |overlay, target| {
                 overlay
-                    .draw(target, &[&pinned], Some(&live))
+                    .draw(target, &[&pinned], Some(&live), None)
                     .expect("the first frame");
                 overlay
-                    .draw(target, &[&later_pinned], Some(&later_live))
+                    .draw(target, &[&later_pinned], Some(&later_live), None)
                     .expect("the second frame");
                 for (m, look) in [(&later_pinned, Look::Pinned), (&later_live, Look::Live)] {
                     labels.extend(overlay.label(m, look).expect("a label"));
