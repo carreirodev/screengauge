@@ -8,10 +8,12 @@
 //! is laid), and a state that changes is drawn over the same bitmap. The part of it past the monitor's edge, which the
 //! toolbar's margin leaves at the top, is cut off by the window as the bitmap is laid.
 //!
-//! Compositing the layers on a transparent bitmap and then that bitmap over the photo rounds each channel a little
-//! differently than compositing every layer straight over the photo would: the two are within a few levels of each other
-//! (`toolbar_tests` measures it), and a toolbar is always drawn the same way, so what is drawn does not change with the
-//! cache's state.
+//! Compositing the layers on a transparent bitmap and then that bitmap over the photo is not the same as compositing every
+//! layer straight over the photo: a faint layer drawn over the photo's 8-bit pixels rounds away, as it changes a channel
+//! by less than half a level, so a shadow comes out too light in the small channels and the glow off its hue. On the
+//! bitmap the layers add up in the alpha channel first and keep their proportions, so the bitmap is the more faithful.
+//! The two differ by up to 27 levels at a pixel, and by 2 to 4 on average over the toolbar (`toolbar_tests` measures
+//! it). A toolbar is always drawn through the bitmap, so what is drawn does not depend on the cache's state.
 
 use screengauge_core::session::Toolbar;
 use screengauge_core::settings::{DimensionsMode, Tool};

@@ -47,7 +47,6 @@ use crate::log;
 use crate::theme::Mode;
 use geometry::{Parts, scaled};
 use palette::Surfaces;
-use toolbar_cache::ToolbarCache;
 
 /// The label's font. Its digits differ in width unless asked for tabular figures (a 1 is two pixels narrower than a 0
 /// at this size), which the label does, so the pill keeps its width while the number keeps its length.
@@ -202,7 +201,7 @@ pub struct Overlay {
     mode: Mode,
     /// The toolbar, drawn on a bitmap that every frame lays over the photo. Lost with the rest of the overlay should the
     /// render target be.
-    toolbar_cache: RefCell<ToolbarCache>,
+    toolbar_cache: RefCell<toolbar_cache::ToolbarCache>,
     /// The window's monitor in the virtual screen, which is where the window's pixel (0, 0) is.
     monitor: RECT,
     dpi: u32,
