@@ -32,26 +32,28 @@ const PANEL_RADIUS: u32 = 14;
 const FRAME_RADIUS: u32 = 9;
 
 /// How much of the notice's shadow this panel casts. The notice's layers are fitted to a shadow box 15px tall (the
-/// notice's 31px less the spread of 8 on each side), and this panel is 214 by 255 at the most, so its box, 198 by 239,
-/// is as good as an edge as far as a blur of sigma 14 (dark) or 13 (light) can tell. A box that tall casts a shadow
-/// stronger than the layers give at full strength, so the layers are made stronger, as the tolerance indicator's, which
-/// is lower than the notice, makes them fainter (see `SHADOW_STRENGTH` in `tolerance`).
+/// notice's 31px less the spread of 8 on each side). This panel is up to 190 by 231 logical pixels (a frame of 176 or
+/// less, a strip of 41 at most), so its box is up to 174 by 215: as good as an edge, as far as a blur of sigma 14 (dark)
+/// or 13 (light) can tell. A box that tall casts a shadow stronger than the layers give at full strength, so they are
+/// made stronger, as the tolerance indicator's, a lower panel than the notice, makes them fainter (see
+/// `SHADOW_STRENGTH` in `tolerance`).
 ///
 /// Fitted by least squares, the layers laid over each other as Direct2D lays them, against CSS's true blur of the box
 /// (`0 10px 28px -8px` at .75 in the dark palette, `0 10px 26px -8px` at .45 in the light one, sigma half the blur),
-/// read outward from the panel at 1 pixel steps, 0 to 30 pixels beyond it on the sides and above, and 40 below. The
-/// answer does not depend on the panel's size, which is much taller than the blur. Dark and light want:
+/// read outward from the panel at 1 pixel steps: 0 to 30 pixels beyond its sides and its top, and 0 to 40 below it. The
+/// answer is the same for every panel from 174 by 199 to 214 by 255, which are all much taller than the blur. Dark and
+/// light want:
 ///
 /// - down the middle, below the panel, which is how the tolerance indicator's 0.68 was found (the same reading gives its
 ///   0.67 and 0.70): 1.32 and 1.25;
 /// - along the middle of a side: 1.17 and 1.04;
 /// - above the panel: 1.03 and 0.80.
 ///
-/// 1.25 is the one number for both palettes that is nearest to all three: the opacity it leaves is within 0.020 (dark)
-/// and 0.014 (light) of CSS's, root mean square, below the panel, 0.012 and 0.012 on the sides and 0.007 above it. Not
-/// closer, because the layers are the notice's: they fall off the way a box 15px tall's shadow does, a little slower
-/// than an edge's, so no single number fits the panel's whole shadow. Right under the panel it is up to 0.06 of opacity
-/// lighter than CSS's.
+/// 1.25 is the one number for both palettes that is nearest to all three. The opacity it leaves is within 0.020 (dark)
+/// and 0.014 (light) of CSS's, root mean square, below the panel, 0.012 and 0.012 on the sides, and 0.007 and 0.007 above
+/// it. It cannot be closer, because the layers are the notice's: they fall off the way a box 15px tall's shadow does, a
+/// little slower than an edge's, so no single number fits the panel's whole shadow. Right under the panel it is up to
+/// 0.06 of opacity lighter than CSS's (0.36 against 0.41 in the dark palette), and a test keeps it within 0.07.
 pub(super) const SHADOW_STRENGTH: f32 = 1.25;
 
 /// How much of the grid's black shows over the pixels (CSS `rgba(0,0,0,.2)`).
