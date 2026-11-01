@@ -9,6 +9,7 @@ mod bounds;
 mod dimensions;
 mod event;
 mod frozen_screen;
+mod magnified_view;
 mod output;
 mod pixels;
 pub mod toolbar;
@@ -24,7 +25,9 @@ pub use output::{
 use std::fmt;
 use std::time::Duration;
 
-use crate::settings::{DimensionsMode, Options, Remembered, Tolerance, Tool, ToolbarPlace};
+use crate::settings::{
+    DimensionsMode, Magnification, Options, Remembered, Tolerance, Tool, ToolbarPlace,
+};
 
 /// How long a notice stays on screen: a little over a second, the approved prototype's 1.3 s (v1 spec WPC-296, Como as
 /// medidas aparecem, "o tempo exato se ajusta na construção").
@@ -32,6 +35,9 @@ const NOTICE_LASTS: Duration = Duration::from_millis(1300);
 
 /// How long the tolerance indicator stays after the mouse wheel's last notch (v1 spec WPC-296, Tolerance).
 const INDICATOR_LASTS: Duration = Duration::from_secs(1);
+
+/// How long the magnified view's tag stays after the mouse wheel's last notch (v1 spec WPC-296, Inspect).
+const TAG_LASTS: Duration = Duration::from_secs(1);
 
 /// How far the mouse wheel turns in a notch, in the units of [`Input::Wheel`]: Windows' WHEEL_DELTA.
 const NOTCH: i32 = 120;
@@ -112,6 +118,8 @@ pub struct Session {
     notice: Option<TimedNotice>,
     /// Until when the tolerance indicator shows, when it does.
     indicator_until: Option<Duration>,
+    /// Until when the magnified view shows the magnification in its corner, when it does.
+    tag_until: Option<Duration>,
     /// How far the mouse wheel has turned towards its next notch, in Windows' units: forward above zero, back below it.
     wheel_turned: i32,
     /// Until when a press is the second click of the double-click that called ScreenGauge.
@@ -188,6 +196,7 @@ impl Session {
             pinned: Vec::new(),
             notice: None,
             indicator_until: None,
+            tag_until: None,
             wheel_turned: 0,
             second_click_until,
             toolbar_monitor,
@@ -219,6 +228,9 @@ impl Session {
             .is_some_and(|until| until <= event.uptime)
         {
             self.indicator_until = None;
+        }
+        if self.tag_until.is_some_and(|until| until <= event.uptime) {
+            self.tag_until = None;
         }
         let alt = match event.input {
             Input::KeyDown(Key::Alt) => true,
@@ -498,14 +510,16 @@ impl Session {
         self.wake()
     }
 
-    /// Moves the tolerance a step for each notch the mouse wheel turned, up for a notch forward and down for one back,
-    /// and measures again at once (v1 spec WPC-296, Tolerance). A precision touchpad turns it a part of a notch at a
-    /// time, so the parts add up until they make a notch, and turning the other way starts counting again. Any turn
-    /// shows the tolerance indicator, which goes a second after the wheel stops. Dimensions, Bounds and Snip share the
-    /// tolerance; with Inspect active, which uses none, the wheel leaves it alone. Turned at `at` on the toolbar, where
-    /// the tool pauses, the wheel does nothing (the owner's choice in WPC-311).
+    /// Turns the mouse wheel by `delta` at `at`. A precision touchpad turns it a part of a notch at a time, so the parts add
+    /// up until they make a notch, and turning the other way starts counting again. Each notch is a step: of the
+    /// magnification with Inspect active, forward for a level higher (v1 spec WPC-296, Inspect), and of the tolerance
+    /// Dimensions, Bounds and Snip share with any other tool, forward for a step up, measured again at once (v1 spec
+    /// WPC-296, Tolerance). Any turn shows what it steps, the magnification in the view's corner or the tolerance
+    /// indicator, until a second after the wheel stops, even a turn past a limit that changes nothing (the owner's choices
+    /// in WPC-309 and WPC-315). Turned at `at` on the toolbar, where the tool pauses, the wheel does nothing (the owner's
+    /// choice in WPC-311).
     fn turn_wheel(&mut self, delta: i32, at: Point, uptime: Duration) -> Vec<Effect> {
-        if self.remembered.last_tool == Tool::Inspect || self.pauses_at(at) {
+        if self.pauses_at(at) {
             return Vec::new();
         }
         if self.wheel_turned.signum() == -delta.signum() {
@@ -514,13 +528,36 @@ impl Session {
         let turned = self.wheel_turned.saturating_add(delta);
         let notches = turned / NOTCH;
         self.wheel_turned = turned % NOTCH;
-        if notches != 0 {
-            self.step_tolerance(notches);
+        // Can't happen: Windows' uptime is milliseconds since it started, nowhere near Duration's limit. Should it, neither
+        // the tag nor the indicator shows.
+        if self.remembered.last_tool == Tool::Inspect {
+            self.step_magnification(notches);
+            self.tag_until = uptime.checked_add(TAG_LASTS);
+        } else {
+            if notches != 0 {
+                self.step_tolerance(notches);
+            }
+            self.indicator_until = uptime.checked_add(INDICATOR_LASTS);
         }
-        // Can't happen: Windows' uptime is milliseconds since it started, nowhere near Duration's limit. Should it, the
-        // indicator doesn't show.
-        self.indicator_until = uptime.checked_add(INDICATOR_LASTS);
         self.wake().into_iter().collect()
+    }
+
+    /// Moves the magnification `notches` levels, up when they are above zero and down when below, stopping at 2× and
+    /// 32×. It is the remembered state's, so the next call opens at the last one used.
+    fn step_magnification(&mut self, notches: i32) {
+        let step = if notches > 0 {
+            Magnification::up
+        } else {
+            Magnification::down
+        };
+        for _ in 0..notches.unsigned_abs() {
+            let next = step(self.remembered.magnification);
+            if next == self.remembered.magnification {
+                // At a limit, where the rest of the notches change nothing either.
+                break;
+            }
+            self.remembered.magnification = next;
+        }
     }
 
     /// Moves the tolerance `notches` steps, up when they are above zero and down when below, stopping at its limits,
@@ -542,11 +579,12 @@ impl Session {
         self.measure();
     }
 
-    /// The wake for the soonest of what is on screen only for a while, the notice and the tolerance indicator: the one
-    /// timer the Windows layer keeps serves both, so the session always asks for the next moment one of them goes.
+    /// The wake for the soonest of what is on screen only for a while, the notice, the tolerance indicator and the
+    /// magnified view's tag: the one timer the Windows layer keeps serves them all, so the session always asks for the
+    /// next moment one of them goes.
     fn wake(&self) -> Option<Effect> {
         let notice = self.notice.as_ref().map(|timed| timed.until);
-        [notice, self.indicator_until]
+        [notice, self.indicator_until, self.tag_until]
             .into_iter()
             .flatten()
             .min()
@@ -556,7 +594,8 @@ impl Session {
     /// Makes `tool` the active tool, by its key or its button on the toolbar, and the next call starts with it (v1 spec
     /// WPC-296, Trocar de ferramenta). Switching isn't closing: the frozen screen, the pinned measurements and the
     /// tolerance the wheel set all stay, and the new tool works on them from where the cursor is. Dimensions and Bounds
-    /// measure; Inspect and Snip are active and do nothing until their own tickets (the owner's choice in WPC-310).
+    /// measure and Inspect shows its magnified view; Snip is active and does nothing until its own ticket (the owner's
+    /// choice in WPC-310).
     fn switch_tool(&mut self, tool: Tool) -> Vec<Effect> {
         // A drag Bounds was drawing is dropped: the new tool has no use for it, and the button it holds is the new tool's
         // no more.
@@ -661,7 +700,8 @@ impl Session {
     /// Measures again: Dimensions around the cursor, or, with the cursor on the toolbar, where the tool paused, so a mode
     /// switched from the toolbar shows at once where the user was measuring (v1 spec WPC-296, Toolbar; the owner's
     /// choice in WPC-311); Bounds the content of the rectangle being drawn, up to the cursor. The photo has no toolbar and
-    /// no pinned measurement in it, so the tools measure through both. Inspect and Snip come with their own tickets.
+    /// no pinned measurement in it, so the tools measure through both. Inspect's magnified view is worked out from where
+    /// the tool measures whenever the scene is asked for; Snip comes with its own ticket.
     fn measure(&mut self) {
         if !self.pauses_at(self.cursor) {
             self.measured_at = Some(self.cursor);
@@ -691,10 +731,11 @@ impl Session {
         };
     }
 
-    /// Closes the tools, erasing every pinned measurement, the notice and the tolerance indicator, and has the remembered
-    /// state kept when the session changed it (v1 spec WPC-296, Fechar as ferramentas). Closing comes first, so the
-    /// screen is back before the settings file is written. The tolerance the mouse wheel set is never kept: the next
-    /// call starts at the default tolerance in Settings.
+    /// Closes the tools, erasing every pinned measurement, the notice, the tolerance indicator and the magnified view's
+    /// tag, and has the remembered state kept when the session changed it, the magnification the wheel left included (v1
+    /// spec WPC-296, Fechar as ferramentas). Closing comes first, so the screen is back before the settings file is
+    /// written. The tolerance the mouse wheel set is never kept: the next call starts at the default tolerance in
+    /// Settings.
     fn close(&mut self) -> Vec<Effect> {
         self.closed = true;
         self.toolbar_grab = None;
@@ -703,6 +744,7 @@ impl Session {
         self.pinned.clear();
         self.notice = None;
         self.indicator_until = None;
+        self.tag_until = None;
         let mut effects = vec![Effect::Close];
         if self.remembered != self.remembered_at_opening {
             effects.push(Effect::SaveRemembered(self.remembered.clone()));
@@ -734,6 +776,26 @@ impl Session {
         })
     }
 
+    /// Inspect's magnified view where the tool measures: around the cursor, or, while the cursor pauses on the toolbar,
+    /// around the last place it had off it, as every tool pauses there (the owner's choice in WPC-311; the prototype hid
+    /// the view instead). `None` with another tool active, or before the cursor has been off the toolbar.
+    fn magnified_view(&self) -> Option<MagnifiedView> {
+        if self.remembered.last_tool != Tool::Inspect {
+            return None;
+        }
+        let center = self.measured_at?;
+        let monitor = frozen_screen::monitor_at(&self.frozen_screen, center)?;
+        let photo = self.frozen_screen.get(monitor)?;
+        Some(magnified_view::magnified_view(
+            photo,
+            monitor,
+            center,
+            self.remembered.magnification,
+            self.tag_until.is_some(),
+            self.also_show_logical_pixels,
+        ))
+    }
+
     /// What to draw now.
     pub fn scene(&self) -> Scene<'_> {
         Scene {
@@ -746,8 +808,7 @@ impl Session {
             live: self.live.as_ref(),
             drawn_rectangle: self.drawn_rectangle(),
             pinned: &self.pinned,
-            // Inspect's magnified view comes with WPC-315's core.
-            magnified_view: None,
+            magnified_view: self.magnified_view(),
             tolerance_indicator: self.tolerance_indicator(),
             notice: self.notice.as_ref().map(|timed| &timed.notice),
             toolbar: Toolbar {

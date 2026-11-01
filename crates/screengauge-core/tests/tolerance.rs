@@ -340,11 +340,13 @@ fn open_with(tool: Tool) -> Session {
 
 #[test]
 fn with_inspect_active_the_wheel_leaves_the_tolerance_alone() {
-    // Inspect uses no tolerance: its wheel changes the magnification (WPC-296, Inspect).
+    // Inspect uses no tolerance: its wheel changes the magnification (WPC-296, Inspect; WPC-315).
     let mut session = open_with(Tool::Inspect);
-    let effects = session.handle(wheel(NOTCH, 1000));
-    assert_eq!(effects, []);
+    session.handle(wheel(NOTCH, 1000));
     assert_eq!(indicator(&session), None);
+    // Back in Dimensions, it measures at the default tolerance.
+    session.handle(event(GRAY_150, 1100, Input::KeyDown(Key::Digit1)));
+    assert_eq!(live_span(&session), Some(at_two()));
 }
 
 #[test]

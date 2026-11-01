@@ -249,4 +249,24 @@ impl Magnification {
             Magnification::X32 => 32,
         }
     }
+
+    /// One level higher, as a notch of the mouse wheel turned forward makes it. At 32× it stays.
+    pub fn up(self) -> Magnification {
+        match self {
+            Magnification::X2 => Magnification::X4,
+            Magnification::X4 => Magnification::X8,
+            Magnification::X8 => Magnification::X16,
+            Magnification::X16 | Magnification::X32 => Magnification::X32,
+        }
+    }
+
+    /// One level lower, as a notch of the mouse wheel turned back makes it. At 2× it stays.
+    pub fn down(self) -> Magnification {
+        match self {
+            Magnification::X2 | Magnification::X4 => Magnification::X2,
+            Magnification::X8 => Magnification::X4,
+            Magnification::X16 => Magnification::X8,
+            Magnification::X32 => Magnification::X16,
+        }
+    }
 }
