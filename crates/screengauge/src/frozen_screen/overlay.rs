@@ -1,7 +1,7 @@
 //! Dimensions' measurements drawn over a window's photo: the cyan line with its ticks and outline, and the label in a
-//! pill, for the pinned measurements and the live one, the tolerance indicator and the notice. Everything about where
-//! they go is in `geometry`, `tolerance` and `notice`, which need no Windows; this draws them onto any Direct2D render
-//! target at 96 DPI, so a test can render them on a bitmap and count pixels.
+//! pill, for the pinned measurements and the live one, the toolbar, the tolerance indicator and the notice. Everything
+//! about where they go is in `geometry`, `toolbar`, `tolerance` and `notice`, which need no Windows; this draws them onto
+//! any Direct2D render target at 96 DPI, so a test can render them on a bitmap and count pixels.
 
 mod floating;
 mod geometry;
@@ -12,6 +12,7 @@ mod panel_tests;
 mod tolerance;
 #[cfg(test)]
 mod tolerance_tests;
+pub mod toolbar;
 
 use std::cell::RefCell;
 

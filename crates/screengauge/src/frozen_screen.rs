@@ -2,14 +2,15 @@
 //! the session core's scene. Each window draws its monitor's photo pixel for pixel with Direct2D, shows the cursor the
 //! scene names, and hands the core what the user does over it and what Windows tells it: another program came to the
 //! front, or the monitors changed. Over its monitor's photo, each window draws the measurements pinned there, what
-//! Dimensions measures right now when the cursor is there, and the tolerance indicator and the notice when they are
-//! there, and is drawn again whenever one of them changes. The first window also keeps the timer that wakes the session
-//! when either is due to go. The windows share the session; destroying them when the tools close, by dropping
+//! Dimensions measures right now when the cursor is there, the toolbar, and the tolerance indicator and the notice when
+//! they are there, and is drawn again whenever one of them changes. A click on the toolbar goes to the core as that
+//! button's, never as a press of the tool. The first window also keeps the timer that wakes the session when the
+//! indicator or the notice is due to go. The windows share the session; destroying them when the tools close, by dropping
 //! [`FrozenScreen`], drops the session and erases the photos with it.
 
 mod overlay;
 
-use std::cell::{OnceCell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::BTreeSet;
 use std::ffi::c_void;
 use std::rc::Rc;
@@ -17,7 +18,7 @@ use std::time::Duration;
 
 use screengauge_core::session::{
     Cursor, Effect, Event, Input, Measurement, Notice, Photo, Point, Rect, Session,
-    ToleranceIndicator,
+    ToleranceIndicator, Toolbar,
 };
 use windows::Win32::Foundation::{
     D2DERR_RECREATE_TARGET, E_FAIL, ERROR_SUCCESS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT,
@@ -40,14 +41,15 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, PAINTSTRUCT};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos,
     GetWindowLongPtrW, HTCLIENT, IDC_CROSS, KillTimer, LoadCursorW, PostMessageW, RegisterClassExW,
     SW_SHOWNA, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, ShowWindow,
-    USER_TIMER_MAXIMUM, USER_TIMER_MINIMUM, WM_APP, WM_CLOSE, WM_DISPLAYCHANGE, WM_ERASEBKGND,
-    WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
-    WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDCLASSEXW,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    USER_TIMER_MAXIMUM, USER_TIMER_MINIMUM, WM_APP, WM_CAPTURECHANGED, WM_CLOSE, WM_DISPLAYCHANGE,
+    WM_ERASEBKGND, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+    WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER,
+    WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{Error, PCWSTR, w};
 
@@ -55,6 +57,7 @@ use crate::theme::Mode;
 use crate::win32::{low_word, struct_size};
 use crate::{event, foreground, log};
 use overlay::Overlay;
+use overlay::toolbar::{self, Hit};
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.FrozenScreen");
 
@@ -322,6 +325,7 @@ impl SharedSession {
                     pinned: scene.pinned.to_vec(),
                     tolerance_indicator: scene.tolerance_indicator,
                     notice: scene.notice.copied(),
+                    toolbar: Some(scene.toolbar),
                 }
             }
             // Can't happen: this is read outside the moment the core handles an event.
@@ -355,6 +359,31 @@ impl SharedSession {
                     "frozen screen: drawing a measurement",
                     &"InvalidateRect returned FALSE",
                 );
+            }
+        }
+    }
+
+    /// What `at`, a point over the window of `monitor`, is on in the toolbar: `None` when the toolbar isn't on that
+    /// monitor or the point is off it. H, V and C count only while they show.
+    fn toolbar_hit(&self, monitor: usize, at: Point) -> Option<Hit> {
+        let Ok(session) = self.core.try_borrow() else {
+            // Can't happen: this is read outside the moment the core handles an event.
+            log::failure(
+                "frozen screen",
+                &"the toolbar was asked for while an event was handled",
+            );
+            return None;
+        };
+        let scene = session.scene();
+        if scene.toolbar.monitor != monitor {
+            return None;
+        }
+        let photo = scene.frozen_screen.get(monitor)?;
+        match toolbar::on_monitor(photo.rect, photo.scale) {
+            Ok(layout) => layout.hit(at, scene.toolbar.mode.is_some()),
+            Err(e) => {
+                log::failure("frozen screen: placing the toolbar", &e);
+                None
             }
         }
     }
@@ -415,6 +444,8 @@ struct Shown {
     pinned: Vec<Measurement>,
     tolerance_indicator: Option<ToleranceIndicator>,
     notice: Option<Notice>,
+    /// `None` only when the scene couldn't be read.
+    toolbar: Option<Toolbar>,
 }
 
 /// One window's part of what is shown: what is on its monitor.
@@ -425,6 +456,7 @@ struct OnMonitor<'a> {
     live: Option<&'a Measurement>,
     tolerance_indicator: Option<&'a ToleranceIndicator>,
     notice: Option<&'a Notice>,
+    toolbar: Option<&'a Toolbar>,
 }
 
 impl Shown {
@@ -447,6 +479,10 @@ impl Shown {
                 .notice
                 .as_ref()
                 .filter(|notice| notice.monitor == monitor),
+            toolbar: self
+                .toolbar
+                .as_ref()
+                .filter(|toolbar| toolbar.monitor == monitor),
         }
     }
 
@@ -464,13 +500,14 @@ impl Shown {
         measured
             .chain(indicated)
             .chain(self.notice.iter().map(|notice| notice.monitor))
+            .chain(self.toolbar.iter().map(|toolbar| toolbar.monitor))
     }
 }
 
 /// The monitors whose windows show something different from `before` to `after`, each once and in order: the one a
 /// measurement left, which must lose its line, the one it is on now, the one a measurement was pinned on or taken off,
-/// the ones the tolerance indicator appeared on, followed the cursor between or went from, and the one a notice appeared
-/// on or went from.
+/// the ones the tolerance indicator appeared on, followed the cursor between or went from, the one a notice appeared
+/// on or went from, and the toolbar's when another of its buttons lights up.
 fn monitors_to_draw_again(before: &Shown, after: &Shown) -> Vec<usize> {
     let monitors: BTreeSet<usize> = before.monitors().chain(after.monitors()).collect();
     monitors
@@ -514,6 +551,9 @@ struct Window {
     factory: ID2D1Factory,
     /// Made at the first draw, and again when Direct2D says the graphics device was lost.
     drawing: RefCell<Option<Drawing>>,
+    /// What on the toolbar the left button went down on, while it is held: the window has the mouse until it comes up,
+    /// and a button acts only when it comes up on the same button (WPC-310).
+    pressed: Cell<Option<Hit>>,
 }
 
 /// The photo on the graphics card, ready to draw, with what draws the measurements and the notice over it. They belong
@@ -545,6 +585,7 @@ fn create_window(
         session: Rc::clone(session),
         factory: factory.clone(),
         drawing: RefCell::new(None),
+        pressed: Cell::new(None),
     }));
     // SAFETY: the class is registered. `slot` outlives the call, and only WM_NCCREATE reaches it, through this
     // pointer. The process is Per-Monitor V2, so the rectangle is in physical pixels.
@@ -610,8 +651,46 @@ extern "system" fn window_proc(
                 Some(LRESULT(1))
             }
             WM_MOUSEMOVE => deliver(Input::Move),
-            WM_LBUTTONDOWN => deliver(Input::Press),
-            WM_LBUTTONUP => deliver(Input::Release),
+            // A press anywhere on the toolbar is the toolbar's: it never reaches the tool, which would pin and copy what
+            // lies under the toolbar. The window keeps the mouse until the button comes up, wherever that is.
+            WM_LBUTTONDOWN => match window
+                .session
+                .toolbar_hit(window.monitor, event::message_cursor())
+            {
+                Some(hit) => {
+                    window.pressed.set(Some(hit));
+                    // SAFETY: our own window, on its thread, with the left button down. It returns the window that had
+                    // the mouse before, which needs nothing.
+                    let _ = unsafe { SetCapture(hwnd) };
+                    Some(LRESULT(0))
+                }
+                None => deliver(Input::Press),
+            },
+            // The button acts when the mouse comes up on it, as a Windows button does, so moving off it first cancels.
+            // Neither the press nor its release reaches the tool.
+            WM_LBUTTONUP => match window.pressed.take() {
+                Some(pressed) => {
+                    // SAFETY: gives back the mouse this window took at the press, on its thread.
+                    if let Err(e) = unsafe { ReleaseCapture() } {
+                        log::failure("frozen screen: giving back the mouse", &e);
+                    }
+                    let released = window
+                        .session
+                        .toolbar_hit(window.monitor, event::message_cursor());
+                    match pressed {
+                        Hit::Button(button) if released == Some(pressed) => {
+                            deliver(Input::Toolbar(button))
+                        }
+                        _ => Some(LRESULT(0)),
+                    }
+                }
+                None => deliver(Input::Release),
+            },
+            // Another window took the mouse while a toolbar button was held, so its release will never come here.
+            WM_CAPTURECHANGED => {
+                window.pressed.set(None);
+                Some(LRESULT(0))
+            }
             WM_MOUSEWHEEL => deliver(Input::Wheel(event::wheel(wparam))),
             WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP => {
                 let key = event::key(wparam)?;
@@ -721,7 +800,8 @@ fn paint(hwnd: HWND, window: &Window) {
 }
 
 /// Draws the window's part of the scene: its monitor's photo, and over it the measurements pinned on this monitor, what
-/// Dimensions measures when that is on this monitor, and the tolerance indicator and the notice when they are here.
+/// Dimensions measures when that is on this monitor, and the toolbar, the tolerance indicator and the notice when they
+/// are here.
 fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
     // A copy, so the session is borrowed only for a moment.
     let shown = window.session.shown();
@@ -749,6 +829,10 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
     // A label, the indicator or a notice that can't be laid out leaves the photo and the lines as they are; the first
     // failure is returned once the frame is finished, and any later one is logged.
     let measured = ready.overlay.draw(&ready.target, &here.pinned, here.live);
+    let toolbar = match here.toolbar {
+        Some(toolbar) => ready.overlay.draw_toolbar(&ready.target, toolbar),
+        None => Ok(()),
+    };
     let indicated = match here.tolerance_indicator {
         Some(indicator) => ready
             .overlay
@@ -761,6 +845,7 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
     };
     let overlaid = first_failure([
         ("frozen screen: drawing the measurements", measured),
+        ("frozen screen: drawing the toolbar", toolbar),
         ("frozen screen: drawing the tolerance indicator", indicated),
         ("frozen screen: drawing the notice", noticed),
     ]);
@@ -873,7 +958,7 @@ mod tests {
     use super::*;
 
     use screengauge_core::session::{Label, Message};
-    use screengauge_core::settings::Tolerance;
+    use screengauge_core::settings::{DimensionsMode, Tolerance, Tool};
 
     /// A measurement on `monitor` whose label reads `text`, so two of them on one monitor differ.
     fn on(monitor: usize, text: &str) -> Measurement {
@@ -992,6 +1077,44 @@ mod tests {
             ..Shown::default()
         };
         assert_eq!(monitors_to_draw_again(&here, &there), [0, 1]);
+    }
+
+    fn toolbar_on(monitor: usize, active: Tool, mode: Option<DimensionsMode>) -> Shown {
+        Shown {
+            toolbar: Some(Toolbar {
+                monitor,
+                active,
+                mode,
+            }),
+            ..Shown::default()
+        }
+    }
+
+    #[test]
+    fn another_tool_or_mode_lit_redraws_the_toolbars_monitor_alone() {
+        let dimensions = toolbar_on(1, Tool::Dimensions, Some(DimensionsMode::Cross));
+        let bounds = toolbar_on(1, Tool::Bounds, None);
+        let horizontal = toolbar_on(1, Tool::Dimensions, Some(DimensionsMode::Horizontal));
+        assert_eq!(monitors_to_draw_again(&dimensions, &bounds), [1]);
+        assert_eq!(monitors_to_draw_again(&dimensions, &horizontal), [1]);
+        assert_eq!(
+            monitors_to_draw_again(&dimensions, &dimensions),
+            Vec::<usize>::new()
+        );
+    }
+
+    #[test]
+    fn a_measurement_moving_on_another_monitor_leaves_the_toolbars_alone() {
+        let toolbar = toolbar_on(0, Tool::Dimensions, Some(DimensionsMode::Cross));
+        let before = Shown {
+            live: Some(on(1, "24")),
+            ..toolbar.clone()
+        };
+        let after = Shown {
+            live: Some(on(1, "25")),
+            ..toolbar
+        };
+        assert_eq!(monitors_to_draw_again(&before, &after), [1]);
     }
 
     #[test]

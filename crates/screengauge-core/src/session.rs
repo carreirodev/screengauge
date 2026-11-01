@@ -15,6 +15,7 @@ pub use event::{Event, Held, Input, Key, LocalTime, ToolbarButton};
 pub use frozen_screen::{Colors, Image, Photo, Point, Rect, Scale};
 pub use output::{
     Cursor, Effect, Label, Measurement, Message, Notice, Scene, Sign, Span, ToleranceIndicator,
+    Toolbar,
 };
 
 use std::fmt;
@@ -102,6 +103,8 @@ pub struct Session {
     wheel_turned: i32,
     /// Until when a press is the second click of the double-click that called ScreenGauge.
     second_click_until: Option<Duration>,
+    /// The monitor the toolbar is on: the current monitor as the tools opened, for as long as they are open.
+    toolbar_monitor: usize,
     /// Set by the effect that closes the tools, after which events do nothing.
     closed: bool,
 }
@@ -135,6 +138,11 @@ impl Session {
         }) {
             return Err(Refused::PhotoSize(monitor));
         }
+        // The cursor is always on a monitor; should it not be, the toolbar goes on the first one.
+        let toolbar_monitor = frozen_screen
+            .iter()
+            .position(|photo| photo.rect.contains(cursor))
+            .unwrap_or(0);
         let mut session = Session {
             frozen_screen,
             cursor,
@@ -148,6 +156,7 @@ impl Session {
             indicator_until: None,
             wheel_turned: 0,
             second_click_until,
+            toolbar_monitor,
             closed: false,
         };
         session.measure();
@@ -411,6 +420,13 @@ impl Session {
             pinned: &self.pinned,
             tolerance_indicator: self.tolerance_indicator(),
             notice: self.notice.as_ref().map(|timed| &timed.notice),
+            toolbar: Toolbar {
+                monitor: self.toolbar_monitor,
+                active: self.remembered.last_tool,
+                mode: self
+                    .dimensions_is_active()
+                    .then_some(self.remembered.dimensions_mode),
+            },
         }
     }
 }

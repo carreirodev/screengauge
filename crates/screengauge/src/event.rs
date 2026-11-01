@@ -17,17 +17,22 @@ use crate::win32::signed_words;
 /// `input`, as part of the message this thread is handling: the cursor's place when Windows sent it, the modifier keys
 /// held as of that message, and the local time and Windows' running time now.
 pub fn of_message(input: Input) -> Event {
-    // SAFETY: no arguments; reads the cursor's place for the message this thread last retrieved.
-    let position = unsafe { GetMessagePos() };
     // SAFETY: no arguments.
     let time = unsafe { GetLocalTime() };
     Event {
-        cursor: point(position),
+        cursor: message_cursor(),
         held: held(),
         time: local_time(time),
         uptime: uptime(),
         input,
     }
+}
+
+/// Where the cursor was when Windows sent the message this thread is handling, in physical pixels of the virtual
+/// screen: the place an event made of that message carries.
+pub fn message_cursor() -> Point {
+    // SAFETY: no arguments; reads the cursor's place for the message this thread last retrieved.
+    point(unsafe { GetMessagePos() })
 }
 
 /// How long Windows has been running, to the millisecond, on the clock its timers count on.

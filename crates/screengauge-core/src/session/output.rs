@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use super::{Image, Photo, Point};
-use crate::settings::{Folder, Remembered, Tolerance};
+use crate::settings::{DimensionsMode, Folder, Remembered, Tolerance, Tool};
 
 /// What the Windows layer draws while the tools are open.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -26,6 +26,24 @@ pub struct Scene<'a> {
     pub tolerance_indicator: Option<ToleranceIndicator>,
     /// The notice on screen, drawn over everything else on its monitor. `None` when there is none.
     pub notice: Option<&'a Notice>,
+    /// The toolbar, on screen the whole time the tools are open, drawn over the measurements on its monitor and under
+    /// the tolerance indicator and the notice.
+    pub toolbar: Toolbar,
+}
+
+/// The toolbar (v1 spec WPC-296, Toolbar): the tools' buttons with the active tool's lit, then H, V and C in a room kept
+/// for them, then the gear, minimize and close. It sits at the top center of its monitor; dragging it elsewhere is
+/// WPC-312's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Toolbar {
+    /// The monitor it is on, as an index in the frozen screen's order: the current monitor as the tools opened. It stays
+    /// there while the cursor goes to another monitor, where the tool then measures.
+    pub monitor: usize,
+    /// The active tool, whose button is lit. There is always one.
+    pub active: Tool,
+    /// Dimensions' mode, whose button is lit, while Dimensions is the active tool. `None` with any other tool: then H, V
+    /// and C don't show, and their room stays empty so no other button moves.
+    pub mode: Option<DimensionsMode>,
 }
 
 /// What the mouse wheel has just made the tolerance (v1 spec WPC-296, Tolerance): "Tolerance N" and a bar of ten
