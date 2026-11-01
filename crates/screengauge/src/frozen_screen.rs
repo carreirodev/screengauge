@@ -1244,6 +1244,15 @@ mod tests {
                 tag,
                 x: coordinate(&x.to_string(), square(x + 33, 304, 16)),
                 y: coordinate("100", square(x + 120, 304, 16)),
+                color: screengauge_core::session::PixelColor {
+                    rgb: [255, 255, 255],
+                    swatch: square(x + 33, 325, 22),
+                    first: screengauge_core::session::ColorText {
+                        text: "#FFFFFF".to_owned(),
+                        line: square(x + 63, 328, 16),
+                    },
+                    second: None,
+                },
             }),
             ..Shown::default()
         }

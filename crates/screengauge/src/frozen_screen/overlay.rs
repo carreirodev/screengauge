@@ -188,6 +188,8 @@ pub struct Overlay {
     shade: ID2D1SolidColorBrush,
     /// The drawn rectangle's dashes.
     white: ID2D1SolidColorBrush,
+    /// The magnified view's swatch. Each use sets its color first: the pixel's under the cursor.
+    swatch: ID2D1SolidColorBrush,
     /// The live label's ink. Each use sets its opacity first, because the brush outlives a frame: full for the
     /// physical text, then the bar's and the logical text's.
     ink: ID2D1SolidColorBrush,
@@ -334,6 +336,7 @@ impl Overlay {
             cyan: brush(0x22, 0xd3, 0xee)?,
             shade: brush(0, 0, 0)?,
             white: brush(255, 255, 255)?,
+            swatch: brush(0, 0, 0)?,
             // #04161b
             ink: brush(0x04, 0x16, 0x1b)?,
             surfaces: Surfaces::new(target, mode)?,

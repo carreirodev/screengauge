@@ -3,7 +3,9 @@
 //! the view the session core hands over is built by the rules the core states (`MagnifiedView`), with a photo whose every
 //! pixel has a color of its own, so a pixel in the wrong place is a wrong color.
 
-use screengauge_core::session::{Coordinate, Label, MagnifiedView, Point, Rect};
+use screengauge_core::session::{
+    ColorText, Coordinate, Label, MagnifiedView, PixelColor, Point, Rect,
+};
 use screengauge_core::settings::Magnification;
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT,
@@ -114,6 +116,11 @@ struct Fixture {
     logical: bool,
     /// What X and Y say: the physical number, and the logical one when `logical`.
     labels: [(&'static str, &'static str); 2],
+    /// The color of the pixel under the cursor, which the swatch shows: one the photo has nowhere, its channels being
+    /// 60 to 209.
+    rgb: [u8; 3],
+    /// What the color's lines say: the first, and the one under it with both formats.
+    color: (&'static str, Option<&'static str>),
 }
 
 impl Fixture {
@@ -131,6 +138,8 @@ impl Fixture {
             tag: false,
             logical: dpi > 96,
             labels: [("1234", "1234.5"), ("1010", "1010.1")],
+            rgb: [30, 144, 255],
+            color: ("#1E90FF", Some("30, 144, 255")),
         }
     }
 
@@ -162,7 +171,12 @@ impl Fixture {
         let side = n * factor;
         let (ring, pad) = (scaled(1, dpi), scaled(6, dpi));
         let lines = if self.logical { 2 } else { 1 };
-        let strip = scaled(7, dpi) + lines * self.line_height() + scaled(2, dpi);
+        let line_height = self.line_height();
+        // The color's row: the swatch of 22 beside one line, or two with both formats, as tall as the taller of them.
+        let swatch_side = scaled(22, dpi);
+        let color_lines = if self.color.1.is_some() { 2 } else { 1 };
+        let row = swatch_side.max(color_lines * line_height);
+        let strip = scaled(7, dpi) + lines * line_height + scaled(5, dpi) + row + scaled(2, dpi);
         let (left, top) = (SCREEN.left + 100, SCREEN.top + 70);
         let panel = core_rect(
             left,
@@ -190,7 +204,6 @@ impl Fixture {
         let inset = scaled(4, dpi);
         let width = side - 2 * inset;
         let strip_top = frame_top + side + scaled(7, dpi);
-        let line_height = self.line_height();
         let (x_line, y_line) = if self.logical {
             (
                 core_rect(frame_left + inset, strip_top, width, line_height),
@@ -221,6 +234,37 @@ impl Fixture {
             },
             line,
         };
+        // The color's row is 5 under the position, the swatch at its left and the text 8 after it, each centered in the
+        // row with the odd pixel below.
+        let row_top = strip_top + lines * line_height + scaled(5, dpi);
+        let beside = swatch_side + scaled(8, dpi);
+        let swatch = core_rect(
+            frame_left + inset,
+            row_top + (row - swatch_side + 1) / 2,
+            swatch_side,
+            swatch_side,
+        );
+        let first_top = row_top + (row - color_lines * line_height + 1) / 2;
+        let color_line = |top| {
+            core_rect(
+                frame_left + inset + beside,
+                top,
+                width - beside,
+                line_height,
+            )
+        };
+        let color = PixelColor {
+            rgb: self.rgb,
+            swatch,
+            first: ColorText {
+                text: self.color.0.to_owned(),
+                line: color_line(first_top),
+            },
+            second: self.color.1.map(|text| ColorText {
+                text: text.to_owned(),
+                line: color_line(first_top + line_height),
+            }),
+        };
         MagnifiedView {
             monitor: 0,
             panel,
@@ -233,6 +277,7 @@ impl Fixture {
             tag: self.tag,
             x: coordinate(self.labels[0], x_line),
             y: coordinate(self.labels[1], y_line),
+            color,
         }
     }
 }
@@ -971,12 +1016,139 @@ impl Drawn {
     }
 }
 
-/// The widest realistic strip: a monitor 3840 by 2560 at 150% or 175%, the cursor in the far corner. At 100% there is no
-/// logical part.
+/// The widest realistic strip: a monitor 3840 by 2560 at 150% or 175%, the cursor in the far corner, on a light gray.
+/// At 100% there is no logical part. `#DDDDDD` is the widest HEX in Segoe UI semibold, and every RGB of three
+/// three-digit channels is as wide as `255, 255, 255`, the digits being tabular.
 fn widest(dpi: u32, magnification: Magnification) -> Fixture {
     Fixture {
         labels: [("3839", "2559.3"), ("2159", "1439.3")],
+        rgb: [0xdd, 0xdd, 0xdd],
+        color: ("#DDDDDD", Some("221, 221, 221")),
         ..Fixture::new(dpi, magnification)
+    }
+}
+
+/// The color's swatch and its lines, where its ink goes.
+fn color_parts(view: &MagnifiedView) -> Vec<RECT> {
+    let color = &view.color;
+    [
+        Some(color.swatch),
+        Some(color.first.line),
+        color.second.as_ref().map(|second| second.line),
+    ]
+    .into_iter()
+    .flatten()
+    .map(ints)
+    .collect()
+}
+
+#[test]
+fn the_colors_texts_stay_inside_their_lines_for_the_widest_values_in_every_color_format() {
+    let canvas = Canvas::new(640, 640);
+    let photo = photo(&canvas);
+    // Color format at Both, HEX and RGB, at 32x, the narrowest strip: at 120 DPI its 5 pixels a side are 160 physical
+    // pixels, 128 logical.
+    let formats = [
+        ("#DDDDDD", Some("221, 221, 221")),
+        ("#DDDDDD", None),
+        ("221, 221, 221", None),
+    ];
+    for mode in MODES {
+        for dpi in [96, 120, 144, 168] {
+            for color in formats {
+                let fixture = Fixture {
+                    color,
+                    ..widest(dpi, Magnification::X32)
+                };
+                let drawn = draw_view(&canvas, &photo, mode, dpi, fixture.view());
+                let context = format!("{color:?}, {mode:?} at {dpi} DPI");
+                let strip = drawn.strip();
+                let swatch = ints(drawn.view.color.swatch);
+                // Each text is what changes when it is blanked, and it is inside its own line, which starts after the
+                // swatch and ends before the strip does.
+                for second in [false, true] {
+                    let mut blanked = drawn.view.clone();
+                    let text = if second {
+                        match blanked.color.second.as_mut() {
+                            Some(text) => text,
+                            None => continue,
+                        }
+                    } else {
+                        &mut blanked.color.first
+                    };
+                    let line = ints(text.line);
+                    text.text = " ".to_owned();
+                    let without = draw_view(&canvas, &photo, mode, dpi, blanked);
+                    let changed: Vec<(i32, i32)> = pixels(strip)
+                        .filter(|&(x, y)| at(&drawn.picture, x, y) != at(&without.picture, x, y))
+                        .collect();
+                    assert!(changed.len() > 30, "{} pixels, {context}", changed.len());
+                    for &(x, y) in &changed {
+                        assert!(
+                            inside(&line, x, y),
+                            "text at ({x}, {y}) outside its line {line:?}, {context}"
+                        );
+                    }
+                    let left = changed.iter().map(|&(x, _)| x).min().expect("ink");
+                    let right = changed.iter().map(|&(x, _)| x).max().expect("ink");
+                    assert!(
+                        left >= swatch.right && right < line.right && line.right <= strip.right,
+                        "ink from column {left} to {right}, swatch {swatch:?}, line {line:?}, strip {strip:?}, \
+                         {context}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_hex_is_in_the_ink_and_the_rgb_under_it_fainter() {
+    let canvas = Canvas::new(640, 640);
+    let photo = photo(&canvas);
+    for mode in MODES {
+        for dpi in [96, 144] {
+            let drawn = draw_view(
+                &canvas,
+                &photo,
+                mode,
+                dpi,
+                Fixture::new(dpi, Magnification::X8).view(),
+            );
+            let context = format!("{mode:?} at {dpi} DPI");
+            let color = &drawn.view.color;
+            let strong = drawn.contrast(ints(color.first.line));
+            let second = color.second.as_ref().expect("RGB under HEX");
+            let faint = drawn.contrast(ints(second.line));
+            // HEX reaches the ink, as the position's numbers do; RGB is at CSS opacity .62.
+            let ink_distance = tokens(mode).ink[1].abs_diff(drawn.panel_color()[1]);
+            assert!(
+                strong.abs_diff(ink_distance) <= 6,
+                "{strong} against {ink_distance}, {context}"
+            );
+            let ratio = f32::from(faint) / f32::from(strong);
+            assert!(
+                (0.5..0.72).contains(&ratio),
+                "RGB is {ratio} of HEX, {context}"
+            );
+            // With RGB alone, it is in the ink.
+            let alone = draw_view(
+                &canvas,
+                &photo,
+                mode,
+                dpi,
+                Fixture {
+                    color: ("30, 144, 255", None),
+                    ..Fixture::new(dpi, Magnification::X8)
+                }
+                .view(),
+            );
+            let alone_contrast = alone.contrast(ints(alone.view.color.first.line));
+            assert!(
+                alone_contrast.abs_diff(ink_distance) <= 6,
+                "{alone_contrast} against {ink_distance}, {context}"
+            );
+        }
     }
 }
 
@@ -991,14 +1163,18 @@ fn the_strips_texts_stay_inside_their_lines_and_the_panel_for_the_widest_numbers
             let drawn = draw_view(&canvas, &photo, mode, dpi, fixture.view());
             let context = format!("{mode:?} at {dpi} DPI");
             let (x_line, y_line) = (ints(drawn.view.x.line), ints(drawn.view.y.line));
+            let color = color_parts(&drawn.view);
             let strip = drawn.strip();
-            // Everything in the strip is in one of the two lines, which are inside the panel's border.
+            // Everything in the strip is in one of the two lines or in the color's row, all inside the panel's border.
             let ink = drawn.ink(strip, 8);
             assert!(ink.len() > 100, "{} ink pixels, {context}", ink.len());
             for &(x, y) in &ink {
                 assert!(
-                    inside(&x_line, x, y) || inside(&y_line, x, y),
-                    "ink at ({x}, {y}) outside the lines {x_line:?} and {y_line:?}, {context}"
+                    inside(&x_line, x, y)
+                        || inside(&y_line, x, y)
+                        || color.iter().any(|part| inside(part, x, y)),
+                    "ink at ({x}, {y}) outside the lines {x_line:?} and {y_line:?} and the color's {color:?}, \
+                     {context}"
                 );
             }
             // Each coordinate's number and bar are inside its own line: what changes when its label is blanked.
@@ -1392,6 +1568,51 @@ fn the_shadow_is_within_7_hundredths_of_opacity_of_the_prototypes_below_and_besi
             assert!(
                 (found - wanted).abs() < 0.07,
                 "{d} beside the panel the shadow is {found}, CSS's is {wanted}, {mode:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_swatch_is_exactly_the_pixels_color_inside_a_ring_of_the_border_with_round_corners() {
+    let canvas = Canvas::new(640, 640);
+    let photo = photo(&canvas);
+    for mode in MODES {
+        for dpi in [96, 120, 144, 168] {
+            let fixture = Fixture::new(dpi, Magnification::X8);
+            let view = fixture.view();
+            let picture = render(&canvas, &photo, mode, dpi, &view);
+            let context = format!("{mode:?} at {dpi} DPI");
+            // `.sw`: 22 a side, its ring of 1 inside it, in `--panel-border` over the swatch's own color, as CSS paints a
+            // border over the box's background, and corners of 6.
+            let swatch = ints(view.color.swatch);
+            assert_eq!(swatch.right - swatch.left, scaled(22, dpi), "{context}");
+            let (ring, radius) = (scaled(1, dpi), scaled(6, dpi));
+            let tokens = tokens(mode);
+            let ring_color = over(tokens.border.0, tokens.border.1, fixture.rgb);
+            for (x, y) in pixels(swatch) {
+                let across = (x - swatch.left).min(swatch.right - 1 - x);
+                let down = (y - swatch.top).min(swatch.bottom - 1 - y);
+                if across < radius && down < radius {
+                    continue;
+                }
+                let found = at(&picture, x, y);
+                if across < ring || down < ring {
+                    assert!(
+                        near(found, ring_color, 1),
+                        "ring pixel ({x}, {y}) is {found:?}, wanted {ring_color:?}, {context}"
+                    );
+                } else {
+                    // Pixel-exact: the color the user copies is the one they see.
+                    assert_eq!(found, fixture.rgb, "pixel ({x}, {y}), {context}");
+                }
+            }
+            // The corner's own pixel is past the round corner: the panel shows there.
+            let panel = tokens.panel_over(BACKGROUND);
+            let corner = at(&picture, swatch.left, swatch.top);
+            assert!(
+                near(corner, panel, 2),
+                "corner {corner:?}, panel {panel:?}, {context}"
             );
         }
     }

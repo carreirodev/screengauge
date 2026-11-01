@@ -174,7 +174,8 @@ fn the_grid_parts_the_pixels_from_8x_up() {
 #[test]
 fn the_panel_is_22_logical_pixels_below_and_right_of_the_cursor_around_the_frame_and_the_strip() {
     // At 100%: a border of 1 and a padding of 6 around the frame of 168, which the strip follows: 7 above its line of
-    // 16 (12px text at a line height of 1.35, 16.2) and 2 below it.
+    // 16 (12px text at a line height of 1.35, 16.2), 5 above the color's row, as tall as HEX above RGB in Color format's
+    // default, Both, two lines of 16, and 2 below it.
     let view = view(&open_at(MIDDLE));
     assert_eq!(
         view.panel,
@@ -182,7 +183,7 @@ fn the_panel_is_22_logical_pixels_below_and_right_of_the_cursor_around_the_frame
             left: 922,
             top: 622,
             width: 7 + 168 + 7,
-            height: 7 + 168 + 7 + 16 + 2 + 7,
+            height: 7 + 168 + 7 + 16 + 5 + 2 * 16 + 2 + 7,
         }
     );
     assert_eq!(view.frame, square(929, 629, 168));
@@ -191,7 +192,8 @@ fn the_panel_is_22_logical_pixels_below_and_right_of_the_cursor_around_the_frame
 #[test]
 fn at_150_percent_every_size_of_the_panel_is_scaled_on_its_own() {
     // Each size halves up on its own: a border of 2 (1.5) and a padding of 9, 33 above and right of the cursor, and the
-    // strip's 11 above its two lines of 24 (24.3) and 3 below them. The logical pixels show, so X and Y take a line each.
+    // strip's 11 above its two lines of 24 (24.3), 8 (7.5) above the color's two lines of 24, and 3 below them. The
+    // logical pixels show, so X and Y take a line each.
     let view = view(&open_with(144, Magnification::X8, MIDDLE));
     assert_eq!(
         view.panel,
@@ -199,7 +201,7 @@ fn at_150_percent_every_size_of_the_panel_is_scaled_on_its_own() {
             left: 933,
             top: 633,
             width: 11 + 264 + 11,
-            height: 11 + 264 + 11 + 2 * 24 + 3 + 11,
+            height: 11 + 264 + 11 + 2 * 24 + 8 + 2 * 24 + 3 + 11,
         }
     );
     assert_eq!(view.frame, square(944, 644, 264));
@@ -217,7 +219,7 @@ fn at(x: i32, y: i32) -> Point {
     Point { x, y }
 }
 
-// At 100% and 8× the panel is 182 wide and 207 tall, and starts 22 right of and below the cursor.
+// At 100% and 8× the panel is 182 wide and 244 tall, and starts 22 right of and below the cursor.
 
 #[test]
 fn near_the_monitors_right_side_the_panel_goes_left_of_the_cursor_and_stays_below_it() {
@@ -232,10 +234,11 @@ fn near_the_monitors_right_side_the_panel_goes_left_of_the_cursor_and_stays_belo
 
 #[test]
 fn near_the_monitors_bottom_the_panel_goes_above_the_cursor_and_stays_right_of_it() {
-    assert_eq!(corner(&view(&open_at(at(900, 847)))), at(922, 869));
+    // At 810 the panel ends 4 short of the monitor's bottom, as near as it comes; a pixel further it goes above.
+    assert_eq!(corner(&view(&open_at(at(900, 810)))), at(922, 832));
     assert_eq!(
-        corner(&view(&open_at(at(900, 848)))),
-        at(922, 848 - 22 - 207)
+        corner(&view(&open_at(at(900, 811)))),
+        at(922, 811 - 22 - 244)
     );
 }
 
@@ -243,7 +246,7 @@ fn near_the_monitors_bottom_the_panel_goes_above_the_cursor_and_stays_right_of_i
 fn in_the_bottom_right_corner_the_panel_goes_above_and_left_of_the_cursor() {
     assert_eq!(
         corner(&view(&open_at(at(1900, 1070)))),
-        at(1900 - 22 - 182, 1070 - 22 - 207)
+        at(1900 - 22 - 182, 1070 - 22 - 244)
     );
 }
 

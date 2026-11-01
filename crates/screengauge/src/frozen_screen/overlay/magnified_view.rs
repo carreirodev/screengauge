@@ -1,27 +1,33 @@
 //! Inspect's magnified view (v1 spec WPC-296, Inspect; the prototype's variant A, WPC-279): the floating panel, the
 //! frozen screen's pixels enlarged without smoothing, the grid, the outline around the pixel under the cursor, the
-//! magnification's tag and the strip with the cursor's position. Every rectangle comes from the session core's
-//! [`MagnifiedView`]; this only draws them onto the overlay's render target.
+//! magnification's tag and the strip with the cursor's position and the color of the pixel under it. Every rectangle
+//! comes from the session core's [`MagnifiedView`]; this only draws them onto the overlay's render target.
 //!
-//! The prototype's `drawMag` and its CSS (`.panel`, `.magframe`, `.magtag`, `.info`) are the model. Where the core hands
+//! The prototype's `drawMag` and its CSS (`.panel`, `.magframe`, `.magtag`, `.info`, `.sw`) are the model. Where the core hands
 //! over a rectangle, it is used as it is; the rest of the sizes below are the prototype's, in logical pixels, which
 //! `scaled` turns into physical pixels for the monitor's scale, each one on its own.
 
 use std::mem::ManuallyDrop;
 
-use screengauge_core::session::{Coordinate, MagnifiedView};
+use screengauge_core::session::{ColorText, Coordinate, MagnifiedView, PixelColor};
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
     D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_DRAW_TEXT_OPTIONS_NONE,
     D2D1_LAYER_OPTIONS_NONE, D2D1_LAYER_PARAMETERS, D2D1_ROUNDED_RECT,
     D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1Bitmap, ID2D1Geometry, ID2D1Layer, ID2D1RenderTarget,
+    ID2D1StrokeStyle,
 };
-use windows::Win32::Graphics::DirectWrite::{DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_BOLD};
+use windows::Win32::Graphics::DirectWrite::{
+    DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_BOLD, IDWriteTextFormat,
+};
 use windows::core::{Error, Interface};
 
 use super::geometry::{self, scaled};
-use super::{Overlay, PlacedLogical, PlacedText, Typeset, dot, px, rounded_at};
+use super::palette::d2d_color;
+use super::{
+    LOGICAL_OPACITY, Overlay, PlacedLogical, PlacedText, Typeset, dot, px, ring, rounded_at,
+};
 
 // Every size below is in logical pixels, which `scaled` turns into physical pixels for the monitor's scale.
 
@@ -30,17 +36,17 @@ const PANEL_RADIUS: u32 = 14;
 const FRAME_RADIUS: u32 = 9;
 
 /// How much of the notice's shadow this panel casts. The notice's layers are fitted to a shadow box 15px tall (the
-/// notice's 31px less the spread of 8 on each side). This panel is up to 190 by 231 logical pixels (a frame of 176 or
-/// less, a strip of 41 at most), so its box is up to 174 by 215: as good as an edge, as far as a blur of sigma 14 (dark)
-/// or 13 (light) can tell. A box that tall casts a shadow stronger than the layers give at full strength, so they are
+/// notice's 31px less the spread of 8 on each side). This panel is up to 190 by 269 logical pixels (a frame of 176 or
+/// less, a strip of 79 at most, the position and the color on two lines each), so its box is up to 174 by 253: as good
+/// as an edge, as far as a blur of sigma 14 (dark) or 13 (light) can tell. A box that tall casts a shadow stronger than the layers give at full strength, so they are
 /// made stronger, as the tolerance indicator's, a lower panel than the notice, makes them fainter (see
 /// `SHADOW_STRENGTH` in `tolerance`).
 ///
 /// Fitted by least squares, the layers laid over each other as Direct2D lays them, against CSS's true blur of the box
 /// (`0 10px 28px -8px` at .75 in the dark palette, `0 10px 26px -8px` at .45 in the light one, sigma half the blur),
 /// read outward from the panel at 1 pixel steps: 0 to 30 pixels beyond its sides and its top, and 0 to 40 below it. The
-/// answer is the same for every panel from 174 by 199 to 214 by 255, which are all much taller than the blur. Dark and
-/// light want:
+/// answer is the same for every panel from 174 by 199 to 214 by 255, which are all much taller than the blur, and so for
+/// the taller ones the color's row makes (WPC-316): a taller box is only more of an edge. Dark and light want:
 ///
 /// - down the middle, below the panel, which is how the tolerance indicator's 0.68 was found (the same reading gives its
 ///   0.67 and 0.70): 1.32 and 1.25;
@@ -73,6 +79,11 @@ pub const TAG_WEIGHT: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT_BOLD;
 const KEY_WIDTH: u32 = 14;
 const GAP: u32 = 8;
 const BAR_MARGIN: u32 = 7;
+
+/// The swatch (`.sw`): corners of 6px, and a ring of 1px inside its side in `--panel-border`, over the swatch's own
+/// color.
+const SWATCH_RADIUS: u32 = 6;
+const SWATCH_RING: u32 = 1;
 
 /// Where the frame's parts go, in physical pixels of the virtual screen, right and bottom one past the last pixel.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -196,6 +207,15 @@ struct PlacedLine {
     logical: Option<PlacedLogical>,
 }
 
+/// The color's part of the strip, ready to draw: the swatch and its ring, and the texts beside it.
+struct PlacedColor {
+    swatch: D2D1_ROUNDED_RECT,
+    ring: i32,
+    rgb: [u8; 3],
+    first: PlacedText,
+    second: Option<PlacedText>,
+}
+
 impl Overlay {
     /// Draws `view` over the measurements and under the toolbar, between BeginDraw and EndDraw, enlarging the pixels of
     /// `photo`, the window's monitor's photo with its pixel (0, 0) at the monitor's top left corner.
@@ -215,6 +235,7 @@ impl Overlay {
             None
         };
         let lines = [self.line("X", &view.x)?, self.line("Y", &view.y)?];
+        let color = self.color(&view.color)?;
         let radius = scaled(FRAME_RADIUS, self.dpi);
         let mask: ID2D1Geometry = self
             .geometry_of(&self.shaped(&places.frame, radius, 0, 0))?
@@ -256,6 +277,7 @@ impl Overlay {
         drop(ManuallyDrop::into_inner(parameters.geometricMask));
 
         self.draw_strip(target, &lines);
+        self.draw_color(target, &color);
         Ok(())
     }
 
@@ -486,11 +508,83 @@ impl Overlay {
             }
         }
     }
+
+    /// The color's swatch, its corners rounded, and its texts, each laid out in its line in `format` with the same
+    /// tabular figures as the position, its baseline on a whole pixel, as a coordinate's number is. The first text is
+    /// semibold, the prototype's `.v`, and the one under it medium, its `.dm`.
+    fn color(&self, color: &PixelColor) -> windows::core::Result<PlacedColor> {
+        let place = |text: &ColorText, format: &IDWriteTextFormat| {
+            let typeset = self.typeset(&text.text, format)?;
+            let line = geometry::bounds(text.line)?;
+            let window = self.in_window(&line);
+            let baseline = typeset.baseline_in(window.top, px(line.bottom - line.top));
+            Ok::<_, Error>(PlacedText {
+                left: window.left,
+                top: baseline - typeset.baseline,
+                layout: typeset.layout,
+            })
+        };
+        Ok(PlacedColor {
+            swatch: self.shaped(
+                &geometry::bounds(color.swatch)?,
+                scaled(SWATCH_RADIUS, self.dpi),
+                0,
+                0,
+            ),
+            ring: scaled(SWATCH_RING, self.dpi),
+            rgb: color.rgb,
+            first: place(&color.first, &self.format)?,
+            second: color
+                .second
+                .as_ref()
+                .map(|second| place(second, &self.logical_format))
+                .transpose()?,
+        })
+    }
+
+    /// The swatch in the pixel's color with the palette's border over its edge, then the first text in the ink and the
+    /// one under it, when there is one, at `LOGICAL_OPACITY`, as the prototype's `.dm` and a label's logical part.
+    fn draw_color(&self, target: &ID2D1RenderTarget, color: &PlacedColor) {
+        let origin = |text: &PlacedText| dot(text.left, text.top).point;
+        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
+        // Direct2D only fails the frame at EndDraw. Each brush's color or opacity is set before it is used, because the
+        // brushes keep the last one.
+        unsafe {
+            // The straight sides are on whole pixels, so they are crisp; only the corners are antialiased.
+            target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            self.swatch.SetColor(&d2d_color(color.rgb, 1.0));
+            target.FillRoundedRectangle(&color.swatch, &self.swatch);
+            target.DrawRoundedRectangle(
+                &ring(&color.swatch, px(color.ring)),
+                &self.surfaces.border,
+                px(color.ring),
+                None::<&ID2D1StrokeStyle>,
+            );
+            // Grayscale, not ClearType: color fringes would show on the see-through panel.
+            target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+            self.surfaces.ink.SetOpacity(1.0);
+            target.DrawTextLayout(
+                origin(&color.first),
+                &color.first.layout,
+                &self.surfaces.ink,
+                D2D1_DRAW_TEXT_OPTIONS_NONE,
+            );
+            if let Some(second) = &color.second {
+                self.surfaces.ink.SetOpacity(LOGICAL_OPACITY);
+                target.DrawTextLayout(
+                    origin(second),
+                    &second.layout,
+                    &self.surfaces.ink,
+                    D2D1_DRAW_TEXT_OPTIONS_NONE,
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use screengauge_core::session::{Label, Point, Rect};
+    use screengauge_core::session::{ColorText, Label, PixelColor, Point, Rect};
     use screengauge_core::settings::Magnification;
 
     use super::*;
@@ -512,6 +606,15 @@ mod tests {
             label: Label::default(),
             line,
         };
+        let color = PixelColor {
+            rgb: [0, 0, 0],
+            swatch: line,
+            first: ColorText {
+                text: String::new(),
+                line,
+            },
+            second: None,
+        };
         MagnifiedView {
             monitor: 0,
             panel: rect(104, 264, 182, 230),
@@ -524,6 +627,7 @@ mod tests {
             tag: false,
             x: coordinate.clone(),
             y: coordinate,
+            color,
         }
     }
 

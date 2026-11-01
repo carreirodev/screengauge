@@ -4,10 +4,10 @@
 //! a fixed height, as CSS gives them, so the panel's size needs no font and the session core places it.
 
 use super::frozen_screen::{Photo, Point, Rect};
-use super::output::{Coordinate, MagnifiedView};
+use super::output::{ColorText, Coordinate, MagnifiedView, PixelColor};
 use super::toolbar::scaled;
-use super::units;
-use crate::settings::Magnification;
+use super::{color, pixels, units};
+use crate::settings::{ColorFormat, Magnification};
 
 // Every size below is in logical pixels.
 
@@ -33,12 +33,18 @@ const STRIP_BOTTOM: u32 = 2;
 const LINE_TENTHS: u32 = 162;
 /// The room between X and Y when they share a line (the grid's `gap: 0 8px`).
 const COLUMN_GAP: u32 = 8;
+/// The room between the cursor's position and the color's row under it (the row's `margin-top: 5px`).
+const COLOR_GAP: u32 = 5;
+/// The swatch's side, its ring inside it (`.sw`, 22px by 22px with `box-sizing: border-box`).
+const SWATCH: u32 = 22;
+/// The room between the swatch and the color's text (the row's `gap: 8px`).
+const SWATCH_GAP: u32 = 8;
 /// The lowest magnification with a grid between the enlarged pixels.
 const GRID_FROM: Magnification = Magnification::X8;
 
 /// The magnified view around `center`, the pixel under the cursor, on `photo`'s monitor, the frozen screen's monitor
-/// `monitor`: at `magnification`, with its tag while `tag`, and the cursor's position with its logical pixels when
-/// `also_show_logical_pixels` and the monitor's scale isn't 100%.
+/// `monitor`: at `magnification`, with its tag while `tag`, the cursor's position with its logical pixels when
+/// `also_show_logical_pixels` and the monitor's scale isn't 100%, and the pixel's color in `color_format`.
 pub(super) fn magnified_view(
     photo: &Photo,
     monitor: usize,
@@ -46,6 +52,7 @@ pub(super) fn magnified_view(
     magnification: Magnification,
     tag: bool,
     also_show_logical_pixels: bool,
+    color_format: ColorFormat,
 ) -> MagnifiedView {
     let dpi = photo.scale.dpi();
     let factor = magnification.factor();
@@ -69,12 +76,24 @@ pub(super) fn magnified_view(
     );
     // X and Y with their logical pixels don't fit the strip side by side (the owner's choice in WPC-315).
     let stacked = x.logical.is_some();
+    let rgb = pixels::color(photo, center);
+    let [first, other] = color::texts(rgb, color_format);
+    // HEX above RGB with both formats (the owner's choice in WPC-316).
+    let second = (color_format == ColorFormat::Both).then_some(other);
 
     let side = across.saturating_mul(factor);
     let inset = scaled(RING, dpi) + scaled(PAD, dpi);
     let line = line_height(dpi);
     let lines = if stacked { 2 } else { 1 };
-    let strip = scaled(STRIP_TOP, dpi) + lines * line + scaled(STRIP_BOTTOM, dpi);
+    let swatch_side = scaled(SWATCH, dpi);
+    let color_lines = if second.is_some() { 2 } else { 1 };
+    // The color's row is as tall as the swatch or its text, whichever is taller (`align-items: center`).
+    let row = swatch_side.max(color_lines * line);
+    let strip = scaled(STRIP_TOP, dpi)
+        + lines * line
+        + scaled(COLOR_GAP, dpi)
+        + row
+        + scaled(STRIP_BOTTOM, dpi);
     let width = inset + side + inset;
     let height = inset + side + strip + inset;
     let panel = Rect {
@@ -123,6 +142,38 @@ pub(super) fn magnified_view(
         (x_line, y_line)
     };
 
+    let row_top = first_line
+        .saturating_add_unsigned(lines * line)
+        .saturating_add_unsigned(scaled(COLOR_GAP, dpi));
+    let swatch = Rect {
+        left: text_left,
+        top: row_top.saturating_add_unsigned(centered(row, swatch_side)),
+        width: swatch_side,
+        height: swatch_side,
+    };
+    let beside = swatch_side + scaled(SWATCH_GAP, dpi);
+    let first_color_line = Rect {
+        left: text_left.saturating_add_unsigned(beside),
+        top: row_top.saturating_add_unsigned(centered(row, color_lines * line)),
+        width: text_width.saturating_sub(beside),
+        height: line,
+    };
+    let color = PixelColor {
+        rgb,
+        swatch,
+        first: ColorText {
+            text: first,
+            line: first_color_line,
+        },
+        second: second.map(|text| ColorText {
+            text,
+            line: Rect {
+                top: first_color_line.top.saturating_add_unsigned(line),
+                ..first_color_line
+            },
+        }),
+    };
+
     MagnifiedView {
         monitor,
         panel,
@@ -141,7 +192,14 @@ pub(super) fn magnified_view(
             label: y,
             line: y_line,
         },
+        color,
     }
+}
+
+/// How far below the top of a row `outer` pixels tall something `inner` pixels tall starts when centered in it: half
+/// the spare room, rounded up as Chromium puts a box on the pixel grid.
+fn centered(outer: u32, inner: u32) -> u32 {
+    outer.saturating_sub(inner).div_ceil(2)
 }
 
 /// How many of the frozen screen's pixels the view holds a side on a monitor of `dpi` at `magnification`: the most whole

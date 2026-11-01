@@ -91,8 +91,9 @@ pub struct ToleranceIndicator {
 /// Inspect's magnified view (v1 spec WPC-296, Inspect; the prototype's variant A, WPC-279): a panel a little below and
 /// to the right of the cursor, or on the other side of it near the monitor's limits, never leaving the current monitor.
 /// It holds a square of the frozen screen's pixels around the cursor, each enlarged to a square of the magnification's
-/// side without smoothing, and under it a strip with the cursor's position. Every rectangle is in physical pixels of
-/// the virtual screen, worked out in the session core from sizes in logical pixels, so nothing in it depends on a font.
+/// side without smoothing, and under it a strip with the cursor's position and the color of the pixel under it. Every
+/// rectangle is in physical pixels of the virtual screen, worked out in the session core from sizes in logical pixels,
+/// so nothing in it depends on a font.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MagnifiedView {
     /// The current monitor, as an index in the frozen screen's order. Everything below is inside it.
@@ -121,6 +122,34 @@ pub struct MagnifiedView {
     pub x: Coordinate,
     /// How far it is from the current monitor's top.
     pub y: Coordinate,
+    /// The color of the pixel under the cursor, on the strip under its position.
+    pub color: PixelColor,
+}
+
+/// The color of the pixel under the cursor on the magnified view's strip (v1 spec WPC-296, Inspect): a swatch of it at
+/// the strip's left, and beside it its HEX, its RGB, or its HEX above its RGB, as Color format says. HEX, RGB and the
+/// swatch don't fit one line of the strip at every magnification and scale, so with both formats HEX and RGB take a
+/// line each, whatever the color, and the panel keeps its size as the cursor moves (the owner's choice in WPC-316).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PixelColor {
+    /// Its red, green and blue, exactly as the frozen screen has the pixel: never averaged with its neighbors.
+    pub rgb: [u8; 3],
+    /// The swatch, filled with the color: a square of 22 logical pixels with a 1-pixel ring inside it in the palette's
+    /// border color and corners of 6, centered in the color's row.
+    pub swatch: Rect,
+    /// What the click copies, in the ink: `#1E90FF`, or `30, 144, 255` with Color format at RGB.
+    pub first: ColorText,
+    /// `30, 144, 255` under the HEX, fainter, with Color format at Both, which Shift + click copies. `None` with HEX or
+    /// RGB alone, when Shift + click copies the other format all the same.
+    pub second: Option<ColorText>,
+}
+
+/// One of the color's texts on the magnified view's strip.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColorText {
+    pub text: String,
+    /// Where it goes: the line's height, starting at the text's left, after the swatch.
+    pub line: Rect,
 }
 
 /// One of the cursor's coordinates on the magnified view's strip: `X` or `Y`, the physical pixels, and, after a thin

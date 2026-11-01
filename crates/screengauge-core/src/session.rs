@@ -6,6 +6,7 @@
 //! never calls Windows and never reads the clock: the local time comes with each event.
 
 mod bounds;
+mod color;
 mod dimensions;
 mod event;
 mod frozen_screen;
@@ -18,15 +19,15 @@ mod units;
 pub use event::{Event, Held, Input, Key, LocalTime, ToolbarButton};
 pub use frozen_screen::{Colors, Image, Photo, Point, Rect, Scale};
 pub use output::{
-    Coordinate, Cursor, DrawnRectangle, Effect, Label, MagnifiedView, Measurement, Message, Notice,
-    Scene, Sign, Span, ToleranceIndicator, Toolbar,
+    ColorText, Coordinate, Cursor, DrawnRectangle, Effect, Label, MagnifiedView, Measurement,
+    Message, Notice, PixelColor, Scene, Sign, Span, ToleranceIndicator, Toolbar,
 };
 
 use std::fmt;
 use std::time::Duration;
 
 use crate::settings::{
-    DimensionsMode, Magnification, Options, Remembered, Tolerance, Tool, ToolbarPlace,
+    ColorFormat, DimensionsMode, Magnification, Options, Remembered, Tolerance, Tool, ToolbarPlace,
 };
 
 /// How long a notice stays on screen: a little over a second, the approved prototype's 1.3 s (v1 spec WPC-296, Como as
@@ -100,6 +101,8 @@ pub struct Session {
     tolerance: Tolerance,
     /// "Also show logical pixels" in Settings: whether a label on a monitor whose scale isn't 100% shows them.
     also_show_logical_pixels: bool,
+    /// "Color format" in Settings: how Inspect shows and copies the color.
+    color_format: ColorFormat,
     /// The remembered state as the tools opened, and as they will leave it: the Windows layer keeps it only when the
     /// two differ.
     remembered_at_opening: Remembered,
@@ -188,6 +191,7 @@ impl Session {
             measured_at: None,
             tolerance: options.default_tolerance,
             also_show_logical_pixels: options.also_show_logical_pixels,
+            color_format: options.color_format,
             remembered_at_opening: remembered.clone(),
             remembered,
             live: None,
@@ -297,8 +301,8 @@ impl Session {
         }
     }
 
-    /// What a press off the toolbar does with the active tool: Dimensions pins what it measures, and Bounds starts a
-    /// drag.
+    /// What a press off the toolbar does with the active tool: Dimensions pins what it measures, Bounds starts a drag,
+    /// and Inspect copies the color.
     fn press(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
         match self.remembered.last_tool {
             Tool::Dimensions => self.pin(held, uptime),
@@ -306,8 +310,34 @@ impl Session {
                 self.start_drag(held.alt, uptime);
                 Vec::new()
             }
-            Tool::Inspect | Tool::Snip => Vec::new(),
+            Tool::Inspect => self.copy_color(held, uptime),
+            Tool::Snip => Vec::new(),
         }
+    }
+
+    /// Copies the color of the pixel at the magnified view's center, the one under the cursor at the click, and shows
+    /// "Copied"; the tool stays as it was, and nothing is pinned (v1 spec WPC-296, Inspect). It copies the format the
+    /// strip shows first, or with Shift held the other, even when it doesn't show. The second click of the double-click
+    /// that called ScreenGauge copies nothing, as it pins nothing in Dimensions (WPC-308).
+    fn copy_color(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
+        if self.is_second_click(uptime) {
+            return Vec::new();
+        }
+        let Some(at) = self.measured_at else {
+            return Vec::new();
+        };
+        let Some(monitor) = frozen_screen::monitor_at(&self.frozen_screen, at) else {
+            return Vec::new();
+        };
+        let Some(photo) = self.frozen_screen.get(monitor) else {
+            // Can't happen: `monitor_at` gives the index of one of the frozen screen's photos.
+            return Vec::new();
+        };
+        let [first, other] = color::texts(pixels::color(photo, at), self.color_format);
+        let text = if held.shift { other } else { first };
+        let mut effects = vec![Effect::CopyText(text)];
+        effects.extend(self.show(Message::Copied, self.notice_monitor(monitor), uptime));
+        effects
     }
 
     /// Starts drawing a rectangle from where the session last put the cursor, on the monitor there, as Dimensions' click
@@ -771,6 +801,7 @@ impl Session {
             self.remembered.magnification,
             self.tag_until.is_some(),
             self.also_show_logical_pixels,
+            self.color_format,
         ))
     }
 

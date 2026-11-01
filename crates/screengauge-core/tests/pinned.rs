@@ -400,16 +400,23 @@ fn the_next_call_opens_with_nothing_pinned() {
 }
 
 #[test]
-fn a_click_with_another_tool_active_pins_and_copies_nothing() {
-    // Inspect's copy comes with WPC-316.
-    let mut session = Session::open(Opening {
-        remembered: Remembered {
-            last_tool: screengauge_core::settings::Tool::Inspect,
-            ..Remembered::default()
-        },
-        ..opening(vec![two_cards()], DimensionsMode::Horizontal, at(1010, 600))
-    })
-    .expect("a frozen screen the session takes");
+fn a_click_in_inspect_pins_nothing_and_in_snip_copies_nothing_either() {
+    // Inspect's click copies the color (inspect_color.rs); Snip's copy comes with WPC-317.
+    let with = |tool| {
+        Session::open(Opening {
+            remembered: Remembered {
+                last_tool: tool,
+                ..Remembered::default()
+            },
+            ..opening(vec![two_cards()], DimensionsMode::Horizontal, at(1010, 600))
+        })
+        .expect("a frozen screen the session takes")
+    };
+    let mut session = with(screengauge_core::settings::Tool::Inspect);
+    session.handle(click(at(1010, 600), 1000));
+    assert_eq!(pinned(&session), []);
+
+    let mut session = with(screengauge_core::settings::Tool::Snip);
     assert_eq!(session.handle(click(at(1010, 600), 1000)), []);
     assert_eq!(pinned(&session), []);
     assert_eq!(session.scene().notice, None);
