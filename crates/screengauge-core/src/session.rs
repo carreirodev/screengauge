@@ -102,6 +102,10 @@ pub struct Session {
     live: Option<Measurement>,
     /// The drag Bounds is drawing a rectangle with, from the press until the button comes up.
     drag: Option<bounds::Drag>,
+    /// Whether the button is still down after Esc cancelled the drag it was drawing. Until it comes up, the press is
+    /// still the tool's: another Esc, or the repeats of one held down, cancel nothing more and close nothing, and the
+    /// toolbar doesn't react (v1 spec WPC-296, Fechar as ferramentas).
+    held_after_cancel: bool,
     /// The pinned measurements, oldest first.
     pinned: Vec<Measurement>,
     /// The notice on screen, and when it goes.
@@ -180,6 +184,7 @@ impl Session {
             remembered,
             live: None,
             drag: None,
+            held_after_cancel: false,
             pinned: Vec::new(),
             notice: None,
             indicator_until: None,
@@ -215,18 +220,19 @@ impl Session {
         {
             self.indicator_until = None;
         }
-        self.hold_alt(match event.input {
+        let alt = match event.input {
             Input::KeyDown(Key::Alt) => true,
             Input::KeyUp(Key::Alt) => false,
             _ => event.held.alt,
-        });
+        };
+        self.follow_alt(alt);
         match event.input {
             // The second click of the double-click that called ScreenGauge does nothing, on the toolbar as on the tool
             // (WPC-308): it would act on a button the user never aimed at.
             Input::Toolbar(_) if self.is_second_click(event.uptime) => Vec::new(),
-            // Esc with the button held while Bounds draws a rectangle cancels only that drag (v1 spec WPC-296, Fechar as
-            // ferramentas).
-            Input::KeyDown(Key::Esc) if self.drag.is_some() => self.cancel_drag(),
+            // Esc with the button held while Bounds draws a rectangle cancels only that drag, and closes nothing for as
+            // long as the button stays down (v1 spec WPC-296, Fechar as ferramentas).
+            Input::KeyDown(Key::Esc) if self.tool_holds_the_press() => self.cancel_drag(),
             // Esc without a drag closes the tools whatever tool is active (v1 spec WPC-296, derived rule 3), and so do
             // the toolbar's close button and the global shortcut pressed again. Alt+F4 closes them as a whole, never one
             // monitor's window alone.
@@ -285,7 +291,7 @@ impl Session {
         match self.remembered.last_tool {
             Tool::Dimensions => self.pin(held, uptime),
             Tool::Bounds => {
-                self.start_drag(held, uptime);
+                self.start_drag(held.alt, uptime);
                 Vec::new()
             }
             Tool::Inspect | Tool::Snip => Vec::new(),
@@ -293,14 +299,14 @@ impl Session {
     }
 
     /// Starts drawing a rectangle from where the session last put the cursor, on the monitor there, as Dimensions' click
-    /// pins what it measures there, exactly as drawn with Alt `held`. The second click of the double-click that called
-    /// ScreenGauge starts none (WPC-308).
-    fn start_drag(&mut self, held: Held, uptime: Duration) {
+    /// pins what it measures there, exactly as drawn while `exact`, with Alt held. The second click of the double-click
+    /// that called ScreenGauge starts none (WPC-308).
+    fn start_drag(&mut self, exact: bool, uptime: Duration) {
         if self.is_second_click(uptime) {
             return;
         }
         self.drag = frozen_screen::monitor_at(&self.frozen_screen, self.cursor)
-            .map(|monitor| bounds::Drag::new(self.cursor, monitor, held.alt));
+            .map(|monitor| bounds::Drag::new(self.cursor, monitor, exact));
         self.measure();
     }
 
@@ -308,15 +314,22 @@ impl Session {
     /// content otherwise. Alt counts as each event has it, so pressing or letting go of it in the middle of the drag
     /// changes the preview at once, and the release goes by the key as the button comes up (v1 spec WPC-296, Bounds).
     /// Only a change measures again: Alt held down repeats, and a shrink may read a whole monitor.
-    fn hold_alt(&mut self, alt: bool) {
-        if let Some(drag) = self.drag.as_mut().filter(|drag| drag.exact != alt) {
-            drag.exact = alt;
+    fn follow_alt(&mut self, alt: bool) {
+        if self.drag.as_mut().is_some_and(|drag| drag.follow_alt(alt)) {
             self.measure();
         }
     }
 
-    /// What the button coming up does: it lets go of the dragged toolbar, or ends the drag Bounds was drawing.
+    /// Whether the button is held for the tool: Bounds draws a rectangle, or Esc cancelled the one it drew and the
+    /// button hasn't come up since.
+    fn tool_holds_the_press(&self) -> bool {
+        self.drag.is_some() || self.held_after_cancel
+    }
+
+    /// What the button coming up does: it lets go of the dragged toolbar, or ends the drag Bounds was drawing, or, after
+    /// Esc cancelled that drag, does nothing.
     fn release(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
+        self.held_after_cancel = false;
         match self.drag.take() {
             Some(drag) => self.finish_drag(drag, held, uptime),
             None => self.let_go(),
@@ -327,6 +340,7 @@ impl Session {
     /// measurement, and the button coming up afterwards pins and copies nothing.
     fn cancel_drag(&mut self) -> Vec<Effect> {
         self.drag = None;
+        self.held_after_cancel = true;
         self.measure();
         Vec::new()
     }
@@ -340,7 +354,7 @@ impl Session {
     fn finish_drag(&mut self, drag: bounds::Drag, held: Held, uptime: Duration) -> Vec<Effect> {
         let measured = self.live.take();
         self.measure();
-        if !drag.counts {
+        if drag.is_click() {
             return Vec::new();
         }
         match measured {
@@ -410,7 +424,7 @@ impl Session {
     /// of each side, where the remembered place puts it at the next call (the owner's choice in WPC-312). The place it
     /// takes is the remembered state's, kept when the tools close, even by Esc in the middle of the drag: the toolbar
     /// stays where the user had it (the owner's choice in WPC-312).
-    fn drag(&mut self) {
+    fn drag_toolbar(&mut self) {
         let Some(grab) = self.toolbar_grab else {
             return;
         };
@@ -544,9 +558,11 @@ impl Session {
     /// tolerance the wheel set all stay, and the new tool works on them from where the cursor is. Dimensions and Bounds
     /// measure; Inspect and Snip are active and do nothing until their own tickets (the owner's choice in WPC-310).
     fn switch_tool(&mut self, tool: Tool) -> Vec<Effect> {
-        // A drag Bounds was drawing is dropped: the new tool has no use for it.
+        // A drag Bounds was drawing is dropped: the new tool has no use for it, and the button it holds is the new tool's
+        // no more.
         if tool != Tool::Bounds {
             self.drag = None;
+            self.held_after_cancel = false;
         }
         self.remembered.last_tool = tool;
         self.measure();
@@ -587,16 +603,19 @@ impl Session {
 
     /// Whether the tool pauses with the cursor at `at`: on the toolbar, and anywhere while the toolbar is dragged, as the
     /// cursor may leave it where it stops at a margin, the other monitor included (the owner's choice in WPC-312). While
-    /// Bounds draws a rectangle, nowhere: the rectangle may go over the toolbar, which the photo doesn't have.
+    /// Bounds draws a rectangle, nowhere: the rectangle may go over the toolbar, which the photo doesn't have. Nor while
+    /// the button that drew a rectangle Esc cancelled is still down: the press is still the tool's.
     fn pauses_at(&self, at: Point) -> bool {
-        self.drag.is_none() && (self.toolbar_grab.is_some() || self.toolbar_hit(at).is_some())
+        !self.tool_holds_the_press()
+            && (self.toolbar_grab.is_some() || self.toolbar_hit(at).is_some())
     }
 
-    /// Puts the cursor at `to`, the dragged toolbar following it, and measures there. The arrow keys come here too, so
-    /// they nudge a held toolbar a pixel at a time, or ten with Shift (the owner's choice in WPC-312).
+    /// Puts the cursor at `to`, the dragged toolbar following it, notes how far the drag Bounds is drawing has gone from
+    /// its start, and measures there. The arrow keys come here too, so they nudge a held toolbar a pixel at a time, or ten
+    /// with Shift (the owner's choice in WPC-312), and count towards the click limit as the mouse going that far would.
     fn move_cursor(&mut self, to: Point) {
         self.cursor = to;
-        self.drag();
+        self.drag_toolbar();
         if let Some(drag) = self.drag.as_mut() {
             drag.went_to(to);
         }
@@ -657,7 +676,7 @@ impl Session {
                 )
             }),
             // Until the drag counts, the preview shows nothing, as the button coming up then does nothing.
-            Tool::Bounds => self.drag.filter(|drag| drag.counts).and_then(|drag| {
+            Tool::Bounds => self.drag.filter(|drag| !drag.is_click()).and_then(|drag| {
                 bounds::measure(
                     &self.frozen_screen,
                     drag,
@@ -678,6 +697,7 @@ impl Session {
         self.closed = true;
         self.toolbar_grab = None;
         self.drag = None;
+        self.held_after_cancel = false;
         self.pinned.clear();
         self.notice = None;
         self.indicator_until = None;
@@ -699,11 +719,9 @@ impl Session {
         })
     }
 
-    /// The rectangle Bounds is drawing, while the button is held, once the drag counts. With Alt held, none: the drawn
-    /// rectangle is then what Bounds measures, and shows only as the live measurement, already in the result's style
-    /// (v1 spec WPC-296, Como as medidas aparecem).
+    /// The rectangle Bounds is drawing, dashed while the button is held once the drag counts, and without Alt.
     fn drawn_rectangle(&self) -> Option<DrawnRectangle> {
-        let drag = self.drag.filter(|drag| drag.counts && !drag.exact)?;
+        let drag = self.drag.filter(|drag| drag.shows_dashes())?;
         let Some(photo) = self.frozen_screen.get(drag.monitor) else {
             // Can't happen: a drag begins on a monitor of the frozen screen.
             return None;
@@ -736,11 +754,11 @@ impl Session {
                     .dimensions_is_active()
                     .then_some(self.remembered.dimensions_mode),
                 minimized: self.toolbar_minimized,
-                // While the toolbar is held, or Bounds draws a rectangle, no button reacts, whatever the cursor slides
-                // over.
+                // While the toolbar is held, or the button is held for Bounds, no button reacts, whatever the cursor
+                // slides over.
                 hovered: match self.toolbar_hit(self.cursor) {
                     Some(toolbar::Hit::Button(button))
-                        if self.toolbar_grab.is_none() && self.drag.is_none() =>
+                        if self.toolbar_grab.is_none() && !self.tool_holds_the_press() =>
                     {
                         Some(button)
                     }

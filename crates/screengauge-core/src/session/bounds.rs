@@ -21,10 +21,9 @@ pub(super) struct Drag {
     pub(super) monitor: usize,
     /// Whether Alt is held, as the last event had it: Bounds then measures exactly the drawn rectangle, for photos,
     /// gradients and empty areas, and doesn't shrink it (v1 spec WPC-296, Bounds).
-    pub(super) exact: bool,
-    /// Whether the cursor has gone further than [`CLICK_LIMIT`] from the start along either axis since the press. Until
-    /// it has, the drag is a click or a tremble: nothing shows, and the button coming up does nothing.
-    pub(super) counts: bool,
+    exact: bool,
+    /// Whether the cursor has gone further than [`CLICK_LIMIT`] from the start along either axis since the press.
+    past_click_limit: bool,
 }
 
 impl Drag {
@@ -34,7 +33,7 @@ impl Drag {
             start,
             monitor,
             exact,
-            counts: false,
+            past_click_limit: false,
         }
     }
 
@@ -43,7 +42,28 @@ impl Drag {
     /// the start: the mouse went that far.
     pub(super) fn went_to(&mut self, cursor: Point) {
         let far = |from: i32, to: i32| from.abs_diff(to) > CLICK_LIMIT;
-        self.counts |= far(self.start.x, cursor.x) || far(self.start.y, cursor.y);
+        self.past_click_limit |= far(self.start.x, cursor.x) || far(self.start.y, cursor.y);
+    }
+
+    /// Has the drag measure exactly the drawn rectangle while `alt` is held, and shrink it to the content otherwise.
+    /// Whether that changed what it measures.
+    pub(super) fn follow_alt(&mut self, alt: bool) -> bool {
+        let changed = self.exact != alt;
+        self.exact = alt;
+        changed
+    }
+
+    /// Whether the drag is still a click or a tremble of the mouse: the cursor hasn't gone past the click limit since
+    /// the press. Then nothing shows, and the button coming up does nothing, with or without Alt.
+    pub(super) fn is_click(self) -> bool {
+        !self.past_click_limit
+    }
+
+    /// Whether the drawn rectangle shows dashed: once the drag counts, without Alt. With Alt, the drawn rectangle is
+    /// what Bounds measures, and shows only as the live measurement, already in the result's style (v1 spec WPC-296,
+    /// Como as medidas aparecem).
+    pub(super) fn shows_dashes(self) -> bool {
+        !self.is_click() && !self.exact
     }
 }
 
