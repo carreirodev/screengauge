@@ -11,8 +11,9 @@ use windows::Win32::Graphics::Direct2D::Common::{
 use windows::Win32::Graphics::Direct2D::{D2D1_BITMAP_PROPERTIES, ID2D1Bitmap};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 
-use super::panel_tests::{MODES, inside, rect, tokens};
-use super::tests::{BACKGROUND, Canvas, Picture, near};
+use super::magnified_view::SHADOW_STRENGTH;
+use super::panel_tests::{MODES, inside, over, rect, tokens};
+use super::tests::{BACKGROUND, Canvas, Picture, near, text_width};
 use super::*;
 
 /// The window of these tests: big enough for a panel at 175% and its shadow, over a monitor left of and below the main
@@ -32,6 +33,14 @@ fn blank(mode: Mode) -> [u8; 3] {
     match mode {
         Mode::Dark => [0x2a, 0x2c, 0x31],
         Mode::Light => [0xd9, 0xd6, 0xd0],
+    }
+}
+
+/// `--panel-dim`, as above.
+fn dim(mode: Mode) -> [u8; 3] {
+    match mode {
+        Mode::Dark => [0x9a, 0xa0, 0xaa],
+        Mode::Light => [0x6b, 0x68, 0x62],
     }
 }
 
@@ -645,6 +654,748 @@ fn the_frames_corners_are_round_and_the_rest_of_its_edge_is_the_photo() {
             assert!(
                 partly >= 3,
                 "{partly} antialiased pixels on the arc, {context}"
+            );
+        }
+    }
+}
+
+/// The tag's rectangle for a text `text_width` pixels wide: its top left `scaled(6)` inside the frame's, padded 4 above
+/// and below and 6 at the sides around a line 11 tall.
+fn tag_rect(view: &MagnifiedView, dpi: u32, text_width: i32) -> RECT {
+    let frame = ints(view.frame);
+    let (left, top) = (frame.left + scaled(6, dpi), frame.top + scaled(6, dpi));
+    rect(
+        left,
+        top,
+        left + scaled(6, dpi) + text_width + scaled(6, dpi),
+        top + scaled(4, dpi) + scaled(11, dpi) + scaled(4, dpi),
+    )
+}
+
+/// `fixture` drawn as `render` draws it, with its view, and how wide the tag's text is when laid out on its own.
+fn render_with_tag(
+    canvas: &Canvas,
+    photo: &ID2D1Bitmap,
+    mode: Mode,
+    fixture: &Fixture,
+) -> (Picture, MagnifiedView, i32) {
+    let view = fixture.view();
+    let mut width = None;
+    let picture = canvas.render_in(mode, SCREEN, fixture.dpi, |overlay, target| {
+        overlay
+            .draw_magnified_view(target, &view, photo)
+            .expect("the magnified view");
+        let text = format!("{}\u{d7}", fixture.factor());
+        width = Some(
+            overlay
+                .typeset_plain(&text, &overlay.tag_format)
+                .expect("the tag's text")
+                .width,
+        );
+    });
+    (picture, view, width.expect("the view was drawn"))
+}
+
+/// The pixels of `area` that are nearly white: the tag's text over the photo darkened by the tag's black at 60%, which is
+/// nowhere near that bright.
+fn white_ink(picture: &Picture, area: RECT) -> Vec<(i32, i32)> {
+    pixels(area)
+        .filter(|&(x, y)| at(picture, x, y).iter().all(|&c| c >= 180))
+        .collect()
+}
+
+#[test]
+fn the_tag_is_black_at_60_percent_in_a_rounded_rectangle_with_the_magnification_in_white() {
+    let canvas = Canvas::new(640, 640);
+    let photo = photo(&canvas);
+    // The same in both palettes.
+    for mode in MODES {
+        for dpi in [96, 168] {
+            let fixture = Fixture {
+                tag: true,
+                ..Fixture::new(dpi, Magnification::X8)
+            };
+            let (picture, view, text) = render_with_tag(&canvas, &photo, mode, &fixture);
+            let tag = tag_rect(&view, dpi, text);
+            let context = format!("{mode:?} at {dpi} DPI");
+            // The photo under it, as it is without a tag.
+            let under = |x: i32, y: i32| wanted(&view, mode, x, y).0;
+            let darkened = |x: i32, y: i32| {
+                // Black at 60% leaves 40% of the color.
+                // TODO: mix in whole numbers, so no float comes back to `u8`.
+                under(x, y).map(|c| (f32::from(c) * 0.4).round() as u8)
+            };
+            // The padding above and below the text, past the corner's arc: the photo at 40%, from the tag's first row to
+            // its last.
+            let x = tag.left + scaled(6, dpi) + 1;
+            for y in [tag.top, tag.top + 1, tag.bottom - 2, tag.bottom - 1] {
+                assert!(
+                    near(at(&picture, x, y), darkened(x, y), 2),
+                    "({x}, {y}) is {:?}, wanted {:?}, {context}",
+                    at(&picture, x, y),
+                    darkened(x, y)
+                );
+            }
+            // The rectangle is exactly this tall and as wide as its text and padding: the pixels beside it are the photo.
+            let middle = (tag.top + tag.bottom) / 2;
+            for (x, y) in [
+                (x, tag.top - 1),
+                (x, tag.bottom),
+                (tag.left - 1, middle),
+                (tag.right, middle),
+            ] {
+                assert!(
+                    near(at(&picture, x, y), under(x, y), 1),
+                    "({x}, {y}), beside the tag, is {:?}, wanted {:?}, {context}",
+                    at(&picture, x, y),
+                    under(x, y)
+                );
+            }
+            for x in [tag.left + 1, tag.right - 2] {
+                assert!(
+                    near(at(&picture, x, middle), darkened(x, middle), 2),
+                    "({x}, {middle}), in the tag's padding, is {:?}, {context}",
+                    at(&picture, x, middle)
+                );
+            }
+            // Its corners are round: the corner pixel is the photo's, not the tag's.
+            for (x, y) in [
+                (tag.left, tag.top),
+                (tag.right - 1, tag.top),
+                (tag.left, tag.bottom - 1),
+                (tag.right - 1, tag.bottom - 1),
+            ] {
+                assert!(
+                    near(at(&picture, x, y), under(x, y), 8),
+                    "the tag's corner ({x}, {y}) is {:?}, wanted the photo's {:?}, {context}",
+                    at(&picture, x, y),
+                    under(x, y)
+                );
+            }
+            // Its text is white, inside the padding, and nowhere else in the tag is anything that white.
+            let text_area = rect(
+                tag.left + scaled(6, dpi) - 1,
+                tag.top + scaled(4, dpi) - 1,
+                tag.right - scaled(6, dpi) + 1,
+                tag.bottom - scaled(4, dpi) + 1,
+            );
+            // Over the photo's own pixels, which can be bright, white says nothing; in the tag, the photo is at 40%.
+            let ink = white_ink(&picture, tag);
+            assert!(ink.len() > 20, "{} white pixels, {context}", ink.len());
+            assert!(
+                ink.iter().all(|&(x, y)| inside(&text_area, x, y)),
+                "white pixels outside the tag's text area, {context}"
+            );
+            // The white is the full white of the text where a stroke covers a pixel all through.
+            assert!(
+                ink.iter().any(|&(x, y)| near(at(&picture, x, y), WHITE, 6)),
+                "the text is never fully white, {context}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_tag_is_there_when_the_view_says_so_and_not_otherwise() {
+    let canvas = Canvas::new(640, 640);
+    let photo = photo(&canvas);
+    for tag in [false, true] {
+        let fixture = Fixture {
+            tag,
+            ..Fixture::new(96, Magnification::X8)
+        };
+        let (picture, view, text) = render_with_tag(&canvas, &photo, Mode::Dark, &fixture);
+        let area = tag_rect(&view, 96, text);
+        // The whole frame outside the tag is the model's, tag or no tag; inside it, without a tag, too.
+        let skip = tag.then_some(area);
+        check_frame(&picture, &view, Mode::Dark, 96, skip);
+        let ink = white_ink(&picture, area).len();
+        assert_eq!(
+            ink > 0,
+            tag,
+            "{ink} white pixels in the tag's place, tag {tag}"
+        );
+    }
+}
+
+#[test]
+fn the_tags_text_is_the_magnification_and_a_times_sign() {
+    let canvas = Canvas::new(640, 640);
+    let photo = photo(&canvas);
+    let mut tags = Vec::new();
+    for magnification in magnifications() {
+        let fixture = Fixture {
+            tag: true,
+            ..Fixture::new(96, magnification)
+        };
+        let (picture, view, text) = render_with_tag(&canvas, &photo, Mode::Dark, &fixture);
+        let area = tag_rect(&view, 96, text);
+        tags.push((magnification.factor(), text, white_ink(&picture, area)));
+    }
+    let found = |factor: u32| {
+        tags.iter()
+            .find(|(f, ..)| *f == factor)
+            .expect("a tag for every magnification")
+    };
+    // Two digits take more room than one, and "32" has the strokes of the "2" and more.
+    assert!(
+        found(32).1 > found(8).1 + 4,
+        "{} against {}",
+        found(32).1,
+        found(8).1
+    );
+    assert!(
+        found(32).2.len() > found(2).2.len() + 8,
+        "{} against {}",
+        found(32).2.len(),
+        found(2).2.len()
+    );
+    // One digit each for 2, 4 and 8, with different strokes: the white pixels are not the same ones.
+    for (a, b) in [(2, 4), (2, 8), (4, 8)] {
+        assert_ne!(found(a).2, found(b).2, "{a}x and {b}x look the same");
+    }
+}
+
+/// The widths of one coordinate's texts, each laid out again on its own, in whole pixels: the key, the physical number
+/// and, when there is one, the logical number (0 when there is none).
+#[derive(Clone, Copy)]
+struct Widths {
+    key: i32,
+    physical: i32,
+    logical: i32,
+}
+
+/// A view drawn, with what the tests know about its strip from outside the drawing code.
+struct Drawn {
+    picture: Picture,
+    view: MagnifiedView,
+    mode: Mode,
+    dpi: u32,
+    x: Widths,
+    y: Widths,
+}
+
+/// `view` drawn in `mode` at `dpi`, with the widths of its strip's texts.
+fn draw_view(
+    canvas: &Canvas,
+    photo: &ID2D1Bitmap,
+    mode: Mode,
+    dpi: u32,
+    view: MagnifiedView,
+) -> Drawn {
+    let mut found = None;
+    let picture = canvas.render_in(mode, SCREEN, dpi, |overlay, target| {
+        overlay
+            .draw_magnified_view(target, &view, photo)
+            .expect("the magnified view");
+        let widths = |key: &str, coordinate: &Coordinate| Widths {
+            key: overlay
+                .typeset_plain(key, &overlay.logical_format)
+                .expect("the key")
+                .width,
+            physical: text_width(overlay, &coordinate.label.physical, &overlay.format),
+            logical: coordinate
+                .label
+                .logical
+                .as_deref()
+                .map_or(0, |text| text_width(overlay, text, &overlay.logical_format)),
+        };
+        found = Some((widths("X", &view.x), widths("Y", &view.y)));
+    });
+    let (x, y) = found.expect("the view was drawn");
+    Drawn {
+        picture,
+        view,
+        mode,
+        dpi,
+        x,
+        y,
+    }
+}
+
+impl Drawn {
+    fn sized(&self, logical: u32) -> i32 {
+        scaled(logical, self.dpi)
+    }
+
+    /// The strip: under the frame, which holds the lines and the padding around them and nothing else. A few pixels in
+    /// from the panel's border and its rounded corners, where the border's own antialiasing would look like ink.
+    fn strip(&self) -> RECT {
+        let (panel, frame) = (ints(self.view.panel), ints(self.view.frame));
+        let side = self.sized(1) + self.sized(3);
+        let below = self.sized(1) + self.sized(6);
+        rect(
+            panel.left + side,
+            frame.bottom,
+            panel.right - side,
+            panel.bottom - below,
+        )
+    }
+
+    fn panel_color(&self) -> [u8; 3] {
+        tokens(self.mode).panel_over(BACKGROUND)
+    }
+
+    /// The pixels of `area` that differ from the panel by more than `by` levels of some channel: ink.
+    fn ink(&self, area: RECT, by: u8) -> Vec<(i32, i32)> {
+        let panel = self.panel_color();
+        pixels(area)
+            .filter(|&(x, y)| !near(at(&self.picture, x, y), panel, by))
+            .collect()
+    }
+
+    /// How far the strongest pixel of `area` is from the panel, in levels of green: the ink at full strength is as far as
+    /// the palette's ink is from the panel, and fainter ink is nearer.
+    fn contrast(&self, area: RECT) -> u8 {
+        let panel = self.panel_color()[1];
+        pixels(area)
+            .map(|(x, y)| at(&self.picture, x, y)[1].abs_diff(panel))
+            .max()
+            .expect("an area with pixels")
+    }
+
+    /// A coordinate's line and widths: X's, or Y's.
+    fn of(&self, y: bool) -> (RECT, Widths) {
+        if y {
+            (ints(self.view.y.line), self.y)
+        } else {
+            (ints(self.view.x.line), self.x)
+        }
+    }
+
+    /// Where the parts of a coordinate's line start, as the prototype's flex row lays them out: the key's box, at least 14
+    /// wide, a gap, the physical number, a gap and a margin, the bar, a margin and a gap, the logical number. Each size
+    /// is scaled on its own.
+    fn columns(&self, y: bool) -> (i32, i32, i32) {
+        let (line, widths) = self.of(y);
+        let physical = line.left + widths.key.max(self.sized(14)) + self.sized(8);
+        let bar = physical + widths.physical + self.sized(8) + self.sized(7);
+        let logical = bar + self.sized(1) + self.sized(7) + self.sized(8);
+        (physical, bar, logical)
+    }
+}
+
+/// The widest realistic strip: a monitor 3840 by 2560 at 150% or 175%, the cursor in the far corner. At 100% there is no
+/// logical part.
+fn widest(dpi: u32, magnification: Magnification) -> Fixture {
+    Fixture {
+        labels: [("3839", "2559.3"), ("2159", "1439.3")],
+        ..Fixture::new(dpi, magnification)
+    }
+}
+
+#[test]
+fn the_strips_texts_stay_inside_their_lines_and_the_panel_for_the_widest_numbers() {
+    let canvas = Canvas::new(640, 640);
+    let photo = photo(&canvas);
+    // 32x is the narrowest frame, so the narrowest strip. 100% has the lines side by side, the others one under the other.
+    for mode in MODES {
+        for dpi in [96, 120, 144, 168] {
+            let fixture = widest(dpi, Magnification::X32);
+            let drawn = draw_view(&canvas, &photo, mode, dpi, fixture.view());
+            let context = format!("{mode:?} at {dpi} DPI");
+            let (x_line, y_line) = (ints(drawn.view.x.line), ints(drawn.view.y.line));
+            let strip = drawn.strip();
+            // Everything in the strip is in one of the two lines, which are inside the panel's border.
+            let ink = drawn.ink(strip, 8);
+            assert!(ink.len() > 100, "{} ink pixels, {context}", ink.len());
+            for &(x, y) in &ink {
+                assert!(
+                    inside(&x_line, x, y) || inside(&y_line, x, y),
+                    "ink at ({x}, {y}) outside the lines {x_line:?} and {y_line:?}, {context}"
+                );
+            }
+            // Each coordinate's number and bar are inside its own line: what changes when its label is blanked.
+            for (y_axis, line) in [(false, x_line), (true, y_line)] {
+                let mut blanked = drawn.view.clone();
+                let coordinate = if y_axis {
+                    &mut blanked.y
+                } else {
+                    &mut blanked.x
+                };
+                coordinate.label = Label {
+                    physical: " ".to_owned(),
+                    logical: None,
+                };
+                let without = draw_view(&canvas, &photo, mode, dpi, blanked);
+                let changed: Vec<(i32, i32)> = pixels(strip)
+                    .filter(|&(x, y)| at(&drawn.picture, x, y) != at(&without.picture, x, y))
+                    .collect();
+                assert!(changed.len() > 30, "{} pixels, {context}", changed.len());
+                for &(x, y) in &changed {
+                    assert!(
+                        inside(&line, x, y),
+                        "{} text at ({x}, {y}) outside its line {line:?}, {context}",
+                        if y_axis { "Y's" } else { "X's" }
+                    );
+                }
+                // A logical part, when there is one, ends before the line does.
+                if drawn.view.x.label.logical.is_some() {
+                    let right = changed.iter().map(|&(x, _)| x).max().expect("ink");
+                    assert!(
+                        right < line.right,
+                        "ink to column {right}, line {line:?}, {context}"
+                    );
+                }
+            }
+            // Side by side, the lines don't meet, and neither do the texts.
+            if drawn.view.x.label.logical.is_none() {
+                assert!(
+                    x_line.right < y_line.left,
+                    "{x_line:?} and {y_line:?}, {context}"
+                );
+                assert!(
+                    ink.iter().any(|&(x, _)| x >= y_line.left),
+                    "Y has no ink, {context}"
+                );
+                assert!(
+                    ink.iter().any(|&(x, _)| x < x_line.right),
+                    "X has no ink, {context}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_parts_of_a_line_sit_a_key_box_a_gap_a_bar_and_a_gap_apart() {
+    let canvas = Canvas::new(640, 640);
+    let photo = photo(&canvas);
+    for mode in MODES {
+        for dpi in [120, 144, 168] {
+            let drawn = draw_view(
+                &canvas,
+                &photo,
+                mode,
+                dpi,
+                Fixture::new(dpi, Magnification::X16).view(),
+            );
+            let ink = tokens(mode).ink;
+            for y_axis in [false, true] {
+                let (line, widths) = drawn.of(y_axis);
+                let (physical, bar, logical) = drawn.columns(y_axis);
+                let context = format!("{mode:?} at {dpi} DPI, line {y_axis}");
+                let rows = |left: i32, right: i32| rect(left, line.top, right, line.bottom);
+                // The key is first, and the room up to the number, which is the key's box and a gap, is empty after it.
+                assert!(
+                    !drawn
+                        .ink(rows(line.left, line.left + widths.key), 20)
+                        .is_empty(),
+                    "{context}"
+                );
+                let gap = drawn.ink(rows(line.left + widths.key + 1, physical - 1), 8);
+                assert!(
+                    gap.is_empty(),
+                    "{} ink pixels between the key and the number, {context}",
+                    gap.len()
+                );
+                // The number starts there, and ends before the gap that leads to the bar, where the bar is.
+                assert!(
+                    !drawn
+                        .ink(rows(physical, physical + drawn.sized(6)), 20)
+                        .is_empty(),
+                    "{context}"
+                );
+                let gap = drawn.ink(rows(physical + widths.physical, bar), 8);
+                assert!(
+                    gap.is_empty(),
+                    "{} ink pixels between the number and the bar, {context}",
+                    gap.len()
+                );
+                // The bar is a pixel of the ink at 40%, as wide and as tall as the prototype's, scaled, in the middle
+                // of the line, with the panel on every side.
+                let (width, height) = (drawn.sized(1), drawn.sized(11));
+                let top = line.top + (line.bottom - line.top - height + 1) / 2;
+                let faint = over(ink, 0.4, drawn.panel_color());
+                for (x, y) in pixels(rect(bar, top, bar + width, top + height)) {
+                    assert!(
+                        near(at(&drawn.picture, x, y), faint, 2),
+                        "the bar at ({x}, {y}) is {:?}, wanted {faint:?}, {context}",
+                        at(&drawn.picture, x, y)
+                    );
+                }
+                let around = [
+                    (bar - 1, top + 2),
+                    (bar + width, top + 2),
+                    (bar, top - 1),
+                    (bar, top + height),
+                ];
+                for (x, y) in around {
+                    assert!(
+                        near(at(&drawn.picture, x, y), drawn.panel_color(), 1),
+                        "({x}, {y}) beside the bar is {:?}, {context}",
+                        at(&drawn.picture, x, y)
+                    );
+                }
+                // The logical number follows the bar and a margin and a gap.
+                let gap = drawn.ink(rows(bar + width, logical), 8);
+                assert!(
+                    gap.is_empty(),
+                    "{} ink pixels between the bar and the logical number, {context}",
+                    gap.len()
+                );
+                assert!(
+                    !drawn
+                        .ink(rows(logical, logical + widths.logical), 20)
+                        .is_empty(),
+                    "{context}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_logical_part_is_fainter_than_the_physical_part_and_the_key_is_dim() {
+    let canvas = Canvas::new(640, 640);
+    let photo = photo(&canvas);
+    for mode in MODES {
+        let drawn = draw_view(
+            &canvas,
+            &photo,
+            mode,
+            144,
+            Fixture::new(144, Magnification::X16).view(),
+        );
+        let t = tokens(mode);
+        let context = format!("{mode:?}");
+        for y_axis in [false, true] {
+            let (line, widths) = drawn.of(y_axis);
+            let (physical, _, logical) = drawn.columns(y_axis);
+            let rows = |left: i32, right: i32| rect(left, line.top, right, line.bottom);
+            let strong = drawn.contrast(rows(physical, physical + widths.physical));
+            let faint = drawn.contrast(rows(logical, logical + widths.logical));
+            let key = drawn.contrast(rows(line.left, line.left + widths.key));
+            // The physical number reaches the ink all through; the logical one at CSS opacity .62 and the bar at .4.
+            let ink_distance = t.ink[1].abs_diff(drawn.panel_color()[1]);
+            assert!(
+                strong.abs_diff(ink_distance) <= 6,
+                "{strong} against {ink_distance}, {context}"
+            );
+            let ratio = f32::from(faint) / f32::from(strong);
+            assert!(
+                (0.5..0.72).contains(&ratio),
+                "the logical part is {ratio} of the physical one, {context}"
+            );
+            // The key is in the dim color: between the two, the ink's own contrast being the greater.
+            let dim_distance = dim(mode)[1].abs_diff(drawn.panel_color()[1]);
+            assert!(
+                key.abs_diff(dim_distance) <= 14,
+                "{key} against {dim_distance}, {context}"
+            );
+            assert!(
+                key + 20 < strong,
+                "the key at {key} is not dimmer than the number at {strong}, {context}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_texts_of_a_line_share_a_baseline_and_sit_in_the_middle_of_the_line() {
+    let canvas = Canvas::new(640, 640);
+    let photo = photo(&canvas);
+    for mode in MODES {
+        for dpi in [96, 144, 168] {
+            // At 100% the lines are side by side and have no logical part: the key and the number share a baseline.
+            let drawn = draw_view(
+                &canvas,
+                &photo,
+                mode,
+                dpi,
+                Fixture::new(dpi, Magnification::X16).view(),
+            );
+            for y_axis in [false, true] {
+                let (line, widths) = drawn.of(y_axis);
+                let (physical, _, logical) = drawn.columns(y_axis);
+                let context = format!("{mode:?} at {dpi} DPI, line {y_axis}");
+                let extent = |left: i32, right: i32| {
+                    let rows: Vec<i32> = drawn
+                        .ink(rect(left, line.top, right, line.bottom), 40)
+                        .iter()
+                        .map(|&(_, y)| y)
+                        .collect();
+                    (
+                        *rows.iter().min().expect("strong ink"),
+                        *rows.iter().max().expect("strong ink"),
+                    )
+                };
+                let (key_top, key_bottom) = extent(line.left, line.left + widths.key);
+                let (number_top, number_bottom) = extent(physical, physical + widths.physical);
+                // Capital letters and digits stand on the same line, the same height or so.
+                assert_eq!(key_bottom, number_bottom, "{context}");
+                assert!(
+                    key_top.abs_diff(number_top) <= 1,
+                    "{key_top} against {number_top}, {context}"
+                );
+                if widths.logical > 0 {
+                    let (_, logical_bottom) = extent(logical, logical + widths.logical);
+                    assert_eq!(
+                        logical_bottom, number_bottom,
+                        "the logical number's baseline, {context}"
+                    );
+                }
+                // In the middle of the line, as CSS centers a line of text: a digit has room above it and below, within
+                // what the font's ascent and descent leave, which is a pixel or two more above than below.
+                let (above, below) = (number_top - line.top, line.bottom - 1 - number_bottom);
+                assert!(
+                    above > 0 && below > 0,
+                    "{above} above and {below} below, {context}"
+                );
+                assert!(
+                    above.abs_diff(below) <= u32::try_from(drawn.sized(2) + 1).expect("a size"),
+                    "{above} above and {below} below, {context}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn nothing_is_drawn_outside_the_panel_but_its_shadow() {
+    let canvas = Canvas::new(640, 640);
+    let photo = photo(&canvas);
+    for mode in MODES {
+        for (dpi, magnification) in [
+            (96, Magnification::X8),
+            (96, Magnification::X32),
+            (120, Magnification::X2),
+            (144, Magnification::X16),
+            (168, Magnification::X32),
+            (168, Magnification::X8),
+        ] {
+            let fixture = Fixture {
+                tag: true,
+                labels: [("3839", "2559.3"), ("2159", "1439.3")],
+                ..Fixture::new(dpi, magnification)
+            };
+            // The view with the cursor in the middle, and with it near the monitor's corner, where the frame is partly
+            // blank: the frame's clip and the tag are at the edges of what is drawn.
+            let views = [
+                fixture.view(),
+                fixture.clone().at(SCREEN.left + 1, SCREEN.top + 1).view(),
+            ];
+            for view in views {
+                let panel = ints(view.panel);
+                let full = render(&canvas, &photo, mode, dpi, &view);
+                let alone = canvas.render_in(mode, SCREEN, dpi, |overlay, target| {
+                    overlay
+                        .draw_floating_panel(target, &panel, 14, SHADOW_STRENGTH)
+                        .expect("the panel");
+                });
+                let context = format!("{mode:?} at {dpi} DPI, {}x", fixture.factor());
+                let mut inside_changed = 0;
+                for (x, y) in pixels(ints(SCREEN)) {
+                    if inside(&panel, x, y) {
+                        inside_changed += usize::from(at(&full, x, y) != at(&alone, x, y));
+                    } else {
+                        assert_eq!(
+                            at(&full, x, y),
+                            at(&alone, x, y),
+                            "({x}, {y}) outside the panel {panel:?}, {context}"
+                        );
+                    }
+                }
+                assert!(
+                    inside_changed > 5000,
+                    "{inside_changed} pixels drawn, {context}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_panel_has_its_border_and_a_shadow_that_falls_below_it_and_reaches_no_further_than_the_notices()
+ {
+    let canvas = Canvas::new(640, 640);
+    let photo = photo(&canvas);
+    for mode in MODES {
+        let t = tokens(mode);
+        for dpi in [96, 168] {
+            let view = Fixture::new(dpi, Magnification::X8).view();
+            let picture = render(&canvas, &photo, mode, dpi, &view);
+            let panel = ints(view.panel);
+            let context = format!("{mode:?} at {dpi} DPI");
+            // The border's ring along the top, over the panel, which is over the photo.
+            let across = (panel.left + panel.right) / 2;
+            assert!(
+                near(at(&picture, across, panel.top), t.ring_over_panel(), 2),
+                "the ring, {context}: {:?}",
+                at(&picture, across, panel.top)
+            );
+            // The shadow falls below the panel, darker than it falls above it, and nothing is drawn beyond its reach: the
+            // blur's 28 less the spread of 8 around the panel, 10 further down, and a pixel or two for the last band.
+            let below = at(&picture, across, panel.bottom + scaled(4, dpi));
+            let above = at(&picture, across, panel.top - scaled(4, dpi));
+            assert!(
+                below[0] < above[0],
+                "{below:?} below and {above:?} above, {context}"
+            );
+            assert!(
+                below[0] < BACKGROUND[0],
+                "{below:?} is not darkened, {context}"
+            );
+            let reach = scaled(28, dpi) + 2;
+            let drop = scaled(10, dpi);
+            let reached = rect(
+                panel.left - reach,
+                panel.top - reach,
+                panel.right + reach,
+                panel.bottom + reach + drop,
+            );
+            for (x, y) in pixels(ints(SCREEN)) {
+                if !inside(&reached, x, y) {
+                    assert_eq!(
+                        at(&picture, x, y),
+                        BACKGROUND,
+                        "({x}, {y}) is beyond the shadow, {context}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_shadow_is_within_7_hundredths_of_opacity_of_the_prototypes_below_and_beside_the_panel() {
+    // CSS `0 10px 28px -8px` at .75 in the dark palette and `0 10px 26px -8px` at .45 in the light one: a gaussian blur
+    // of sigma half the blur radius, of the panel's box shrunk by 8 on every side and moved 10 down. The panel is much
+    // taller than the blur, so down its middle the box is an edge: below the panel the edge is 2 further down than the
+    // panel's bottom, and beside it 8 further in.
+    let canvas = Canvas::new(640, 640);
+    let photo = photo(&canvas);
+    for (mode, alpha, sigma, shadow) in [
+        (Mode::Dark, 0.75_f64, 14.0_f64, [0_u8, 0, 0]),
+        (Mode::Light, 0.45, 13.0, [70, 60, 45]),
+    ] {
+        let view = Fixture::new(96, Magnification::X8).view();
+        let picture = render(&canvas, &photo, mode, 96, &view);
+        let panel = ints(view.panel);
+        let (across, middle) = (
+            (panel.left + panel.right) / 2,
+            (panel.top + panel.bottom) / 2,
+        );
+        // How much of the shadow's color lies over the photo at (x, y), from the red channel.
+        let drawn = |x: i32, y: i32| {
+            let (background, shadow) = (f64::from(BACKGROUND[0]), f64::from(shadow[0]));
+            (background - f64::from(at(&picture, x, y)[0])) / (background - shadow)
+        };
+        let css = |beyond_the_edge: f64| {
+            alpha * (1.0 - super::shadow::normal_cdf(beyond_the_edge / sigma))
+        };
+        for d in [0, 3, 8, 14, 22, 30] {
+            let wanted = css(f64::from(d) + 0.5 - 2.0);
+            let found = drawn(across, panel.bottom + d);
+            assert!(
+                (found - wanted).abs() < 0.07,
+                "{d} below the panel the shadow is {found}, CSS's is {wanted}, {mode:?}"
+            );
+            let wanted = css(f64::from(d) + 0.5 + 8.0);
+            let found = drawn(panel.left - 1 - d, middle);
+            assert!(
+                (found - wanted).abs() < 0.07,
+                "{d} beside the panel the shadow is {found}, CSS's is {wanted}, {mode:?}"
             );
         }
     }

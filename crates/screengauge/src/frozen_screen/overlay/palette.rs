@@ -1,6 +1,6 @@
-//! The colors of ScreenGauge's own surfaces, the pinned labels' panel and the notice, in the light and the dark
-//! palette: the prototype's theme tokens (WPC-279), where the two that are `oklch` there are converted to sRGB. The
-//! measurement's line and the live label are cyan in both and are not here.
+//! The colors of ScreenGauge's own surfaces, the pinned labels' panel, the notice and the magnified view, in the light
+//! and the dark palette: the prototype's theme tokens (WPC-279), where the two that are `oklch` there are converted to
+//! sRGB. The measurement's line and the live label are cyan in both and are not here.
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use windows::Win32::Graphics::Direct2D::{ID2D1RenderTarget, ID2D1SolidColorBrush};

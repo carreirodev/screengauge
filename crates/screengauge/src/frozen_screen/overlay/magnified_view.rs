@@ -500,3 +500,155 @@ impl Overlay {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use screengauge_core::session::{Label, Point, Rect};
+    use screengauge_core::settings::Magnification;
+
+    use super::*;
+
+    fn rect(left: i32, top: i32, width: u32, height: u32) -> Rect {
+        Rect {
+            left,
+            top,
+            width,
+            height,
+        }
+    }
+
+    /// An 8x view with the cursor at (60, 70) on a monitor whose left side is at 55, so the source, 21 pixels across,
+    /// reaches 5 pixels past it.
+    fn near_the_left_side() -> MagnifiedView {
+        let line = rect(0, 0, 0, 0);
+        let coordinate = Coordinate {
+            label: Label::default(),
+            line,
+        };
+        MagnifiedView {
+            monitor: 0,
+            panel: rect(104, 264, 182, 230),
+            frame: rect(110, 270, 168, 168),
+            source: rect(50, 60, 21, 21),
+            shown: rect(55, 60, 16, 21),
+            center: Point { x: 60, y: 70 },
+            magnification: Magnification::X8,
+            grid: true,
+            tag: false,
+            x: coordinate.clone(),
+            y: coordinate,
+        }
+    }
+
+    fn area(rect: &RECT) -> i32 {
+        (rect.right - rect.left) * (rect.bottom - rect.top)
+    }
+
+    #[test]
+    fn the_monitors_part_of_the_frame_starts_where_the_source_reaches_the_monitor() {
+        let places = places(&near_the_left_side()).expect("places");
+        assert_eq!(places.factor, 8);
+        // 5 pixels of the source are past the monitor's left side, so 5 enlarged pixels of the frame are blank; the
+        // rest reaches the frame's right and bottom sides, 16 and 21 pixels enlarged.
+        let frame = RECT {
+            left: 110,
+            top: 270,
+            right: 278,
+            bottom: 438,
+        };
+        assert_eq!(places.frame, frame);
+        assert_eq!(
+            places.drawn,
+            RECT {
+                left: 110 + 5 * 8,
+                top: 270,
+                right: 278,
+                bottom: 438,
+            }
+        );
+        // The photo's pixels it enlarges are `shown`, as they are in the virtual screen.
+        assert_eq!(
+            places.shown,
+            RECT {
+                left: 55,
+                top: 60,
+                right: 71,
+                bottom: 81,
+            }
+        );
+        // The pixel under the cursor is the middle one of the 21, the eleventh, 10 enlarged pixels from the frame's left.
+        assert_eq!(
+            places.cell,
+            RECT {
+                left: 110 + 10 * 8,
+                top: 270 + 10 * 8,
+                right: 110 + 11 * 8,
+                bottom: 270 + 11 * 8,
+            }
+        );
+    }
+
+    #[test]
+    fn a_view_too_large_for_a_coordinate_is_an_error_and_not_a_wrong_picture() {
+        let mut view = near_the_left_side();
+        view.shown = rect(55, 60, u32::MAX, 21);
+        assert!(places(&view).is_err());
+    }
+
+    #[test]
+    fn a_ring_is_the_pixels_just_outside_the_cell_each_once() {
+        let cell = RECT {
+            left: 10,
+            top: 20,
+            right: 18,
+            bottom: 28,
+        };
+        for (distance, pixels) in [(1, 10 * 10 - 8 * 8), (2, 12 * 12 - 10 * 10)] {
+            let sides = ring_around(&cell, distance);
+            assert_eq!(sides.iter().map(area).sum::<i32>(), pixels);
+            for (n, side) in sides.iter().enumerate() {
+                // One pixel thick, and outside the cell and inside the next ring out.
+                assert_eq!(
+                    (side.right - side.left).min(side.bottom - side.top),
+                    1,
+                    "{side:?}"
+                );
+                assert!(side.left >= cell.left - distance && side.right <= cell.right + distance);
+                assert!(side.top >= cell.top - distance && side.bottom <= cell.bottom + distance);
+                // No two sides share a pixel.
+                for other in &sides[n + 1..] {
+                    let shared = side.left < other.right
+                        && other.left < side.right
+                        && side.top < other.bottom
+                        && other.top < side.bottom;
+                    assert!(!shared, "{side:?} and {other:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_parts_of_a_line_follow_each_other_by_the_prototypes_gaps_each_scaled_on_its_own() {
+        // 100%: a key narrower than its box of 14, a gap of 8, the number, a gap of 8 and a margin of 7, a bar of 1, a
+        // margin of 7 and a gap of 8.
+        assert_eq!(
+            columns(8, 40, 96),
+            Columns {
+                physical: 14 + 8,
+                bar: 14 + 8 + 40 + 8 + 7,
+                logical: 14 + 8 + 40 + 8 + 7 + 1 + 7 + 8,
+            }
+        );
+        // 175%: 14 is 25, 8 is 14, 7 is 12 and 1 is 2, each on its own.
+        assert_eq!(
+            columns(18, 60, 168),
+            Columns {
+                physical: 25 + 14,
+                bar: 25 + 14 + 60 + 14 + 12,
+                logical: 25 + 14 + 60 + 14 + 12 + 2 + 12 + 14,
+            }
+        );
+        // A key wider than its box widens it.
+        assert_eq!(columns(30, 40, 96).physical, 30 + 8);
+    }
+}
