@@ -43,6 +43,26 @@ impl Rect {
             .saturating_sub(1)
     }
 
+    /// The pixels the rectangle shares with `other`: none when they don't touch.
+    pub(crate) fn overlap(self, other: Rect) -> Rect {
+        let left = self.left.max(other.left);
+        let top = self.top.max(other.top);
+        let right = self
+            .left
+            .saturating_add_unsigned(self.width)
+            .min(other.left.saturating_add_unsigned(other.width));
+        let bottom = self
+            .top
+            .saturating_add_unsigned(self.height)
+            .min(other.top.saturating_add_unsigned(other.height));
+        Rect {
+            left,
+            top,
+            width: right.saturating_sub(left).max(0).unsigned_abs(),
+            height: bottom.saturating_sub(top).max(0).unsigned_abs(),
+        }
+    }
+
     /// The rectangle's pixel nearest to `point`: `point` itself when it is in the rectangle.
     pub fn nearest(self, point: Point) -> Point {
         // `max` keeps an empty rectangle from making `clamp` panic.

@@ -269,6 +269,13 @@ struct Typeset {
 }
 
 impl Typeset {
+    /// Where the text's baseline goes for it to sit in a line `line` pixels tall whose top is at `top`, the way CSS puts
+    /// it there: the line's extra room, above and below the text's own height, is shared equally. It is on a whole pixel,
+    /// so the letters are crisp.
+    fn baseline_in(&self, top: f32, line: f32) -> f32 {
+        (top + (line - self.line_height) / 2.0 + self.baseline).round()
+    }
+
     /// `layout`, measured.
     fn of(layout: IDWriteTextLayout) -> windows::core::Result<Typeset> {
         let mut metrics = DWRITE_TEXT_METRICS::default();
@@ -617,21 +624,36 @@ impl Overlay {
                 ink,
                 D2D1_DRAW_TEXT_OPTIONS_NONE,
             );
-            if let Some(logical) = &label.logical {
-                // The bar is a fill of whole pixels, so it is exactly its width however the scale rounds; then the
-                // default comes back.
-                target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-                ink.SetOpacity(BAR_OPACITY);
-                target.FillRectangle(&logical.bar, ink);
-                target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-                ink.SetOpacity(LOGICAL_OPACITY);
-                target.DrawTextLayout(
-                    origin(&logical.text),
-                    &logical.text.layout,
-                    ink,
-                    D2D1_DRAW_TEXT_OPTIONS_NONE,
-                );
-            }
+        }
+        if let Some(logical) = &label.logical {
+            self.draw_logical(target, logical, ink);
+        }
+    }
+
+    /// A label's logical part in `ink`: the bar at `BAR_OPACITY` and the logical text at `LOGICAL_OPACITY`. The brush keeps
+    /// the last opacity, so whatever draws with it next sets its own first.
+    fn draw_logical(
+        &self,
+        target: &ID2D1RenderTarget,
+        logical: &PlacedLogical,
+        ink: &ID2D1SolidColorBrush,
+    ) {
+        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
+        // Direct2D only fails the frame at EndDraw.
+        unsafe {
+            // The bar is a fill of whole pixels, so it is exactly its width however the scale rounds; then the default
+            // comes back.
+            target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+            ink.SetOpacity(BAR_OPACITY);
+            target.FillRectangle(&logical.bar, ink);
+            target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            ink.SetOpacity(LOGICAL_OPACITY);
+            target.DrawTextLayout(
+                dot(logical.text.left, logical.text.top).point,
+                &logical.text.layout,
+                ink,
+                D2D1_DRAW_TEXT_OPTIONS_NONE,
+            );
         }
     }
 

@@ -21,9 +21,7 @@ use windows::Win32::Graphics::DirectWrite::{DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIG
 use windows::core::{Error, Interface};
 
 use super::geometry::{self, scaled};
-use super::{
-    BAR_OPACITY, LOGICAL_OPACITY, Overlay, PlacedLogical, PlacedText, Typeset, dot, px, rounded_at,
-};
+use super::{Overlay, PlacedLogical, PlacedText, Typeset, dot, px, rounded_at};
 
 // Every size below is in logical pixels, which `scaled` turns into physical pixels for the monitor's scale.
 
@@ -70,12 +68,11 @@ pub const TAG_TEXT: u32 = 11;
 pub const TAG_WEIGHT: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT_BOLD;
 
 /// The strip's rows (`.info .row`): the key `X` or `Y` in a box at least this wide, then a gap, then the physical number.
-/// A logical part follows after a gap and a margin, a bar `BAR_WIDTH` wide and `BAR_HEIGHT` tall, a margin and a gap.
+/// A logical part follows after a gap and a margin, the label's bar (`geometry::BAR_WIDTH` wide and `geometry::BAR_HEIGHT`
+/// tall), a margin and a gap.
 const KEY_WIDTH: u32 = 14;
 const GAP: u32 = 8;
 const BAR_MARGIN: u32 = 7;
-const BAR_WIDTH: u32 = 1;
-const BAR_HEIGHT: u32 = 11;
 
 /// Where the frame's parts go, in physical pixels of the virtual screen, right and bottom one past the last pixel.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -166,19 +163,22 @@ fn ring_around(cell: &RECT, distance: i32) -> [RECT; 4] {
 /// Where the parts of a coordinate's line start, counted from the line's left side, for a key `key` pixels wide and a
 /// physical number `physical` pixels wide. Every size is scaled on its own, as a browser lays each one out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Columns {
+struct LineColumns {
     physical: i32,
     bar: i32,
     logical: i32,
 }
 
-fn columns(key: i32, physical: i32, dpi: u32) -> Columns {
+fn line_columns(key: i32, physical: i32, dpi: u32) -> LineColumns {
     let physical_at = key.max(scaled(KEY_WIDTH, dpi)) + scaled(GAP, dpi);
     let bar = physical_at + physical + scaled(GAP, dpi) + scaled(BAR_MARGIN, dpi);
-    Columns {
+    LineColumns {
         physical: physical_at,
         bar,
-        logical: bar + scaled(BAR_WIDTH, dpi) + scaled(BAR_MARGIN, dpi) + scaled(GAP, dpi),
+        logical: bar
+            + scaled(geometry::BAR_WIDTH, dpi)
+            + scaled(BAR_MARGIN, dpi)
+            + scaled(GAP, dpi),
     }
 }
 
@@ -190,7 +190,7 @@ struct PlacedTag {
 
 /// One of the strip's lines, ready to draw: the key, the physical number, and the bar and the logical number when the
 /// coordinate has them.
-struct PlacedStrip {
+struct PlacedLine {
     key: PlacedText,
     physical: PlacedText,
     logical: Option<PlacedLogical>,
@@ -214,7 +214,7 @@ impl Overlay {
         } else {
             None
         };
-        let strips = [self.strip("X", &view.x)?, self.strip("Y", &view.y)?];
+        let lines = [self.line("X", &view.x)?, self.line("Y", &view.y)?];
         let radius = scaled(FRAME_RADIUS, self.dpi);
         let mask: ID2D1Geometry = self
             .geometry_of(&self.shaped(&places.frame, radius, 0, 0))?
@@ -255,7 +255,7 @@ impl Overlay {
         // The layer kept its own reference to the mask until the pop; this one is released here, once.
         drop(ManuallyDrop::into_inner(parameters.geometricMask));
 
-        self.draw_strip(target, &strips);
+        self.draw_strip(target, &lines);
         Ok(())
     }
 
@@ -370,7 +370,7 @@ impl Overlay {
         // The text sits in its line the way CSS does it, as the notice's does: the line's extra room is shared equally,
         // and the baseline is on a whole pixel.
         let line_top = window.top + px(pad_y);
-        let baseline = (line_top + (px(line) - text.line_height) / 2.0 + text.baseline).round();
+        let baseline = text.baseline_in(line_top, px(line));
         Ok(PlacedTag {
             background: rounded_at(
                 self.window_origin(),
@@ -412,7 +412,7 @@ impl Overlay {
     /// medium and dim, the physical number semibold in the ink, and the logical one, after a bar, medium at
     /// `LOGICAL_OPACITY`, as in a pinned label. The texts share one baseline, on a whole pixel, which centers the
     /// physical number in the line the way CSS does it; the bar is centered in the line, as a flex item is.
-    fn strip(&self, key: &str, coordinate: &Coordinate) -> windows::core::Result<PlacedStrip> {
+    fn line(&self, key: &str, coordinate: &Coordinate) -> windows::core::Result<PlacedLine> {
         let label = &coordinate.label;
         // The key has no digits to align, so it is laid out without the tabular figures, which would take its kerning.
         let key = self.typeset_plain(key, &self.logical_format)?;
@@ -422,28 +422,25 @@ impl Overlay {
             .as_deref()
             .map(|text| self.typeset(text, &self.logical_format))
             .transpose()?;
-        let columns = columns(key.width, physical.width, self.dpi);
+        let columns = line_columns(key.width, physical.width, self.dpi);
 
         let line = geometry::bounds(coordinate.line)?;
         let window = self.in_window(&line);
-        let baseline = (window.top
-            + (px(line.bottom - line.top) - physical.line_height) / 2.0
-            + physical.baseline)
-            .round();
+        let baseline = physical.baseline_in(window.top, px(line.bottom - line.top));
         let at = |text: Typeset, along: i32| PlacedText {
             left: window.left + px(along),
             top: baseline - text.baseline,
             layout: text.layout,
         };
         let logical = logical.map(|text| {
-            let height = scaled(BAR_HEIGHT, self.dpi);
+            let height = scaled(geometry::BAR_HEIGHT, self.dpi);
             // Half the line's spare room above the bar, rounded up as Chromium puts a box on the pixel grid.
             let top = line.top + (line.bottom - line.top - height + 1) / 2;
             let left = line.left + columns.bar;
             let bar = RECT {
                 left,
                 top,
-                right: left + scaled(BAR_WIDTH, self.dpi),
+                right: left + scaled(geometry::BAR_WIDTH, self.dpi),
                 bottom: top + height,
             };
             PlacedLogical {
@@ -451,7 +448,7 @@ impl Overlay {
                 text: at(text, columns.logical),
             }
         });
-        Ok(PlacedStrip {
+        Ok(PlacedLine {
             key: at(key, 0),
             physical: at(physical, columns.physical),
             logical,
@@ -459,45 +456,33 @@ impl Overlay {
     }
 
     /// The strip's lines: for each, the key in the dim ink, the physical number in the ink and, when there is one, the
-    /// bar and the logical number fainter.
-    fn draw_strip(&self, target: &ID2D1RenderTarget, strips: &[PlacedStrip]) {
+    /// bar and the logical number fainter, as a pinned label draws them.
+    fn draw_strip(&self, target: &ID2D1RenderTarget, lines: &[PlacedLine]) {
         let origin = |text: &PlacedText| dot(text.left, text.top).point;
-        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
-        // Direct2D only fails the frame at EndDraw. Each brush's opacity is set before it is used, because the brushes
-        // keep the last one.
-        unsafe {
-            // Grayscale, not ClearType: color fringes would show on the see-through panel.
-            target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
-            for strip in strips {
+        for line in lines {
+            // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and
+            // EndDraw, Direct2D only fails the frame at EndDraw. Each brush's opacity is set before it is used, because
+            // the brushes keep the last one.
+            unsafe {
+                // Grayscale, not ClearType: color fringes would show on the see-through panel.
+                target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
                 self.surfaces.dim.SetOpacity(1.0);
                 target.DrawTextLayout(
-                    origin(&strip.key),
-                    &strip.key.layout,
+                    origin(&line.key),
+                    &line.key.layout,
                     &self.surfaces.dim,
                     D2D1_DRAW_TEXT_OPTIONS_NONE,
                 );
                 self.surfaces.ink.SetOpacity(1.0);
                 target.DrawTextLayout(
-                    origin(&strip.physical),
-                    &strip.physical.layout,
+                    origin(&line.physical),
+                    &line.physical.layout,
                     &self.surfaces.ink,
                     D2D1_DRAW_TEXT_OPTIONS_NONE,
                 );
-                if let Some(logical) = &strip.logical {
-                    // The bar is a fill of whole pixels, so it is exactly its width however the scale rounds; then the
-                    // default comes back.
-                    target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-                    self.surfaces.ink.SetOpacity(BAR_OPACITY);
-                    target.FillRectangle(&logical.bar, &self.surfaces.ink);
-                    target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-                    self.surfaces.ink.SetOpacity(LOGICAL_OPACITY);
-                    target.DrawTextLayout(
-                        origin(&logical.text),
-                        &logical.text.layout,
-                        &self.surfaces.ink,
-                        D2D1_DRAW_TEXT_OPTIONS_NONE,
-                    );
-                }
+            }
+            if let Some(logical) = &line.logical {
+                self.draw_logical(target, logical, &self.surfaces.ink);
             }
         }
     }
@@ -634,8 +619,8 @@ mod tests {
         // 100%: a key narrower than its box of 14, a gap of 8, the number, a gap of 8 and a margin of 7, a bar of 1, a
         // margin of 7 and a gap of 8.
         assert_eq!(
-            columns(8, 40, 96),
-            Columns {
+            line_columns(8, 40, 96),
+            LineColumns {
                 physical: 14 + 8,
                 bar: 14 + 8 + 40 + 8 + 7,
                 logical: 14 + 8 + 40 + 8 + 7 + 1 + 7 + 8,
@@ -643,14 +628,14 @@ mod tests {
         );
         // 175%: 14 is 25, 8 is 14, 7 is 12 and 1 is 2, each on its own.
         assert_eq!(
-            columns(18, 60, 168),
-            Columns {
+            line_columns(18, 60, 168),
+            LineColumns {
                 physical: 25 + 14,
                 bar: 25 + 14 + 60 + 14 + 12,
                 logical: 25 + 14 + 60 + 14 + 12 + 2 + 12 + 14,
             }
         );
         // A key wider than its box widens it.
-        assert_eq!(columns(30, 40, 96).physical, 30 + 8);
+        assert_eq!(line_columns(30, 40, 96).physical, 30 + 8);
     }
 }

@@ -49,7 +49,7 @@ pub(super) fn magnified_view(
 ) -> MagnifiedView {
     let dpi = photo.scale.dpi();
     let factor = magnification.factor();
-    let across = pixels_across(dpi, factor);
+    let across = pixels_across(dpi, magnification);
     let half = across / 2;
     let source = Rect {
         left: center.x.saturating_sub_unsigned(half),
@@ -128,7 +128,7 @@ pub(super) fn magnified_view(
         panel,
         frame,
         source,
-        shown: overlap(source, photo.rect),
+        shown: source.overlap(photo.rect),
         center,
         magnification,
         grid: magnification >= GRID_FROM,
@@ -144,11 +144,11 @@ pub(super) fn magnified_view(
     }
 }
 
-/// How many of the frozen screen's pixels the view holds a side on a monitor of `dpi` at a magnification of `factor`: the
-/// most whole enlarged pixels that fit in `SIDE`, an odd number of them so the cursor's is the middle one, and never
-/// fewer than `FEWEST` (the prototype's `drawMag`).
-fn pixels_across(dpi: u32, factor: u32) -> u32 {
-    let fit = scaled(SIDE, dpi) / factor.max(1);
+/// How many of the frozen screen's pixels the view holds a side on a monitor of `dpi` at `magnification`: the most whole
+/// enlarged pixels that fit in `SIDE`, an odd number of them so the cursor's is the middle one, and never fewer than
+/// `FEWEST` (the prototype's `drawMag`).
+fn pixels_across(dpi: u32, magnification: Magnification) -> u32 {
+    let fit = scaled(SIDE, dpi) / magnification.factor();
     let odd = if fit.is_multiple_of(2) {
         fit.saturating_sub(1)
     } else {
@@ -187,24 +187,4 @@ fn place(cursor: i32, size: u32, start: i32, length: u32, dpi: u32) -> i32 {
                 .saturating_sub_unsigned(size),
         )
         .max(start.saturating_add_unsigned(margin))
-}
-
-/// The pixels `a` and `b` share: none when they don't touch.
-fn overlap(a: Rect, b: Rect) -> Rect {
-    let left = a.left.max(b.left);
-    let top = a.top.max(b.top);
-    let right = a
-        .left
-        .saturating_add_unsigned(a.width)
-        .min(b.left.saturating_add_unsigned(b.width));
-    let bottom = a
-        .top
-        .saturating_add_unsigned(a.height)
-        .min(b.top.saturating_add_unsigned(b.height));
-    Rect {
-        left,
-        top,
-        width: right.saturating_sub(left).max(0).unsigned_abs(),
-        height: bottom.saturating_sub(top).max(0).unsigned_abs(),
-    }
 }

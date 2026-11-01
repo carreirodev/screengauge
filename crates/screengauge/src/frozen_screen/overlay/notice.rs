@@ -95,8 +95,7 @@ impl Overlay {
         // is shared equally. Its baseline is on a whole pixel, so the letters are crisp; "Copied" has a letter that
         // drops below the line, so the middle of its digits is no guide here, as it is for a measurement's label.
         let line = px(scaled(LINE, self.dpi));
-        let baseline =
-            (content_top + (line - typeset.line_height) / 2.0 + typeset.baseline).round();
+        let baseline = typeset.baseline_in(content_top, line);
         let origin = dot(
             content_left + px(scaled(SIGN, self.dpi) + scaled(GAP, self.dpi)),
             baseline - typeset.baseline,

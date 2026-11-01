@@ -202,7 +202,7 @@ impl Overlay {
         // equally above and below. They share one baseline, on a whole pixel so the letters are crisp: the word's own
         // places it, and the number is drawn at its own distance from it, should its face have another ascent.
         let line = px(scaled(LINE, self.dpi));
-        let baseline = (content_top + (line - word.line_height) / 2.0 + word.baseline).round();
+        let baseline = word.baseline_in(content_top, line);
         let number_left = content_left + px(word.width + scaled(GAP, self.dpi));
         // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
         // Direct2D only fails the frame at EndDraw.

@@ -27,8 +27,8 @@ pub const SHADOW_DROP: u32 = 2;
 /// Between the physical and the logical part of a label: a gap, a bar, and a gap again. The bar is this wide and tall,
 /// and its bottom side hangs this far below the text's baseline (CSS `vertical-align: -1px` on an empty box).
 const BAR_GAP: u32 = 7;
-const BAR_WIDTH: u32 = 1;
-const BAR_HEIGHT: u32 = 11;
+pub const BAR_WIDTH: u32 = 1;
+pub const BAR_HEIGHT: u32 = 11;
 const BAR_DROP: u32 = 1;
 /// A pinned label's border (prototype CSS `border: 1px solid`, with `border-left: 3px solid` in cyan): a ring on its
 /// top, right and bottom sides, and a wider strip on its left.

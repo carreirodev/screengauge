@@ -720,11 +720,7 @@ fn the_tag_is_black_at_60_percent_in_a_rounded_rectangle_with_the_magnification_
             let context = format!("{mode:?} at {dpi} DPI");
             // The photo under it, as it is without a tag.
             let under = |x: i32, y: i32| wanted(&view, mode, x, y).0;
-            let darkened = |x: i32, y: i32| {
-                // Black at 60% leaves 40% of the color.
-                // TODO: mix in whole numbers, so no float comes back to `u8`.
-                under(x, y).map(|c| (f32::from(c) * 0.4).round() as u8)
-            };
+            let darkened = |x: i32, y: i32| over([0, 0, 0], 0.6, under(x, y));
             // The padding above and below the text, past the corner's arc: the photo at 40%, from the tag's first row to
             // its last.
             let x = tag.left + scaled(6, dpi) + 1;

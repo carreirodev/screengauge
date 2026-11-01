@@ -531,7 +531,12 @@ impl Session {
         // Can't happen: Windows' uptime is milliseconds since it started, nowhere near Duration's limit. Should it, neither
         // the tag nor the indicator shows.
         if self.remembered.last_tool == Tool::Inspect {
-            self.step_magnification(notches);
+            self.remembered.magnification = stepped(
+                self.remembered.magnification,
+                notches,
+                Magnification::up,
+                Magnification::down,
+            );
             self.tag_until = uptime.checked_add(TAG_LASTS);
         } else {
             if notches != 0 {
@@ -542,40 +547,10 @@ impl Session {
         self.wake().into_iter().collect()
     }
 
-    /// Moves the magnification `notches` levels, up when they are above zero and down when below, stopping at 2× and
-    /// 32×. It is the remembered state's, so the next call opens at the last one used.
-    fn step_magnification(&mut self, notches: i32) {
-        let step = if notches > 0 {
-            Magnification::up
-        } else {
-            Magnification::down
-        };
-        for _ in 0..notches.unsigned_abs() {
-            let next = step(self.remembered.magnification);
-            if next == self.remembered.magnification {
-                // At a limit, where the rest of the notches change nothing either.
-                break;
-            }
-            self.remembered.magnification = next;
-        }
-    }
-
     /// Moves the tolerance `notches` steps, up when they are above zero and down when below, stopping at its limits,
     /// and measures again.
     fn step_tolerance(&mut self, notches: i32) {
-        let step = if notches > 0 {
-            Tolerance::up
-        } else {
-            Tolerance::down
-        };
-        for _ in 0..notches.unsigned_abs() {
-            let next = step(self.tolerance);
-            if next == self.tolerance {
-                // At a limit, where the rest of the notches change nothing either.
-                break;
-            }
-            self.tolerance = next;
-        }
+        self.tolerance = stepped(self.tolerance, notches, Tolerance::up, Tolerance::down);
         self.measure();
     }
 
@@ -785,7 +760,10 @@ impl Session {
         }
         let center = self.measured_at?;
         let monitor = frozen_screen::monitor_at(&self.frozen_screen, center)?;
-        let photo = self.frozen_screen.get(monitor)?;
+        let Some(photo) = self.frozen_screen.get(monitor) else {
+            // Can't happen: `monitor_at` gives the index of one of the frozen screen's photos.
+            return None;
+        };
         Some(magnified_view::magnified_view(
             photo,
             monitor,
@@ -832,4 +810,20 @@ impl Session {
             },
         }
     }
+}
+
+/// `value` moved `notches` steps, by `up` when they are above zero and by `down` when below, as the mouse wheel moves the
+/// tolerance and the magnification a step a notch. It stops at the first step that changes nothing: a limit, where the
+/// rest of the notches change nothing either.
+fn stepped<T: Copy + PartialEq>(value: T, notches: i32, up: fn(T) -> T, down: fn(T) -> T) -> T {
+    let step = if notches > 0 { up } else { down };
+    let mut value = value;
+    for _ in 0..notches.unsigned_abs() {
+        let next = step(value);
+        if next == value {
+            break;
+        }
+        value = next;
+    }
+    value
 }
