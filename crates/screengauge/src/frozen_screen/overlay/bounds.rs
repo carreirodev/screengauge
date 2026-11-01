@@ -10,7 +10,7 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, ID2D1RenderTarget,
 };
 
-use super::geometry::{self, Size, scaled};
+use super::geometry::{self, Parts, Size, scaled};
 use super::{Look, Overlay};
 
 // Every size below is in logical pixels, which `scaled` turns into physical pixels for the monitor's scale.
@@ -30,16 +30,6 @@ const DASH_BLACK: f32 = 0.85;
 /// How much of the cyan over the content shows: more while it is live than once it is pinned (`.16` and `.1`).
 const LIVE_FILL: f32 = 0.16;
 const PINNED_FILL: f32 = 0.1;
-
-/// `rect`'s pixels, right and bottom one past its last pixel, as Windows has them.
-fn window_rect(rect: Rect) -> RECT {
-    RECT {
-        left: rect.left,
-        top: rect.top,
-        right: rect.right() + 1,
-        bottom: rect.bottom() + 1,
-    }
-}
 
 /// The outer pixels of the rectangle from (`left`, `top`) to (`right`, `bottom`), both included, as rectangles that
 /// don't overlap, so none is darkened twice: the top row whole, then the bottom row and the columns between them. A
@@ -75,9 +65,17 @@ fn outer_pixels(left: i32, top: i32, right: i32, bottom: i32) -> Vec<RECT> {
     pixels
 }
 
-/// The ring of pixels `by` pixels outside `content` all around it, one pixel wide: the cyan line is the ring at 1 and
-/// its outline the ring at 2.
-pub fn ring(content: Rect, by: i32) -> Vec<RECT> {
+/// What to fill around Bounds' content, as Dimensions' line has its [`geometry::parts`]: a cyan ring one pixel wide just
+/// outside the content, whatever the scale, and the outline as the ring outside that.
+pub fn parts(content: Rect) -> Parts {
+    Parts {
+        outline: ring(content, 2),
+        line: ring(content, 1),
+    }
+}
+
+/// The ring of pixels `by` pixels outside `content` all around it, one pixel wide.
+fn ring(content: Rect, by: i32) -> Vec<RECT> {
     outer_pixels(
         content.left - by,
         content.top - by,
@@ -187,21 +185,31 @@ impl Overlay {
         }
     }
 
-    /// Fills each content with see-through cyan, lighter for a pinned one than for the live one.
-    pub(super) fn draw_fills(&self, target: &ID2D1RenderTarget, fills: &[(Rect, Look)]) {
+    /// Fills each content with see-through cyan, lighter for a pinned one than for the live one. Should a content be too
+    /// large to draw, none is.
+    pub(super) fn draw_fills(
+        &self,
+        target: &ID2D1RenderTarget,
+        fills: &[(Rect, Look)],
+    ) -> windows::core::Result<()> {
+        let fills = fills
+            .iter()
+            .map(|&(content, look)| Ok((geometry::bounds(content)?, look)))
+            .collect::<windows::core::Result<Vec<_>>>()?;
         // SAFETY: as in `draw_drawn_rectangle`. The cyan brush is opaque again afterwards, as the lines and the live
         // pill take it.
         unsafe {
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-            for &(content, look) in fills {
+            for (content, look) in &fills {
                 self.cyan.SetOpacity(match look {
                     Look::Live => LIVE_FILL,
                     Look::Pinned => PINNED_FILL,
                 });
-                target.FillRectangle(&self.in_window(&window_rect(content)), &self.cyan);
+                target.FillRectangle(&self.in_window(content), &self.cyan);
             }
             self.cyan.SetOpacity(1.0);
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         }
+        Ok(())
     }
 }

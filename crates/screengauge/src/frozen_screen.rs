@@ -510,9 +510,9 @@ impl Shown {
 
 /// The monitors whose windows show something different from `before` to `after`, each once and in order: the one a
 /// measurement left, which must lose its line, the one it is on now, the one a measurement was pinned on or taken off,
-/// the one Bounds draws a rectangle on while it appears, changes or goes,
-/// the ones the tolerance indicator appeared on, followed the cursor between or went from, the one a notice appeared
-/// on or went from, and the toolbar's when another of its buttons lights up or it moves.
+/// the one Bounds draws a rectangle on while it appears, changes or goes, the ones the tolerance indicator appeared on,
+/// followed the cursor between or went from, the one a notice appeared on or went from, and the toolbar's when another
+/// of its buttons lights up or it moves.
 fn monitors_to_draw_again(before: &Shown, after: &Shown) -> Vec<usize> {
     let monitors: BTreeSet<usize> = before.monitors().chain(after.monitors()).collect();
     monitors
@@ -1104,7 +1104,7 @@ mod tests {
 
     #[test]
     fn a_drawn_rectangle_that_appears_grows_or_goes_redraws_its_monitor_alone() {
-        // Over nothing but the background, Bounds measures nothing, and the drawn rectangle alone changes.
+        // Over nothing but the reference color, Bounds measures nothing, and the drawn rectangle alone changes.
         let nothing = Shown::default();
         assert_eq!(monitors_to_draw_again(&nothing, &drawing(1, 300)), [1]);
         assert_eq!(

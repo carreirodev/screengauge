@@ -1,7 +1,7 @@
 //! Bounds: a rectangle the user drags out, shrunk until each side touches the content inside it (v1 spec WPC-296,
 //! Bounds).
 
-use super::pixels::{self, Like, color, rgb};
+use super::pixels::{self, Reference, color, rgb};
 use super::{Label, Measurement, Photo, Point, Rect, units};
 use crate::settings::Tolerance;
 
@@ -38,7 +38,10 @@ pub(super) fn measure(
     tolerance: Tolerance,
     also_show_logical_pixels: bool,
 ) -> Option<Measurement> {
-    let photo = frozen_screen.get(drag.monitor)?;
+    let Some(photo) = frozen_screen.get(drag.monitor) else {
+        // Can't happen: a drag begins on a monitor of the frozen screen.
+        return None;
+    };
     let drawn = drawn_rectangle(photo, drag, cursor);
     let content = shrink(photo, drawn, color(photo, drag.start), tolerance)?;
     let mut measurement = Measurement {
@@ -64,8 +67,8 @@ pub(super) fn measure(
 /// It reads the photo a row at a time, the way it lies in memory, and each pixel at most once: a drag across a whole 4K
 /// monitor of background reads every one of its pixels at each move of the mouse.
 fn shrink(photo: &Photo, drawn: Rect, reference: [u8; 3], tolerance: Tolerance) -> Option<Rect> {
-    let like = Like::new(reference, tolerance);
-    let content = |pixel: &[u8; 4]| like.differs(rgb(*pixel));
+    let reference = Reference::new(reference, tolerance);
+    let content = |pixel: &[u8; 4]| reference.differs(rgb(*pixel));
     let row = |y: i32| pixels::row(photo, y, drawn.left, drawn.width);
     let holds_content = |y: &i32| row(*y).iter().any(content);
     let top = (drawn.top..=drawn.bottom()).find(holds_content)?;
@@ -84,7 +87,8 @@ fn shrink(photo: &Photo, drawn: Rect, reference: [u8; 3], tolerance: Tolerance) 
             last += 1 + further;
         }
     }
-    // Can't fail: both lie inside the drawn rectangle, whose width is a u32 and whose left side plus it an i32.
+    // Can't happen that either conversion fails: both lie inside the drawn rectangle, whose width is a u32 and whose
+    // left side plus it an i32.
     let left = drawn
         .left
         .checked_add_unsigned(u32::try_from(first).ok()?)?;

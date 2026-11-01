@@ -301,36 +301,29 @@ impl Session {
 
     /// What the button coming up does: it lets go of the dragged toolbar, or ends the drag Bounds was drawing.
     fn release(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
-        match self.drag.take() {
-            Some(drag) => self.finish_drag(drag, held, uptime),
-            None => self.let_go(),
+        if self.drag.take().is_some() {
+            self.finish_drag(held, uptime)
+        } else {
+            self.let_go()
         }
     }
 
-    /// Pins what Bounds measured as the drag ended, exactly as the preview showed it, and copies its physical pixels,
-    /// or its logical pixels with Shift held as the button comes up, whatever it was held for before (v1 spec WPC-296,
-    /// Bounds). The copy shows "Copied" where the drag ended. The drawn rectangle goes, there are no handles to adjust
-    /// it, and the tool is ready for the next drag.
-    fn finish_drag(&mut self, drag: bounds::Drag, held: Held, uptime: Duration) -> Vec<Effect> {
+    /// Pins what Bounds measured as the drag ended, exactly as the preview showed it, and copies it, its logical pixels
+    /// with Shift held as the button comes up, whatever it was held for before (v1 spec WPC-296, Bounds). The drawn
+    /// rectangle goes, there are no handles to adjust it, and the tool is ready for the next drag. With nothing but the
+    /// reference color in the drawn rectangle, nothing is pinned or copied.
+    fn finish_drag(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
         let measured = self.live.take();
         self.measure();
-        let (Some(measurement), Some(photo)) = (measured, self.frozen_screen.get(drag.monitor))
-        else {
-            return Vec::new();
-        };
-        let text = units::clipboard_text(&measurement.lengths(), photo.scale, held.shift);
-        // The cursor may have gone on to another monitor; the drawn rectangle, and the notice, stop at the limit.
-        let ended = photo.rect.nearest(self.cursor);
-        self.pinned.push(measurement);
-        let mut effects = vec![Effect::CopyText(text)];
-        effects.extend(self.show(Message::Copied, ended, drag.monitor, uptime));
-        effects
+        match measured {
+            Some(measurement) => self.pin_and_copy(measurement, held.shift, uptime),
+            None => Vec::new(),
+        }
     }
 
-    /// Pins what Dimensions measures, as the user sees it at the click, and copies its physical pixels, or its logical
-    /// pixels with Shift held, whether the label shows them or not; Dimensions goes on measuring, and the copy shows
-    /// "Copied" where the click was (v1 spec WPC-296, Dimensions). A click with nothing measured does nothing, and so
-    /// does the second click of the double-click that called ScreenGauge (WPC-308).
+    /// Pins what Dimensions measures, as the user sees it at the click, and copies it, its logical pixels with Shift
+    /// held; Dimensions goes on measuring (v1 spec WPC-296, Dimensions). A click with nothing measured does nothing, and
+    /// so does the second click of the double-click that called ScreenGauge (WPC-308).
     fn pin(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
         if self.is_second_click(uptime) {
             return Vec::new();
@@ -338,15 +331,30 @@ impl Session {
         let Some(measurement) = self.live.clone() else {
             return Vec::new();
         };
+        self.pin_and_copy(measurement, held.shift, uptime)
+    }
+
+    /// Pins `measurement` and copies its physical pixels, or its logical pixels when `logical`, whether its label shows
+    /// them or not, which is what Dimensions' click and Bounds' release both copy (v1 spec WPC-296, Dimensions and
+    /// Bounds). The copy shows "Copied" where the cursor is.
+    fn pin_and_copy(
+        &mut self,
+        measurement: Measurement,
+        logical: bool,
+        uptime: Duration,
+    ) -> Vec<Effect> {
         let Some(photo) = self.frozen_screen.get(measurement.monitor) else {
-            // Can't happen: Dimensions measures on a monitor of the frozen screen.
+            // Can't happen: the tools measure on monitors of the frozen screen.
             return Vec::new();
         };
-        let text = units::clipboard_text(&measurement.lengths(), photo.scale, held.shift);
-        let monitor = measurement.monitor;
+        let text = units::clipboard_text(&measurement.lengths(), photo.scale, logical);
+        // The cursor is always on a monitor, which the drag of Bounds may have left for another; should it be on none,
+        // the notice goes on the measurement's monitor.
+        let monitor = frozen_screen::monitor_at(&self.frozen_screen, self.cursor)
+            .unwrap_or(measurement.monitor);
         self.pinned.push(measurement);
         let mut effects = vec![Effect::CopyText(text)];
-        effects.extend(self.show(Message::Copied, self.cursor, monitor, uptime));
+        effects.extend(self.show(Message::Copied, monitor, uptime));
         effects
     }
 
@@ -423,21 +431,15 @@ impl Session {
         Vec::new()
     }
 
-    /// Shows `message` at `at`, on `monitor`, in place of any notice still on screen, until it is due to go, and asks for
-    /// the next wake, which is the tolerance indicator's when that goes first.
-    fn show(
-        &mut self,
-        message: Message,
-        at: Point,
-        monitor: usize,
-        uptime: Duration,
-    ) -> Option<Effect> {
+    /// Shows `message` where the cursor is, on `monitor`, in place of any notice still on screen, until it is due to go,
+    /// and asks for the next wake, which is the tolerance indicator's when that goes first.
+    fn show(&mut self, message: Message, monitor: usize, uptime: Duration) -> Option<Effect> {
         // Can't happen: Windows' uptime is milliseconds since it started, nowhere near Duration's limit.
         let until = uptime.checked_add(NOTICE_LASTS)?;
         self.notice = Some(TimedNotice {
             notice: Notice {
                 message,
-                at,
+                at: self.cursor,
                 monitor,
             },
             until,
@@ -659,7 +661,10 @@ impl Session {
     /// The rectangle Bounds is drawing, while the button is held.
     fn drawn_rectangle(&self) -> Option<DrawnRectangle> {
         let drag = self.drag?;
-        let photo = self.frozen_screen.get(drag.monitor)?;
+        let Some(photo) = self.frozen_screen.get(drag.monitor) else {
+            // Can't happen: a drag begins on a monitor of the frozen screen.
+            return None;
+        };
         Some(DrawnRectangle {
             monitor: drag.monitor,
             rect: bounds::drawn_rectangle(photo, drag, self.cursor),

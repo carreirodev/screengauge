@@ -1,11 +1,9 @@
-//! Where a measurement lands, as whole-pixel rectangles in physical pixels of the virtual screen. Nothing here calls
-//! Windows, so the pixel counts the owner checks by eye are tested without a monitor: [`parts`] gives Dimensions' line,
-//! its ticks and their outline, or the ring around Bounds' content and its outline, and [`place_label`] gives the
-//! label's place.
+//! Where Dimensions' live measurement lands, as whole-pixel rectangles in physical pixels of the virtual screen.
+//! Nothing here calls Windows, so the pixel counts the owner checks by eye are tested without a monitor: [`parts`]
+//! gives the line, its ticks and their outline, and [`place_label`] gives the label's place. Bounds' own are in
+//! `bounds`.
 
 use screengauge_core::session::{Measurement, Rect, Span, toolbar};
-
-use super::bounds;
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::core::Error;
 
@@ -71,16 +69,11 @@ pub struct Parts {
 
 /// The line, ticks and outline of `measurement`, for a monitor of `dpi`. A span is exactly its pixels, one pixel thick
 /// whatever the scale; a tick is a perpendicular run of 2k + 1 pixels through the span's first pixel and another
-/// through its last, where k is the tick's reach scaled. Bounds' content has a cyan ring one pixel wide just outside it,
-/// whatever the scale, and the outline as the ring outside that.
+/// through its last, where k is the tick's reach scaled.
 pub fn parts(measurement: &Measurement, dpi: u32) -> Parts {
     let reach = scaled(TICK, dpi);
     let mut line = Vec::new();
     let mut outline = Vec::new();
-    if let Some(content) = measurement.content {
-        line.extend(bounds::ring(content, 1));
-        outline.extend(bounds::ring(content, 2));
-    }
     if let Some(Span { first, last }) = measurement.horizontal {
         add_span(
             first.x,
@@ -291,16 +284,13 @@ pub fn bar(left: i32, baseline: i32, dpi: u32) -> RECT {
 /// happens near the monitor's limit, so this follows the other two modes: with no room on the right the label mirrors
 /// to the left of the crossing, its right side `CROSS_OFFSET` from it, and with no room below it mirrors above. Where
 /// it would still stick out, because the monitor is smaller than the label, or the span is short next to the monitor's
-/// limit, it slides inside. Bounds' label goes where [`bounds::place_label`] puts it, above the content.
+/// limit, it slides inside.
 pub fn place_label(
     measurement: &Measurement,
     label: Size,
     monitor: RECT,
     dpi: u32,
 ) -> Option<RECT> {
-    if let Some(content) = measurement.content {
-        return Some(bounds::place_label(content, label, monitor, dpi));
-    }
     let (above, side, offset) = (
         scaled(ABOVE_GAP, dpi),
         scaled(SIDE_GAP, dpi),

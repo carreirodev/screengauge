@@ -347,8 +347,8 @@ impl Overlay {
     ///
     /// Order matters, and it is across the measurements, not within each: the drawn rectangle; every content's fill;
     /// every label's shadow, which is faint and reaches toward the lines; every outline; every cyan pixel, so nothing
-    /// darkens one, whichever measurement it belongs to; then the pills with their text. A pill never touches its own line, being further from it than a
-    /// tick reaches, but it covers another measurement's. A label that can't be laid out doesn't stop the others; the
+    /// darkens one, whichever measurement it belongs to; then the pills with their text. A pill never touches its own
+    /// line, being further from it than a tick reaches, but it covers another measurement's. A label that can't be laid out doesn't stop the others; the
     /// first failure is returned once everything else is drawn, and any later one is logged.
     pub fn draw(
         &self,
@@ -372,11 +372,14 @@ impl Overlay {
         let mut labels = Vec::new();
         let pinned = pinned.iter().map(|&m| (m, Look::Pinned));
         for (measurement, look) in pinned.chain(live.map(|m| (m, Look::Live))) {
-            parts.push(geometry::parts(measurement, self.dpi));
+            parts.push(match measurement.content {
+                Some(content) => bounds::parts(content),
+                None => geometry::parts(measurement, self.dpi),
+            });
             fills.extend(measurement.content.map(|content| (content, look)));
             match self.label(measurement, look) {
                 Ok(Some(label)) => labels.push(label),
-                // No span, so nothing to label.
+                // No span and no content, so nothing to label.
                 Ok(None) => {}
                 Err(e) => keep(Err(e)),
             }
@@ -384,7 +387,7 @@ impl Overlay {
         if let Some(drawn) = drawn {
             self.draw_drawn_rectangle(target, drawn);
         }
-        self.draw_fills(target, &fills);
+        keep(self.draw_fills(target, &fills));
         for label in &labels {
             keep(self.draw_shadow(target, label));
         }
@@ -485,7 +488,11 @@ impl Overlay {
                 geometry::border(self.dpi).strip,
             ),
         };
-        let Some(pill) = geometry::place_label(measurement, size, self.monitor, self.dpi) else {
+        let placed = match measurement.content {
+            Some(content) => Some(bounds::place_label(content, size, self.monitor, self.dpi)),
+            None => geometry::place_label(measurement, size, self.monitor, self.dpi),
+        };
+        let Some(pill) = placed else {
             return Ok(None);
         };
 

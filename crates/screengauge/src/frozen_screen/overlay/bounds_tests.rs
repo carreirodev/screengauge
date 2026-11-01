@@ -4,6 +4,7 @@
 
 use screengauge_core::session::{DrawnRectangle, Label, Measurement, Rect};
 
+use super::panel_tests::over;
 use super::tests::{BACKGROUND, CYAN, Canvas, MONITOR, Picture, SCALES, near, text_width};
 use super::*;
 
@@ -32,11 +33,7 @@ fn shrunk_to(content: Rect, text: &str) -> Measurement {
 
 /// `color` at `alpha` over the canvas's background, as a photo shows it.
 fn over_background(color: [u8; 3], alpha: f32) -> [u8; 3] {
-    let mut mixed = [0; 3];
-    for (channel, (&over, &under)) in mixed.iter_mut().zip(color.iter().zip(&BACKGROUND)) {
-        *channel = (f32::from(over) * alpha + f32::from(under) * (1.0 - alpha)).round() as u8;
-    }
-    mixed
+    over(color, alpha, BACKGROUND)
 }
 
 /// The window's pixel (`x`, `y`) of `picture`, by its place in the virtual screen.
@@ -87,8 +84,9 @@ fn check_every_pixel(
     what: &str,
     wanted: impl Fn(i32, i32) -> [u8; 3],
 ) {
-    for row in 0..canvas.height as i32 {
-        for column in 0..canvas.width as i32 {
+    let size = |pixels: u32| i32::try_from(pixels).expect("a small canvas");
+    for row in 0..size(canvas.height) {
+        for column in 0..size(canvas.width) {
             let (x, y) = (column + MONITOR.left, row + MONITOR.top);
             let wanted = wanted(x, y);
             assert!(
@@ -157,7 +155,7 @@ fn on_ring(content: Rect, by: i32, x: i32, y: i32) -> bool {
 /// What a pixel of the window is for the content of a Bounds measurement drawn without its label: the content filled
 /// with cyan at 16% while live and 10% once pinned, the ring of pixels just outside it in cyan, the ring outside that in
 /// black at 28% over the background, and the background everywhere else.
-fn boxed(content: Rect, look: Look, x: i32, y: i32) -> [u8; 3] {
+fn around_content(content: Rect, look: Look, x: i32, y: i32) -> [u8; 3] {
     let inside = (content.left..=content.right()).contains(&x)
         && (content.top..=content.bottom()).contains(&y);
     if inside {
@@ -171,12 +169,12 @@ fn boxed(content: Rect, look: Look, x: i32, y: i32) -> [u8; 3] {
     }
 }
 
-/// The fill, the outline and the ring of `measurement`, in the order `draw` lays them, without the label.
-fn draw_box(overlay: &Overlay, target: &ID2D1RenderTarget, measurement: &Measurement, look: Look) {
-    let parts = [geometry::parts(measurement, overlay.dpi)];
-    if let Some(content) = measurement.content {
-        overlay.draw_fills(target, &[(content, look)]);
-    }
+/// The fill, the outline and the ring of `content`, in the order `draw` lays them, without the label.
+fn draw_content(overlay: &Overlay, target: &ID2D1RenderTarget, content: Rect, look: Look) {
+    let parts = [bounds::parts(content)];
+    overlay
+        .draw_fills(target, &[(content, look)])
+        .expect("a small content");
     overlay.draw_outlines(target, &parts);
     overlay.draw_cyan(target, &parts);
 }
@@ -188,13 +186,13 @@ fn the_content_is_light_cyan_with_a_cyan_ring_just_outside_it_and_the_outline_be
     for look in [Look::Live, Look::Pinned] {
         for dpi in SCALES {
             let picture = canvas.render(MONITOR, dpi, |overlay, target| {
-                draw_box(overlay, target, &shrunk_to(content, "100 × 40"), look);
+                draw_content(overlay, target, content, look);
             });
             check_every_pixel(
                 &picture,
                 &canvas,
                 &format!("{look:?} at {dpi} DPI"),
-                |x, y| boxed(content, look, x, y),
+                |x, y| around_content(content, look, x, y),
             );
         }
     }
@@ -205,10 +203,10 @@ fn a_content_of_one_pixel_still_has_its_ring_and_outline_whole() {
     let canvas = Canvas::new(480, 320);
     let content = rect(-300, 300, -300, 300);
     let picture = canvas.render(MONITOR, 120, |overlay, target| {
-        draw_box(overlay, target, &shrunk_to(content, "1 × 1"), Look::Live);
+        draw_content(overlay, target, content, Look::Live);
     });
     check_every_pixel(&picture, &canvas, "one pixel", |x, y| {
-        boxed(content, Look::Live, x, y)
+        around_content(content, Look::Live, x, y)
     });
 }
 

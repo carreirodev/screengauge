@@ -25,33 +25,31 @@ pub(super) fn rgb([blue, green, red, _]: [u8; 4]) -> [u8; 3] {
     [red, green, blue]
 }
 
-/// Whether `pixel` differs from `reference` by more than `tolerance`, by [`Like`].
-pub(super) fn differs(reference: [u8; 3], pixel: [u8; 3], tolerance: Tolerance) -> bool {
-    Like::new(reference, tolerance).differs(pixel)
-}
-
-/// The colors that don't differ from a reference color by more than a tolerance: those whose red, green and blue each
-/// lie within three times the tolerance of the reference's. The prototype's rule, provisional until the calibration
-/// (WPC-332). Worked out once, for the millions of pixels a drag of Bounds may compare with it at each move.
+/// A reference color with the tolerance it is compared at, which tells content from the same area: a pixel differs
+/// from it when one of its red, green or blue differs from the reference color's by more than three times the
+/// tolerance. The prototype's rule, provisional until the calibration (WPC-332). Worked out once, for the millions of
+/// pixels a drag of Bounds may compare with it at each move.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct Like {
-    /// The lowest and the highest red, green and blue that are still like the reference.
+pub(super) struct Reference {
+    /// The lowest red, green and blue a pixel can have and still not differ.
     low: [u8; 3],
+    /// The highest.
     high: [u8; 3],
 }
 
-impl Like {
-    pub(super) fn new(reference: [u8; 3], tolerance: Tolerance) -> Like {
+impl Reference {
+    /// `color` as the reference color, compared at `tolerance`.
+    pub(super) fn new(color: [u8; 3], tolerance: Tolerance) -> Reference {
         // At most 150, as the highest tolerance is 50: a u8, kept from going past 255 all the same.
         let limit = tolerance.get().saturating_mul(3);
-        Like {
-            low: reference.map(|channel| channel.saturating_sub(limit)),
-            high: reference.map(|channel| channel.saturating_add(limit)),
+        Reference {
+            low: color.map(|channel| channel.saturating_sub(limit)),
+            high: color.map(|channel| channel.saturating_add(limit)),
         }
     }
 
-    /// Whether `pixel` differs from the reference by more than the tolerance: one of its red, green or blue lies outside
-    /// the range.
+    /// Whether `pixel` differs from the reference color by more than the tolerance: one of its red, green or blue lies
+    /// outside the range.
     pub(super) fn differs(self, pixel: [u8; 3]) -> bool {
         // Every channel is compared, without stopping at the first that differs, so the comparisons run side by side.
         (0..3).fold(false, |differs, channel| {

@@ -1,7 +1,7 @@
 //! Dimensions: the span of pixels around the cursor, from the edge on one side to the edge on the other, along the
 //! cursor's row, its column or both (v1 spec WPC-296, Dimensions).
 
-use super::pixels::{color, differs};
+use super::pixels::{Reference, color};
 use super::{Label, Measurement, Photo, Point, Span, units};
 use crate::settings::{DimensionsMode, Tolerance};
 
@@ -50,7 +50,7 @@ enum Axis {
 /// more than `tolerance`, up to the edge on each side or the monitor's limit. Each pixel is compared with the reference
 /// color, never with its neighbor.
 fn span(photo: &Photo, cursor: Point, axis: Axis, tolerance: Tolerance) -> Span {
-    let reference = color(photo, cursor);
+    let reference = Reference::new(color(photo, cursor), tolerance);
     let rect = photo.rect;
     let (at, low, high) = match axis {
         Axis::Row => (cursor.x, rect.left, rect.right()),
@@ -66,7 +66,7 @@ fn span(photo: &Photo, cursor: Point, axis: Axis, tolerance: Tolerance) -> Span 
             y: along,
         },
     };
-    let same = |along: i32| !differs(reference, color(photo, point(along)), tolerance);
+    let same = |along: i32| !reference.differs(color(photo, point(along)));
     let mut first = at;
     while first > low && same(first - 1) {
         first -= 1;

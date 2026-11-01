@@ -147,7 +147,7 @@ fn the_button() -> Measurement {
 }
 
 #[test]
-fn letting_go_pins_the_content_and_shows_copied_where_the_drag_ended() {
+fn letting_go_pins_the_content_and_shows_copied_where_the_cursor_is() {
     let mut session = open(vec![button()], at(900, 500));
     drag(&mut session, at(900, 500), at(1200, 700), 1000);
     assert_eq!(pinned(&session), [the_button()]);
@@ -239,7 +239,7 @@ const ICON_GRAY: [u8; 3] = [90, 90, 90];
 const TEXT_BLACK: [u8; 3] = [20, 20, 20];
 
 #[test]
-fn several_objects_make_one_box_with_the_gaps_between_them_inside() {
+fn content_in_several_places_shrinks_to_one_rectangle_with_the_gaps_inside() {
     // Two icons of 20 × 20 a hundred pixels apart, the second lower than the first.
     let icons = monitor(
         AOC,
@@ -255,9 +255,9 @@ fn several_objects_make_one_box_with_the_gaps_between_them_inside() {
 }
 
 #[test]
-fn an_icon_and_its_text_in_the_same_rectangle_make_one_box() {
-    // An icon of 24 × 24, then 8 pixels further a word of three letters 10 pixels tall, its strokes 2 pixels wide, sitting
-    // on the icon's bottom.
+fn an_icon_and_its_text_in_the_same_rectangle_shrink_to_one_rectangle() {
+    // An icon of 24 × 24, then 8 pixels further a word of three letters 10 pixels tall, its strokes 2 pixels wide,
+    // sitting on the icon's bottom.
     let item = monitor(
         AOC,
         168,
@@ -300,7 +300,7 @@ fn a_rectangle_that_cuts_through_the_button_measures_only_the_part_inside_it() {
 }
 
 #[test]
-fn starting_on_the_object_makes_it_the_background_and_the_rectangle_hardly_shrinks() {
+fn starting_on_the_button_makes_its_blue_the_reference_color_and_the_rectangle_hardly_shrinks() {
     // Begun inside the button, the blue is the reference color, and the white around the button is the content: it
     // reaches every side of what was drawn.
     let mut session = open(vec![button()], at(1010, 610));
@@ -377,13 +377,13 @@ fn the_rectangle_stops_at_the_limit_of_the_monitor_the_drag_began_on() {
             logical: Some("22.9 × 22.9".to_owned()),
         }
     );
-    // The notice is where the rectangle stopped, on the monitor the drag began on.
+    // The notice is where the cursor is, on the monitor the cursor went on to, as every notice is.
     assert_eq!(
         session
             .scene()
             .notice
             .map(|notice| (notice.at, notice.monitor)),
-        Some((at(3839, 700), 0))
+        Some((at(4000, 700), 1))
     );
 }
 
@@ -419,7 +419,7 @@ const NOTCH: i32 = 120;
 #[test]
 fn the_wheel_in_the_middle_of_the_drag_changes_the_preview_at_once() {
     // A faint panel above the button, 10 levels off the white: content at the default tolerance, whose limit is 6
-    // levels, and background two notches up, at 12.
+    // levels, and like the reference color two notches up, at 12.
     let faint = monitor(
         AOC,
         168,
@@ -468,7 +468,8 @@ fn with_the_button_held_the_arrows_move_the_rectangles_corner_one_pixel_or_ten_w
 #[test]
 fn without_the_button_the_arrows_move_where_the_next_drag_begins() {
     let mut session = open(vec![button()], at(1010, 610));
-    // Begun on the button, a drag would make the blue the background; ten pixels up and left it begins on the white.
+    // Begun on the button, a drag would make the blue the reference color; ten pixels up and left it begins on the
+    // white.
     session.handle(event_holding(
         at(1010, 610),
         SHIFT,
@@ -662,7 +663,7 @@ fn a_pin_is_a_record_of_the_release_that_a_later_turn_of_the_wheel_doesnt_change
 }
 
 #[test]
-fn a_drag_over_nothing_but_the_background_pins_and_copies_nothing() {
+fn a_drag_over_nothing_but_the_reference_color_pins_and_copies_nothing() {
     // The notice "No content found" comes with WPC-314.
     let mut session = open(vec![button()], at(100, 100));
     hold(&mut session, at(100, 100), at(400, 300), 1000);
