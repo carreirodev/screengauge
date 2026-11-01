@@ -10,10 +10,12 @@ mod palette;
 #[cfg(test)]
 mod panel_tests;
 mod shadow;
+mod svg_path;
 mod tolerance;
 #[cfg(test)]
 mod tolerance_tests;
 pub mod toolbar;
+mod toolbar_icons;
 mod toolbar_paint;
 mod toolbar_palette;
 #[cfg(test)]

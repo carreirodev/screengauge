@@ -11,19 +11,27 @@
 //! reactions to the mouse hovering and pressing (WPC-311).
 
 use screengauge_core::session::{Toolbar, ToolbarButton};
-use windows::Win32::Foundation::RECT;
-use windows::Win32::Graphics::Direct2D::Common::{D2D_RECT_F, D2D1_COLOR_F, D2D1_GRADIENT_STOP};
-use windows::Win32::Graphics::Direct2D::{
-    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2,
-    D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_ROUNDED_RECT, ID2D1RenderTarget,
-    ID2D1RoundedRectangleGeometry, ID2D1SolidColorBrush, ID2D1StrokeStyle,
+use windows::Win32::Foundation::{E_FAIL, RECT};
+use windows::Win32::Graphics::Direct2D::Common::{
+    D2D_RECT_F, D2D_SIZE_F, D2D1_BEZIER_SEGMENT, D2D1_COLOR_F, D2D1_FIGURE_BEGIN_HOLLOW,
+    D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN, D2D1_GRADIENT_STOP,
 };
+use windows::Win32::Graphics::Direct2D::{
+    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_ARC_SEGMENT, D2D1_ARC_SIZE_LARGE, D2D1_ARC_SIZE_SMALL,
+    D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
+    D2D1_ROUNDED_RECT, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE,
+    ID2D1PathGeometry, ID2D1RenderTarget, ID2D1RoundedRectangleGeometry, ID2D1SolidColorBrush,
+    ID2D1StrokeStyle,
+};
+use windows::core::Error;
 
 use super::geometry::scaled;
 use super::shadow::{self, Profile};
+use super::svg_path::{self, Figure, Pt, Segment};
 use super::toolbar::Layout;
+use super::toolbar_icons::{self, Icon, Shape, VIEW_BOX};
 use super::toolbar_palette::{self, Palette, Rgba, Shadow, Stop, Surface};
-use super::{Overlay, px, ring};
+use super::{Overlay, dot, px, ring};
 
 // Every size below is in logical pixels, which `scaled` turns into physical pixels for the monitor's scale.
 
@@ -83,6 +91,20 @@ struct Painter<'a> {
     origin: (i32, i32),
     /// Recolored for every fill, so the layers of a shadow share one.
     brush: ID2D1SolidColorBrush,
+}
+
+/// Where an icon's view box is on the target and how big a unit of it is, to turn its points into pixels.
+struct Placement {
+    left: f32,
+    top: f32,
+    unit: f32,
+}
+
+impl Placement {
+    /// `p` in pixels, as the ellipse of no size Direct2D's calls take their points from (see `dot`).
+    fn point(&self, p: Pt) -> D2D1_ELLIPSE {
+        dot(self.left + p.x * self.unit, self.top + p.y * self.unit)
+    }
 }
 
 impl Overlay {
@@ -200,7 +222,141 @@ impl Painter<'_> {
         if lit {
             self.surface(&self.palette.lit, place, radius, 0, false)?;
         }
+        // The icon is over the lit box, in the lit ink.
+        let ink = match (lit, button) {
+            (true, _) => self.palette.ink_on,
+            (false, ToolbarButton::Tool(_) | ToolbarButton::Mode(_)) => self.palette.ink,
+            (false, _) => self.palette.small_ink,
+        };
+        self.icon(button, place, ink)
+    }
+
+    /// The icon of `button` in `ink`, centered in `place`: its view box at its CSS size, scaled for the monitor, with its
+    /// top left corner on a whole pixel (a half pixel of room goes to the left and top), and its strokes round at their
+    /// ends and corners.
+    fn icon(&self, button: &ToolbarButton, place: &RECT, ink: Rgba) -> windows::core::Result<()> {
+        let Some(icon) = toolbar_icons::icon_for(button) else {
+            return Ok(());
+        };
+        let side = self.s(icon.size);
+        let at = Placement {
+            left: px(place.left + (place.right - place.left - side + 1) / 2),
+            top: px(place.top + (place.bottom - place.top - side + 1) / 2),
+            unit: px(side) / VIEW_BOX,
+        };
+        self.set(ink.rgb, ink.alpha);
+        for shape in icon.shapes {
+            self.shape_of(icon, shape, &at)?;
+        }
         Ok(())
+    }
+
+    /// One piece of `icon`, stroked at the icon's width.
+    fn shape_of(&self, icon: &Icon, shape: &Shape, at: &Placement) -> windows::core::Result<()> {
+        let width = icon.stroke * at.unit;
+        let style = &self.overlay.stroke;
+        match *shape {
+            Shape::Path(d) => {
+                let figures = svg_path::parse(d)
+                    .map_err(|e| Error::new(E_FAIL, format!("a toolbar icon: {e}")))?;
+                let geometry = self.path_geometry(&figures, at)?;
+                // SAFETY: a drawing call on a live render target with arguments that outlive it. Out of BeginDraw and
+                // EndDraw, Direct2D only fails the frame at EndDraw.
+                unsafe {
+                    self.target
+                        .DrawGeometry(&geometry, &self.brush, width, style)
+                };
+            }
+            Shape::Circle { cx, cy, r } => {
+                let mut circle = at.point(Pt { x: cx, y: cy });
+                circle.radiusX = r * at.unit;
+                circle.radiusY = r * at.unit;
+                // SAFETY: as above.
+                unsafe { self.target.DrawEllipse(&circle, &self.brush, width, style) };
+            }
+            Shape::Rect {
+                x,
+                y,
+                width: w,
+                height: h,
+                radius,
+            } => {
+                let corner = at.point(Pt { x, y });
+                let far = at.point(Pt { x: x + w, y: y + h });
+                let rounded = D2D1_ROUNDED_RECT {
+                    rect: D2D_RECT_F {
+                        left: corner.point.X,
+                        top: corner.point.Y,
+                        right: far.point.X,
+                        bottom: far.point.Y,
+                    },
+                    radiusX: radius * at.unit,
+                    radiusY: radius * at.unit,
+                };
+                // SAFETY: as above.
+                unsafe {
+                    self.target
+                        .DrawRoundedRectangle(&rounded, &self.brush, width, style);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `figures`, in an icon's own units, as Direct2D geometry in the target's pixels. A figure no closepath ended is
+    /// left open, so its ends get caps.
+    fn path_geometry(
+        &self,
+        figures: &[Figure],
+        at: &Placement,
+    ) -> windows::core::Result<ID2D1PathGeometry> {
+        // SAFETY: no arguments.
+        let geometry = unsafe { self.overlay.factory.CreatePathGeometry() }?;
+        // SAFETY: no arguments.
+        let sink = unsafe { geometry.Open() }?;
+        for figure in figures {
+            // SAFETY: calls on the sink opened above, which is closed below, once. Each figure is begun and ended in
+            // turn; Direct2D reports a misuse when the sink is closed.
+            unsafe {
+                sink.BeginFigure(at.point(figure.start).point, D2D1_FIGURE_BEGIN_HOLLOW);
+                for segment in &figure.segments {
+                    match *segment {
+                        Segment::Line(to) => sink.AddLine(at.point(to).point),
+                        Segment::Cubic { c1, c2, to } => sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                            point1: at.point(c1).point,
+                            point2: at.point(c2).point,
+                            point3: at.point(to).point,
+                        }),
+                        Segment::Arc(arc) => sink.AddArc(&D2D1_ARC_SEGMENT {
+                            point: at.point(arc.to).point,
+                            size: D2D_SIZE_F {
+                                width: arc.radii.x * at.unit,
+                                height: arc.radii.y * at.unit,
+                            },
+                            rotationAngle: arc.rotation,
+                            sweepDirection: if arc.sweep {
+                                D2D1_SWEEP_DIRECTION_CLOCKWISE
+                            } else {
+                                D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE
+                            },
+                            arcSize: if arc.large {
+                                D2D1_ARC_SIZE_LARGE
+                            } else {
+                                D2D1_ARC_SIZE_SMALL
+                            },
+                        }),
+                    }
+                }
+                sink.EndFigure(if figure.closed {
+                    D2D1_FIGURE_END_CLOSED
+                } else {
+                    D2D1_FIGURE_END_OPEN
+                });
+            }
+        }
+        // SAFETY: closes the sink opened above, once.
+        unsafe { sink.Close() }?;
+        Ok(geometry)
     }
 
     /// A box painted as CSS does: the outer shadows, the background, the border and the inset shadows, the last listed of

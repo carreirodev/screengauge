@@ -39,6 +39,10 @@ struct Tokens {
     group_top: f64,
     group_bottom: f64,
     group_border: ([u8; 3], f64),
+    /// `--ink`, `--ink-on` and `--sbtn-ink`.
+    ink: [u8; 3],
+    ink_on: [u8; 3],
+    small_ink: [u8; 3],
 }
 
 fn tokens(mode: Mode) -> Tokens {
@@ -60,6 +64,9 @@ fn tokens(mode: Mode) -> Tokens {
             group_top: 0.09,
             group_bottom: 0.02,
             group_border: ([255, 255, 255], 0.08),
+            ink: [0xc3, 0xc7, 0xcf],
+            ink_on: [0x06, 0x14, 0x1a],
+            small_ink: [0xae, 0xb3, 0xbd],
         },
         Mode::Light => Tokens {
             button: &[
@@ -78,6 +85,9 @@ fn tokens(mode: Mode) -> Tokens {
             group_top: 0.85,
             group_bottom: 0.45,
             group_border: ([255, 255, 255], 0.9),
+            ink: [0x4b, 0x48, 0x43],
+            ink_on: [0xff, 0xff, 0xff],
+            small_ink: [0x5b, 0x58, 0x52],
         },
     }
 }
@@ -575,6 +585,182 @@ fn drawing_the_same_scene_twice_gives_the_same_pixels() {
                 first.picture.pixels == second.picture.pixels,
                 "{mode:?} at {dpi} DPI"
             );
+        }
+    }
+}
+
+/// Each icon's CSS size and what it covers of its 24 by 24 view box, stroke included (left, top, right, bottom), worked out
+/// by hand from the prototype's SVGs: the extent of the points the strokes pass through, and half a stroke width more
+/// all round, as the ends and corners are round. Inspect's magnifying glass is not centered on (12, 12), nor the gear's
+/// outline quite inside its box.
+const ICONS: [(ToolbarButton, u32, [f64; 4]); 10] = [
+    (
+        ToolbarButton::Tool(Tool::Dimensions),
+        20,
+        [1.5, 7.0, 22.5, 17.0],
+    ),
+    (
+        ToolbarButton::Tool(Tool::Bounds),
+        20,
+        [3.0, 3.0, 21.0, 21.0],
+    ),
+    (
+        ToolbarButton::Tool(Tool::Inspect),
+        20,
+        [4.0, 4.0, 21.0, 21.0],
+    ),
+    (ToolbarButton::Tool(Tool::Snip), 20, [3.0, 4.0, 21.0, 20.0]),
+    (
+        ToolbarButton::Mode(DimensionsMode::Horizontal),
+        16,
+        [2.9, 6.9, 21.1, 17.1],
+    ),
+    (
+        ToolbarButton::Mode(DimensionsMode::Vertical),
+        16,
+        [6.9, 2.9, 17.1, 21.1],
+    ),
+    (
+        ToolbarButton::Mode(DimensionsMode::Cross),
+        16,
+        [1.9, 1.9, 22.1, 22.1],
+    ),
+    (ToolbarButton::Settings, 16, [-0.05, -0.05, 24.05, 24.05]),
+    (ToolbarButton::Minimize, 15, [7.7, 4.7, 16.3, 19.3]),
+    (ToolbarButton::Close, 14, [4.6, 4.6, 19.4, 19.4]),
+];
+
+/// What the pixels of a box show of an icon's ink over its background.
+struct Inked {
+    /// The most ink any pixel has: how much of the way from the background to the ink its color is, along the line
+    /// between them (0 for the background, 1 for full ink; a stroke that covers part of a pixel blends the two).
+    most: f64,
+    /// How far that pixel's color is from that line: nothing but the ink and the background is in it.
+    off_the_line: f64,
+    /// How many pixels are more than half ink.
+    inky: usize,
+    /// The box around the pixels that are more than a third ink: left, top, right and bottom, the last two one past.
+    found: [i32; 4],
+}
+
+/// A whole number of pixels, rounded down. Icons are tens of pixels across, far inside `i32`.
+// TODO: lay the box out in whole pixels without a float, so no float comes back to `i32` here.
+fn floor(value: f64) -> i32 {
+    value.floor() as i32
+}
+
+/// As `floor`, rounded up.
+// TODO: as `floor`.
+fn ceil(value: f64) -> i32 {
+    value.ceil() as i32
+}
+
+/// The ink of color `ink` over the gradient `stops` in the pixels of `drawn` within `wanted`, the box the prototype puts
+/// the icon in, and two pixels around it, in `button`'s place.
+fn ink_in(drawn: &Drawn, place: &RECT, stops: Stops, ink: [u8; 3], wanted: [f64; 4]) -> Inked {
+    let mut inked = Inked {
+        most: f64::MIN,
+        off_the_line: 0.0,
+        inky: 0,
+        found: [i32::MAX, i32::MAX, i32::MIN, i32::MIN],
+    };
+    for y in floor(wanted[1]) - 2..ceil(wanted[3]) + 2 {
+        let background = gradient_at(stops, down(place, y));
+        let along = |i: usize| f64::from(ink[i]) - f64::from(background[i]);
+        let length: f64 = (0..3).map(|i| along(i) * along(i)).sum();
+        for x in floor(wanted[0]) - 2..ceil(wanted[2]) + 2 {
+            let pixel = drawn.at(x, y);
+            let from = |i: usize| f64::from(pixel[i]) - f64::from(background[i]);
+            let share = (0..3).map(|i| from(i) * along(i)).sum::<f64>() / length;
+            if share > inked.most {
+                inked.most = share;
+                inked.off_the_line = (0..3)
+                    .map(|i| (from(i) - share * along(i)).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+            }
+            if share > 0.35 {
+                let [left, top, right, bottom] = inked.found;
+                inked.found = [left.min(x), top.min(y), right.max(x + 1), bottom.max(y + 1)];
+            }
+            if share > 0.5 {
+                inked.inky += 1;
+            }
+        }
+    }
+    inked
+}
+
+#[test]
+fn each_icon_is_in_its_ink_centered_in_its_button_at_its_size() {
+    let canvas = canvas();
+    // Each tool and each mode is lit in one of these, and unlit in the others.
+    let scenes = [
+        scene(Tool::Dimensions, Some(DimensionsMode::Horizontal)),
+        scene(Tool::Bounds, Some(DimensionsMode::Vertical)),
+        scene(Tool::Inspect, Some(DimensionsMode::Cross)),
+        scene(Tool::Snip, Some(DimensionsMode::Horizontal)),
+    ];
+    for mode in MODES {
+        let t = tokens(mode);
+        for dpi in SCALES {
+            for toolbar in &scenes {
+                let drawn = draw(&canvas, mode, dpi, toolbar);
+                let lit = lit_in(toolbar);
+                for (button, css_size, extent) in ICONS {
+                    let place = drawn.place(button);
+                    let is_lit = lit.contains(&button);
+                    let (stops, ink) = match (is_lit, is_control(button)) {
+                        (true, _) => (t.lit, t.ink_on),
+                        (false, true) => (t.small, t.small_ink),
+                        (false, false) => (t.button, t.ink),
+                    };
+                    let context = format!("{button:?} lit {is_lit}: {mode:?} at {dpi} DPI");
+
+                    // Where the icon's view box is: centered in the button, at the prototype's CSS size scaled. (The
+                    // drawing puts its corner on a whole pixel, which moves it by half a pixel at most.)
+                    let side = f64::from(scaled(css_size, dpi));
+                    let unit = side / 24.0;
+                    let room_x = f64::from(place.right - place.left) - side;
+                    let room_y = f64::from(place.bottom - place.top) - side;
+                    let (left, top) = (
+                        f64::from(place.left) + room_x / 2.0,
+                        f64::from(place.top) + room_y / 2.0,
+                    );
+                    let wanted = [
+                        left + extent[0] * unit,
+                        top + extent[1] * unit,
+                        left + extent[2] * unit,
+                        top + extent[3] * unit,
+                    ];
+
+                    let inked = ink_in(&drawn, &place, stops, ink, wanted);
+                    assert!(
+                        inked.most >= 0.6 && inked.inky >= 8,
+                        "the inkiest pixel is {:.2} ink and {} are over half: {context}",
+                        inked.most,
+                        inked.inky
+                    );
+                    // And it is the ink's color, over the button's: a stroke blends the two, nothing else.
+                    assert!(
+                        inked.off_the_line <= 12.0,
+                        "the inkiest pixel is {:.1} off the ink-background line: {context}",
+                        inked.off_the_line
+                    );
+                    let [left, top, right, bottom] = inked.found;
+                    for (side_name, got, want) in [
+                        ("left", f64::from(left), wanted[0]),
+                        ("top", f64::from(top), wanted[1]),
+                        ("right", f64::from(right), wanted[2]),
+                        ("bottom", f64::from(bottom), wanted[3]),
+                    ] {
+                        assert!(
+                            (got - want).abs() <= 1.5,
+                            "the icon's {side_name} is at {got}, the prototype puts it at {want:.2}: {context}"
+                        );
+                    }
+                }
+            }
         }
     }
 }

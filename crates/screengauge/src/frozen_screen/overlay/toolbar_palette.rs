@@ -1,5 +1,5 @@
 //! The toolbar's colors and shadows in the light and the dark palette: the prototype's theme tokens (WPC-279, variant
-//! A: `--grp-*`, `--btn-*`, `--on-*` and `--sbtn-*`), where the `oklch` colors are converted to sRGB. Written
+//! A: `--grp-*`, `--btn-*`, `--on-*`, `--sbtn-*` and `--ink*`), where the `oklch` colors are converted to sRGB. Written
 //! as the CSS lists them, so a shadow list reads top to bottom as the stylesheet does: the first is painted on top.
 //! Sizes are in logical pixels, which `toolbar_paint` scales for the monitor.
 
@@ -80,6 +80,10 @@ pub struct Palette {
     pub lit: Surface,
     /// `.sbtn`: the gear, minimize and close.
     pub small: Surface,
+    /// `--ink`, `--ink-on` (the lit button's) and `--sbtn-ink`: the icons.
+    pub ink: Rgba,
+    pub ink_on: Rgba,
+    pub small_ink: Rgba,
 }
 
 /// `.sbtn`'s `box-shadow`, which the themes don't change.
@@ -145,6 +149,9 @@ const DARK: Palette = Palette {
         outer: &SMALL_OUTER,
         inset: &SMALL_INSET,
     },
+    ink: rgb(0xc3, 0xc7, 0xcf),
+    ink_on: rgb(0x06, 0x14, 0x1a),
+    small_ink: rgb(0xae, 0xb3, 0xbd),
 };
 
 const LIGHT: Palette = Palette {
@@ -206,6 +213,9 @@ const LIGHT: Palette = Palette {
         outer: &SMALL_OUTER,
         inset: &SMALL_INSET,
     },
+    ink: rgb(0x4b, 0x48, 0x43),
+    ink_on: rgb(0xff, 0xff, 0xff),
+    small_ink: rgb(0x5b, 0x58, 0x52),
 };
 
 /// The palette of `mode`.
