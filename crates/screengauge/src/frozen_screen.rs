@@ -4,7 +4,8 @@
 //! front, or the monitors changed. Over its monitor's photo, each window draws the measurements pinned there, what
 //! Dimensions measures right now when the cursor is there, the toolbar, and the tolerance indicator and the notice when
 //! they are there, and is drawn again whenever one of them changes. A click on the toolbar goes to the core as that
-//! button's, never as a press of the tool; the core says where the toolbar is, and which of its buttons a point is on.
+//! button's, never as a press of the tool, and a press on its background as one the core drags the toolbar by; the core
+//! says where the toolbar is, and which of its buttons a point is on.
 //! The first window also keeps the timer that wakes the session when the indicator or the notice is due to go. The
 //! windows share the session; destroying them when the tools close, by dropping [`FrozenScreen`], drops the session and
 //! erases the photos with it.
@@ -502,7 +503,7 @@ impl Shown {
 /// The monitors whose windows show something different from `before` to `after`, each once and in order: the one a
 /// measurement left, which must lose its line, the one it is on now, the one a measurement was pinned on or taken off,
 /// the ones the tolerance indicator appeared on, followed the cursor between or went from, the one a notice appeared
-/// on or went from, and the toolbar's when another of its buttons lights up.
+/// on or went from, and the toolbar's when another of its buttons lights up or it moves.
 fn monitors_to_draw_again(before: &Shown, after: &Shown) -> Vec<usize> {
     let monitors: BTreeSet<usize> = before.monitors().chain(after.monitors()).collect();
     monitors
@@ -659,7 +660,8 @@ extern "system" fn window_proc(
             }
             WM_MOUSEMOVE => deliver(Input::Move),
             // A press anywhere on the toolbar is the toolbar's: it never reaches the tool, which would pin and copy what
-            // lies under the toolbar. The window keeps the mouse until the button comes up, wherever that is.
+            // lies under the toolbar. The window keeps the mouse until the button comes up, wherever that is, so a drag
+            // of the toolbar goes on over the other monitors' windows.
             WM_LBUTTONDOWN => match window.session.toolbar_hit(event::message_cursor()) {
                 Some(hit) => {
                     window.pressed.set(Some(hit));
@@ -668,7 +670,11 @@ extern "system" fn window_proc(
                     let _ = unsafe { SetCapture(hwnd) };
                     // The button under the cursor looks pressed.
                     redraw_window(hwnd);
-                    Some(LRESULT(0))
+                    match hit {
+                        // On the background, the press picks the toolbar up, and the core drags it with the cursor.
+                        Hit::Background => deliver(Input::Press),
+                        Hit::Button(_) => Some(LRESULT(0)),
+                    }
                 }
                 None => deliver(Input::Press),
             },
@@ -689,18 +695,27 @@ extern "system" fn window_proc(
                         Hit::Button(button) if released == Some(pressed) => {
                             deliver(Input::Toolbar(button))
                         }
-                        _ => Some(LRESULT(0)),
+                        Hit::Button(_) => Some(LRESULT(0)),
+                        // The dragged toolbar is let go where it is, whatever the cursor is on now.
+                        Hit::Background => deliver(Input::Release),
                     }
                 }
                 None => deliver(Input::Release),
             },
-            // Another window took the mouse while a toolbar button was held, so its release will never come here.
-            WM_CAPTURECHANGED => {
-                if window.pressed.take().is_some() {
+            // Another window took the mouse while the toolbar was held, so its release will never come here: a button held
+            // down goes back to rest, and a dragged toolbar is let go where it is, or it would follow the cursor with
+            // the button up.
+            WM_CAPTURECHANGED => match window.pressed.take() {
+                Some(Hit::Background) => {
                     redraw_window(hwnd);
+                    deliver(Input::Release)
                 }
-                Some(LRESULT(0))
-            }
+                Some(Hit::Button(_)) => {
+                    redraw_window(hwnd);
+                    Some(LRESULT(0))
+                }
+                None => Some(LRESULT(0)),
+            },
             WM_MOUSEWHEEL => deliver(Input::Wheel(event::wheel(wparam))),
             WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP => {
                 let key = event::key(wparam)?;
@@ -1095,6 +1110,10 @@ mod tests {
         Shown {
             toolbar: Some(Toolbar {
                 monitor,
+                corner: Point {
+                    x: 1920 + 700,
+                    y: 14,
+                },
                 active,
                 mode,
                 minimized: false,
@@ -1146,6 +1165,13 @@ mod tests {
             ..rest.clone()
         };
         assert_eq!(monitors_to_draw_again(&rest, &arrow), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn a_dragged_toolbar_redraws_its_monitor_alone() {
+        let here = toolbar_on(1, Tool::Dimensions, None);
+        let lower = with_toolbar(&here, |toolbar| toolbar.corner.y += 300);
+        assert_eq!(monitors_to_draw_again(&here, &lower), [1]);
     }
 
     #[test]

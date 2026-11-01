@@ -22,7 +22,7 @@ pub use output::{
 use std::fmt;
 use std::time::Duration;
 
-use crate::settings::{DimensionsMode, Options, Remembered, Tolerance, Tool};
+use crate::settings::{DimensionsMode, Options, Remembered, Tolerance, Tool, ToolbarPlace};
 
 /// How long a notice stays on screen: a little over a second, the approved prototype's 1.3 s (v1 spec WPC-296, Como as
 /// medidas aparecem, "o tempo exato se ajusta na construção").
@@ -110,12 +110,25 @@ pub struct Session {
     second_click_until: Option<Duration>,
     /// The monitor the toolbar is on: the current monitor as the tools opened, for as long as they are open.
     toolbar_monitor: usize,
-    /// Where the toolbar's parts are on that monitor.
+    /// Where the toolbar's parts are on that monitor: at the remembered place as the tools opened, and wherever a drag
+    /// takes it.
     toolbar_layout: toolbar::Layout,
+    /// How the toolbar is held while it is dragged by its background (WPC-312). `None` the rest of the time.
+    toolbar_grab: Option<Grab>,
     /// Whether the toolbar is minimized to its small button. Every call opens it whole, so it is never kept.
     toolbar_minimized: bool,
     /// Set by the effect that closes the tools, after which events do nothing.
     closed: bool,
+}
+
+/// How the toolbar is held while it is dragged.
+#[derive(Debug, Clone, Copy)]
+struct Grab {
+    /// How far right and down of the toolbar's corner the press was: the cursor keeps holding the toolbar there.
+    offset: Point,
+    /// The toolbar's place at the press. Each move works the place out from it again, so an axis the toolbar comes back
+    /// to its starting pixel on keeps the share it had, and the remembered state changes only when the toolbar moved.
+    from: ToolbarPlace,
 }
 
 /// A notice, with the moment it goes: when Windows has been running `until`.
@@ -151,7 +164,10 @@ impl Session {
         let toolbar_monitor = frozen_screen::monitor_at(&frozen_screen, cursor).unwrap_or(0);
         let toolbar_layout = frozen_screen
             .get(toolbar_monitor)
-            .map(|photo| toolbar::layout(photo.rect, photo.scale))
+            .map(|photo| {
+                let corner = toolbar::corner(photo.rect, photo.scale, remembered.toolbar_place);
+                toolbar::layout(corner, photo.scale)
+            })
             .ok_or(Refused::NoMonitor)?;
         let mut session = Session {
             frozen_screen,
@@ -169,6 +185,7 @@ impl Session {
             second_click_until,
             toolbar_monitor,
             toolbar_layout,
+            toolbar_grab: None,
             toolbar_minimized: false,
             closed: false,
         };
@@ -232,14 +249,17 @@ impl Session {
             Input::KeyDown(Key::Up) => self.step(0, -1, event.held),
             Input::KeyDown(Key::Down) => self.step(0, 1, event.held),
             Input::Move => {
-                self.cursor = event.cursor;
-                self.measure();
+                self.move_cursor(event.cursor);
                 Vec::new()
             }
-            // A press on the toolbar is the toolbar's, never the tool's, which pauses there: the Windows layer makes it
-            // the click of a button.
-            Input::Press if self.toolbar_hit(event.cursor).is_some() => Vec::new(),
-            Input::Press => self.pin(event.held, event.uptime),
+            // A press on the toolbar is the toolbar's, never the tool's, which pauses there: on a button the Windows
+            // layer makes it the click of that button, and on the background it picks the toolbar up to drag it.
+            Input::Press => match self.toolbar_hit(event.cursor) {
+                Some(toolbar::Hit::Background) => self.grab(event.cursor, event.uptime),
+                Some(toolbar::Hit::Button(_)) => Vec::new(),
+                None => self.pin(event.held, event.uptime),
+            },
+            Input::Release => self.let_go(),
             Input::KeyDown(Key::Backspace | Key::Delete) => self.unpin(),
             Input::Wheel(delta) => self.turn_wheel(delta, event.cursor, event.uptime),
             // What was due has gone above. A timer may also come a little early: what was due then stays, and the
@@ -270,6 +290,63 @@ impl Session {
         let mut effects = vec![Effect::CopyText(text)];
         effects.extend(self.show(Message::Copied, monitor, uptime));
         effects
+    }
+
+    /// Picks the toolbar up by its background at `at`, to drag it (v1 spec WPC-296, Toolbar; WPC-312). The second click of
+    /// the double-click that called ScreenGauge picks nothing up, as it does nothing anywhere else: a toolbar left at the
+    /// bottom right may sit over the tray icon.
+    fn grab(&mut self, at: Point, uptime: Duration) -> Vec<Effect> {
+        if !self.is_second_click(uptime) {
+            let corner = self.toolbar_corner();
+            self.toolbar_grab = Some(Grab {
+                offset: Point {
+                    x: at.x.saturating_sub(corner.x),
+                    y: at.y.saturating_sub(corner.y),
+                },
+                from: self.remembered.toolbar_place,
+            });
+        }
+        Vec::new()
+    }
+
+    /// Moves the held toolbar so the cursor keeps holding it where it was picked up, as near as the margins of its own
+    /// monitor let it go: it never leaves that monitor (v1 spec WPC-296, Toolbar), and stops 14 logical pixels short
+    /// of each side, where the remembered place puts it at the next call (the owner's choice in WPC-312). The place it
+    /// takes is the remembered state's, kept when the tools close.
+    fn drag(&mut self) {
+        let Some(grab) = self.toolbar_grab else {
+            return;
+        };
+        let Some(photo) = self.frozen_screen.get(self.toolbar_monitor) else {
+            // Can't happen: the toolbar's monitor is one of the frozen screen's.
+            return;
+        };
+        let wanted = Point {
+            x: self.cursor.x.saturating_sub(grab.offset.x),
+            y: self.cursor.y.saturating_sub(grab.offset.y),
+        };
+        let place = toolbar::place_nearest(photo.rect, photo.scale, wanted, grab.from);
+        self.remembered.toolbar_place = place;
+        let corner = toolbar::corner(photo.rect, photo.scale, place);
+        self.toolbar_layout = toolbar::layout(corner, photo.scale);
+    }
+
+    /// Lets the dragged toolbar go where it is, when the button comes up or the Windows layer loses the mouse. Should the
+    /// toolbar have stopped at a margin short of the cursor, the tool measures where the cursor is at once. With
+    /// nothing held, it does nothing.
+    fn let_go(&mut self) -> Vec<Effect> {
+        if self.toolbar_grab.take().is_some() {
+            self.measure();
+        }
+        Vec::new()
+    }
+
+    /// The toolbar's top left corner, which its minimized button shares.
+    fn toolbar_corner(&self) -> Point {
+        Point {
+            x: self.toolbar_layout.toolbar.left,
+            y: self.toolbar_layout.toolbar.top,
+        }
     }
 
     /// Whether a click when Windows has been running `uptime` is the second click of the double-click that called
@@ -311,7 +388,7 @@ impl Session {
     /// tolerance; with Inspect active, which uses none, the wheel leaves it alone. Turned at `at` on the toolbar, where
     /// the tool pauses, the wheel does nothing (the owner's choice in WPC-311).
     fn turn_wheel(&mut self, delta: i32, at: Point, uptime: Duration) -> Vec<Effect> {
-        if self.remembered.last_tool == Tool::Inspect || self.toolbar_hit(at).is_some() {
+        if self.remembered.last_tool == Tool::Inspect || self.pauses_at(at) {
             return Vec::new();
         }
         if self.wheel_turned.signum() == -delta.signum() {
@@ -401,6 +478,19 @@ impl Session {
         }
     }
 
+    /// Whether the tool pauses with the cursor at `at`: on the toolbar, and anywhere while the toolbar is dragged, as the
+    /// cursor may leave it where it stops at a margin.
+    fn pauses_at(&self, at: Point) -> bool {
+        self.toolbar_grab.is_some() || self.toolbar_hit(at).is_some()
+    }
+
+    /// Puts the cursor at `to`, the dragged toolbar following it, and measures there.
+    fn move_cursor(&mut self, to: Point) {
+        self.cursor = to;
+        self.drag();
+        self.measure();
+    }
+
     /// Moves the cursor one pixel the arrow's way, or ten with Shift, and measures there (v1 spec WPC-296, Dimensions).
     /// The step goes on from where the session last put the cursor, never from the event's place: a key held down
     /// repeats, and a repeat may carry the cursor's place from before Windows carried out the last move. A step that
@@ -426,8 +516,7 @@ impl Session {
         if to == self.cursor {
             return Vec::new();
         }
-        self.cursor = to;
-        self.measure();
+        self.move_cursor(to);
         vec![Effect::MoveCursor(to)]
     }
 
@@ -442,7 +531,7 @@ impl Session {
     /// the owner's choice in WPC-311). The photo has no toolbar and no pinned measurement in it, so the tool measures
     /// through both. Only Dimensions measures yet: the other tools come with their own tickets.
     fn measure(&mut self) {
-        if self.toolbar_hit(self.cursor).is_none() {
+        if !self.pauses_at(self.cursor) {
             self.measured_at = Some(self.cursor);
         }
         if !self.dimensions_is_active() {
@@ -466,6 +555,7 @@ impl Session {
     /// call starts at the default tolerance in Settings.
     fn close(&mut self) -> Vec<Effect> {
         self.closed = true;
+        self.toolbar_grab = None;
         self.pinned.clear();
         self.notice = None;
         self.indicator_until = None;
@@ -489,12 +579,12 @@ impl Session {
 
     /// What to draw now.
     pub fn scene(&self) -> Scene<'_> {
-        let on_toolbar = self.toolbar_hit(self.cursor);
         Scene {
             frozen_screen: &self.frozen_screen,
-            cursor: match on_toolbar {
-                Some(_) => Cursor::Arrow,
-                None => Cursor::Cross,
+            cursor: if self.pauses_at(self.cursor) {
+                Cursor::Arrow
+            } else {
+                Cursor::Cross
             },
             live: self.live.as_ref(),
             pinned: &self.pinned,
@@ -502,14 +592,18 @@ impl Session {
             notice: self.notice.as_ref().map(|timed| &timed.notice),
             toolbar: Toolbar {
                 monitor: self.toolbar_monitor,
+                corner: self.toolbar_corner(),
                 active: self.remembered.last_tool,
                 mode: self
                     .dimensions_is_active()
                     .then_some(self.remembered.dimensions_mode),
                 minimized: self.toolbar_minimized,
-                hovered: match on_toolbar {
-                    Some(toolbar::Hit::Button(button)) => Some(button),
-                    Some(toolbar::Hit::Background) | None => None,
+                // While the toolbar is held, no button reacts, whatever the cursor slides over where it stops.
+                hovered: match self.toolbar_hit(self.cursor) {
+                    Some(toolbar::Hit::Button(button)) if self.toolbar_grab.is_none() => {
+                        Some(button)
+                    }
+                    Some(_) | None => None,
                 },
             },
         }

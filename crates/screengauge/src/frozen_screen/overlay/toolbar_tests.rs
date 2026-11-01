@@ -3,7 +3,7 @@
 //! time and scaled in the tests, not read back from the code that is being tested. The shadows are judged by the owner's
 //! eye; these check where things are, what is lit, and what is not drawn.
 
-use screengauge_core::settings::{DimensionsMode, Tool};
+use screengauge_core::settings::{DimensionsMode, Tool, ToolbarPlace};
 
 use super::geometry::{self, scaled};
 use super::palette::d2d_color;
@@ -12,7 +12,7 @@ use super::tests::{BACKGROUND, Canvas, Picture, SCALES, near};
 use super::toolbar::Layout;
 use super::*;
 use super::{toolbar_paint, toolbar_palette};
-use screengauge_core::session::toolbar::Hit;
+use screengauge_core::session::toolbar::{self as core_toolbar, Hit};
 use screengauge_core::session::{Point, Toolbar, ToolbarButton};
 
 /// A window wide enough for the toolbar at 175% and tall enough for its shadow, over a monitor left of and below the main
@@ -157,9 +157,12 @@ fn bounds() -> RECT {
     geometry::bounds(TOOLBAR_MONITOR).expect("the monitor")
 }
 
+/// A toolbar with `active` and `mode` lit, at no place yet: each drawing here puts it at the top center for its scale
+/// (`placed`).
 fn scene(active: Tool, mode: Option<DimensionsMode>) -> Toolbar {
     Toolbar {
         monitor: 0,
+        corner: Point::default(),
         active,
         mode,
         minimized: false,
@@ -167,9 +170,23 @@ fn scene(active: Tool, mode: Option<DimensionsMode>) -> Toolbar {
     }
 }
 
-/// Where the core puts the toolbar on the tests' monitor at `dpi`.
+/// Where the first call puts the toolbar's corner on the tests' monitor at `dpi`: its top center.
+fn top_center(dpi: u32) -> Point {
+    let scale = Scale::from_dpi(dpi).expect("a scale");
+    core_toolbar::corner(TOOLBAR_MONITOR, scale, ToolbarPlace::default())
+}
+
+/// `toolbar` at the top center of the tests' monitor at `dpi`.
+fn placed(toolbar: &Toolbar, dpi: u32) -> Toolbar {
+    Toolbar {
+        corner: top_center(dpi),
+        ..*toolbar
+    }
+}
+
+/// Where the core puts the toolbar's parts at the top center of the tests' monitor at `dpi`.
 fn toolbar_layout(dpi: u32) -> Layout {
-    Layout::of(TOOLBAR_MONITOR, Scale::from_dpi(dpi).expect("a scale")).expect("the monitor")
+    Layout::of(top_center(dpi), Scale::from_dpi(dpi).expect("a scale")).expect("the monitor")
 }
 
 /// `toolbar` drawn over `BACKGROUND` in the palette of `mode` for a window of `dpi`.
@@ -184,7 +201,7 @@ fn draw_over(canvas: &Canvas, mode: Mode, dpi: u32, toolbar: &Toolbar, photo: [u
         // SAFETY: a drawing call between BeginDraw and EndDraw on a live target.
         unsafe { target.Clear(Some(&photo)) };
         overlay
-            .draw_toolbar(target, toolbar, None)
+            .draw_toolbar(target, &placed(toolbar, dpi), None)
             .expect("the toolbar");
     });
     Drawn {
@@ -806,7 +823,7 @@ fn frames_held(
                 clear_to_photo(target);
             }
             overlay
-                .draw_toolbar(target, toolbar, *held)
+                .draw_toolbar(target, &placed(toolbar, dpi), *held)
                 .expect("the toolbar");
             fills.push(overlay.toolbar_cache.borrow().fills);
         }
@@ -861,6 +878,55 @@ fn lighting_another_tool_or_mode_draws_the_bitmap_again_and_going_back_draws_the
                     "{first:?} after {other:?} is not drawn as it is alone: {mode:?} at {dpi} DPI"
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn a_dragged_toolbar_lays_the_same_bitmap_at_its_new_place() {
+    let canvas = canvas();
+    for mode in MODES {
+        for dpi in SCALES {
+            let start = placed(&scene(Tool::Bounds, None), dpi);
+            let moved = Toolbar {
+                corner: Point {
+                    x: start.corner.x - 61,
+                    y: start.corner.y + 37,
+                },
+                ..start
+            };
+            let mut fills = Vec::new();
+            let dragged = canvas.render_in(mode, TOOLBAR_MONITOR, dpi, |overlay, target| {
+                for (frame, toolbar) in [start, moved].iter().enumerate() {
+                    if frame > 0 {
+                        clear_to_photo(target);
+                    }
+                    overlay
+                        .draw_toolbar(target, toolbar, Some(Hit::Background))
+                        .expect("the toolbar");
+                    fills.push(overlay.toolbar_cache.borrow().fills);
+                }
+            });
+            // Drawn on the bitmap once: moving it only lays the bitmap somewhere else.
+            assert_eq!(fills, [1, 1], "{mode:?} at {dpi} DPI");
+            let fresh = canvas.render_in(mode, TOOLBAR_MONITOR, dpi, |overlay, target| {
+                overlay
+                    .draw_toolbar(target, &moved, Some(Hit::Background))
+                    .expect("the toolbar");
+            });
+            assert!(
+                dragged.pixels == fresh.pixels,
+                "the moved toolbar differs from one drawn there at once: {mode:?} at {dpi} DPI"
+            );
+            // It is somewhere else: its tools' panel starts 61 further left and 37 lower than at the top center.
+            let layout = toolbar_layout(dpi);
+            let edge = at(
+                &dragged,
+                layout.tools.left - 61 + 20,
+                layout.tools.top + 37 + 1,
+            );
+            let before = at(&dragged, layout.tools.left + 20, layout.tools.top + 1);
+            assert_ne!(edge, before, "{mode:?} at {dpi} DPI");
         }
     }
 }
@@ -988,7 +1054,7 @@ fn toolbar_draw_times() {
                     times[slot].push(start.elapsed());
                 };
                 let show = |toolbar: &Toolbar| {
-                    let toolbar = *toolbar;
+                    let toolbar = placed(toolbar, dpi);
                     move |overlay: &Overlay, target: &ID2D1RenderTarget| {
                         overlay
                             .draw_toolbar(target, &toolbar, None)
@@ -1099,7 +1165,7 @@ fn the_toolbar_draws_on_a_windows_own_render_target_which_ignores_alpha() {
                 scene(Tool::Snip, None),
             ] {
                 overlay
-                    .draw_toolbar(&target, &toolbar, None)
+                    .draw_toolbar(&target, &placed(&toolbar, dpi), None)
                     .expect("the toolbar");
             }
             // SAFETY: ends the BeginDraw above.
@@ -1336,7 +1402,7 @@ fn minimized(toolbar: Toolbar) -> Toolbar {
 fn draw_held(canvas: &Canvas, mode: Mode, dpi: u32, toolbar: &Toolbar, held: Option<Hit>) -> Drawn {
     let picture = canvas.render_in(mode, TOOLBAR_MONITOR, dpi, |overlay, target| {
         overlay
-            .draw_toolbar(target, toolbar, held)
+            .draw_toolbar(target, &placed(toolbar, dpi), held)
             .expect("the toolbar");
     });
     Drawn {

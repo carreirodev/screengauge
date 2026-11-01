@@ -2,9 +2,9 @@
 //! scale, each button's place, the minimized toolbar's button, and what a point is on. The sizes are the prototype's
 //! (variant A of WPC-279: `#toolbar`, `.grp`, `.tbtn`, `.mbtn`, `.sbtn` and `#tbMini`), written out here a second time.
 
-use screengauge_core::session::toolbar::{BUTTONS, Hit, Layout, layout, scaled};
+use screengauge_core::session::toolbar::{BUTTONS, Hit, Layout, corner, layout, scaled};
 use screengauge_core::session::{Point, Rect, Scale, ToolbarButton};
-use screengauge_core::settings::{DimensionsMode, Tool};
+use screengauge_core::settings::{DimensionsMode, Tool, ToolbarPlace};
 
 /// A 4K monitor right of the main one, as on the owner's desk.
 const MONITOR: Rect = Rect {
@@ -17,8 +17,13 @@ const MONITOR: Rect = Rect {
 /// Every scale Windows offers.
 const DPIS: [u32; 10] = [96, 120, 144, 168, 192, 216, 240, 288, 336, 384];
 
+/// The toolbar at the top center of `monitor`, where the first call puts it.
+fn top_center(monitor: Rect, scale: Scale) -> Layout {
+    layout(corner(monitor, scale, ToolbarPlace::default()), scale)
+}
+
 fn at(dpi: u32) -> Layout {
-    layout(MONITOR, Scale::from_dpi(dpi).expect("a real scale"))
+    top_center(MONITOR, Scale::from_dpi(dpi).expect("a real scale"))
 }
 
 /// The column one past `rect`'s right side.
@@ -171,7 +176,7 @@ fn on_a_monitor_too_narrow_it_keeps_to_the_left_side() {
         height: 600,
     };
     let at_175 = Scale::from_dpi(168).expect("a real scale");
-    let narrower_than_the_toolbar = layout(narrow, at_175).toolbar;
+    let narrower_than_the_toolbar = top_center(narrow, at_175).toolbar;
     assert_eq!(narrower_than_the_toolbar.left, -800);
     assert_eq!(narrower_than_the_toolbar.top, -600 + s(14, 168));
     let just_too_narrow = Rect {
@@ -179,7 +184,9 @@ fn on_a_monitor_too_narrow_it_keeps_to_the_left_side() {
         ..narrow
     };
     assert_eq!(
-        layout(just_too_narrow, Scale::HUNDRED_PERCENT).toolbar.left,
+        top_center(just_too_narrow, Scale::HUNDRED_PERCENT)
+            .toolbar
+            .left,
         -800 + 14
     );
 }

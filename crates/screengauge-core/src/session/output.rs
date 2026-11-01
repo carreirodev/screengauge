@@ -34,13 +34,16 @@ pub struct Scene<'a> {
 
 /// The toolbar (v1 spec WPC-296, Toolbar): the tools' buttons with the active tool's lit, then H, V and C in a room kept
 /// for them, then the gear, minimize and close; or, minimized, one small cyan button with the active tool's icon and a
-/// small arrow, in the same place. It sits at the top center of its monitor, where
-/// [`toolbar::layout`](super::toolbar::layout) puts it; dragging it elsewhere is WPC-312's.
+/// small arrow, in the same place. Its parts are where [`toolbar::layout`](super::toolbar::layout) puts them from its
+/// corner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Toolbar {
     /// The monitor it is on, as an index in the frozen screen's order: the current monitor as the tools opened. It stays
-    /// there while the cursor goes to another monitor, where the tool then measures.
+    /// there while the cursor goes to another monitor, where the tool then measures, and while it is dragged.
     pub monitor: usize,
+    /// Its top left corner, in physical pixels of the virtual screen, which the minimized toolbar's button shares: at the
+    /// remembered place on its monitor as the tools open, and wherever a drag takes it inside that monitor (WPC-312).
+    pub corner: Point,
     /// The active tool, whose button is lit. There is always one.
     pub active: Tool,
     /// Dimensions' mode, whose button is lit, while Dimensions is the active tool. `None` with any other tool: then H, V

@@ -37,6 +37,16 @@ use super::toolbar_paint::{self, Margins};
 use super::toolbar_palette;
 use crate::log;
 
+/// What the bitmap shows of `toolbar` with `held` down: everything but where the toolbar is, which only moves where the
+/// bitmap is laid, so a drag never draws it again.
+fn look(toolbar: &Toolbar, held: Option<Hit>) -> (Toolbar, Option<Hit>) {
+    let anywhere = Toolbar {
+        corner: Point::default(),
+        ..*toolbar
+    };
+    (anywhere, held)
+}
+
 /// The bitmap and what it is of.
 struct Kept {
     /// What the toolbar was drawn on, kept to draw the next state on it.
@@ -45,7 +55,7 @@ struct Kept {
     /// What the bitmap shows: the lit tool, the lit mode while there is one, the button under the cursor, whether it is
     /// minimized, and what the left button is held down on. The groups and the buttons are always the same, and so are
     /// the monitor, the scale and the palette, which an `Overlay` is made for; the toolbar's own monitor never changes for
-    /// a window, so the whole scene's toolbar is the key, with what is held.
+    /// a window, so the scene's toolbar is the key, with what is held, all but its corner (`look`).
     shows: (Toolbar, Option<Hit>),
     /// How much of the bitmap is left, above and to the left of the toolbar, for the shadows.
     margins: Margins,
@@ -79,7 +89,7 @@ impl Overlay {
             )
         })?;
         let kept = match cache.kept.take() {
-            Some(kept) if kept.shows == (*toolbar, held) => kept,
+            Some(kept) if kept.shows == look(toolbar, held) => kept,
             old => {
                 #[cfg(test)]
                 {
@@ -169,7 +179,7 @@ impl Overlay {
         Ok(Kept {
             target: bitmap_target,
             bitmap,
-            shows: (*toolbar, held),
+            shows: look(toolbar, held),
             margins,
             width,
             height,

@@ -22,6 +22,20 @@ const AOC: Rect = Rect {
     height: 2160,
 };
 
+/// Where the top center puts the toolbar's corner on the 4K monitor: 930 × 117 at 175%, 25 inside the top side, and half
+/// of the 3840 - 930 - 50 = 2860 across past the margin.
+const AOC_TOP_CENTER: Point = Point {
+    x: 25 + 1430,
+    y: 25,
+};
+
+/// On the Full HD monitor: 663 × 82 at 125%, 18 inside the top side, and half of the 1920 - 663 - 36 = 1221 across,
+/// rounded down, past the margin.
+const ARZOPA_TOP_CENTER: Point = Point {
+    x: 3840 + 18 + 610,
+    y: 18,
+};
+
 /// The owner's Full HD monitor at 125%, right of the 4K one.
 const ARZOPA: Rect = Rect {
     left: 3840,
@@ -241,6 +255,7 @@ fn the_last_tool_used_is_kept_and_the_next_call_starts_with_it() {
         toolbar(&next),
         Toolbar {
             monitor: 0,
+            corner: AOC_TOP_CENTER,
             active: Tool::Snip,
             mode: None,
             minimized: false,
@@ -385,6 +400,7 @@ fn the_toolbar_opens_on_the_cursors_monitor_with_the_last_tool_lit() {
         toolbar(&session),
         Toolbar {
             monitor: 1,
+            corner: ARZOPA_TOP_CENTER,
             active: Tool::Dimensions,
             mode: Some(DimensionsMode::Vertical),
             minimized: false,
@@ -396,6 +412,7 @@ fn the_toolbar_opens_on_the_cursors_monitor_with_the_last_tool_lit() {
         toolbar(&session),
         Toolbar {
             monitor: 0,
+            corner: AOC_TOP_CENTER,
             active: Tool::Bounds,
             mode: None,
             minimized: false,
@@ -416,6 +433,7 @@ fn the_toolbar_stays_on_its_monitor_while_the_tool_measures_on_the_other() {
         toolbar(&session),
         Toolbar {
             monitor: 1,
+            corner: ARZOPA_TOP_CENTER,
             active: Tool::Inspect,
             mode: None,
             minimized: false,

@@ -202,8 +202,8 @@ pub struct Overlay {
     /// The toolbar, drawn on a bitmap that every frame lays over the photo. Lost with the rest of the overlay should the
     /// render target be.
     toolbar_cache: RefCell<toolbar_cache::ToolbarCache>,
-    /// Where the toolbar's parts are on this window's monitor, whether or not the toolbar is on it.
-    toolbar_layout: toolbar::Layout,
+    /// The monitor's scale, which the toolbar's parts are laid out at, wherever the scene puts it.
+    scale: Scale,
     /// The window's monitor in the virtual screen, which is where the window's pixel (0, 0) is.
     monitor: RECT,
     dpi: u32,
@@ -326,7 +326,7 @@ impl Overlay {
             fonts: fonts.clone(),
             mode,
             toolbar_cache: RefCell::default(),
-            toolbar_layout: toolbar::Layout::of(monitor, scale)?,
+            scale,
             monitor: geometry::bounds(monitor)?,
             dpi,
         })

@@ -12,7 +12,7 @@ use screengauge_core::session::{
     Colors, Cursor, Effect, Event, Held, Image, Input, Key, LocalTime, Measurement, Opening, Photo,
     Point, Rect, Scale, Session, Span, ToolbarButton,
 };
-use screengauge_core::settings::{DimensionsMode, Options, Remembered, Tool};
+use screengauge_core::settings::{DimensionsMode, Options, Remembered, Tool, ToolbarPlace};
 
 /// The owner's 4K monitor at 175%, Windows' main monitor.
 const AOC: Rect = Rect {
@@ -83,7 +83,8 @@ const IN_SMALL_CARD: Point = Point { x: 4050, y: 350 };
 
 /// Where the core puts the toolbar on the 4K monitor, where the cursors of these tests open it.
 fn toolbar_layout() -> Layout {
-    toolbar::layout(AOC, Scale::from_dpi(168).expect("a real scale"))
+    let scale = Scale::from_dpi(168).expect("a real scale");
+    toolbar::layout(toolbar::corner(AOC, scale, ToolbarPlace::default()), scale)
 }
 
 fn middle(rect: Rect) -> Point {

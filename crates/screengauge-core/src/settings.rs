@@ -147,8 +147,10 @@ impl Default for Tolerance {
     }
 }
 
-/// Where the toolbar sits in its monitor, as a share of the room it has to move on each axis: 0 is against the left
-/// (or top) edge, 1 against the right (or bottom) edge. The toolbar (WPC-312) places it on the current monitor.
+/// Where the toolbar sits in its monitor, as a share of the room it has to move inside its margins on each axis: 0 is
+/// against the left (or top) margin, 1 against the right (or bottom) one. Dragging the toolbar sets it, and the next call
+/// puts the toolbar at the same place of the current monitor, whatever its size and scale
+/// ([`session::toolbar::corner`](crate::session::toolbar::corner), WPC-312).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ToolbarPlace {
     x: f64,

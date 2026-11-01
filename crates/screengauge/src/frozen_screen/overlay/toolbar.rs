@@ -1,11 +1,12 @@
-//! The toolbar on screen (v1 spec WPC-296, Toolbar; WPC-310 and WPC-311): where the session core's layout puts each of
-//! its parts, as the rectangles Windows and the painting use, how each button is styled, and drawing it.
+//! The toolbar on screen (v1 spec WPC-296, Toolbar; WPC-310, WPC-311 and WPC-312): where the session core's layout puts
+//! each of its parts from the corner the scene gives, as the rectangles Windows and the painting use, how each button is
+//! styled, and drawing it.
 //!
 //! Where the toolbar and each button are is the core's ([`screengauge_core::session::toolbar`]), which also says what a
 //! point is on, so the window's clicks, the cursor's arrow, the pause of the tool and what is drawn here never disagree.
 
 use screengauge_core::session::toolbar::{self as core_toolbar, BUTTONS, Hit};
-use screengauge_core::session::{Rect, Scale, Toolbar, ToolbarButton};
+use screengauge_core::session::{Point, Scale, Toolbar, ToolbarButton};
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Direct2D::ID2D1RenderTarget;
 
@@ -93,9 +94,9 @@ pub struct Layout {
 }
 
 impl Layout {
-    /// Where the core puts the toolbar on `monitor`, at `scale`.
-    pub fn of(monitor: Rect, scale: Scale) -> windows::core::Result<Layout> {
-        let core = core_toolbar::layout(monitor, scale);
+    /// Where the core puts the toolbar's parts with its top left corner at `corner`, at `scale`.
+    pub fn of(corner: Point, scale: Scale) -> windows::core::Result<Layout> {
+        let core = core_toolbar::layout(corner, scale);
         let mut buttons = core.buttons.map(|(button, _)| (button, RECT::default()));
         for ((_, slot), (_, rect)) in buttons.iter_mut().zip(core.buttons) {
             *slot = geometry::bounds(rect)?;
@@ -113,37 +114,37 @@ impl Layout {
 
 impl Overlay {
     /// Draws `toolbar` over the measurements and under the tolerance indicator and the notice, between BeginDraw and
-    /// EndDraw, when it is on this window's monitor: each group's panel and its buttons, in the palette of the window,
-    /// with the active tool's button and the mode's lit and the buttons reacting to the cursor, or the minimized
-    /// toolbar's button alone. `held` is what on the toolbar the left button went down on, while it is held. They are
+    /// EndDraw, when it is on this window's monitor, at the scene's corner: each group's panel and its buttons, in the
+    /// palette of the window, with the active tool's button and the mode's lit and the buttons reacting to the cursor,
+    /// or the minimized toolbar's button alone. `held` is what on the toolbar the left button went down on, while it is held. They are
     /// drawn once on a bitmap that the next frames lay over the photo, until something on the toolbar changes
-    /// (`toolbar_cache`).
+    /// (`toolbar_cache`); a drag only moves where the bitmap is laid.
     pub fn draw_toolbar(
         &self,
         target: &ID2D1RenderTarget,
         toolbar: &Toolbar,
         held: Option<Hit>,
     ) -> windows::core::Result<()> {
-        self.show_toolbar(target, &self.toolbar_layout, toolbar, held)
+        let layout = Layout::of(toolbar.corner, self.scale)?;
+        self.show_toolbar(target, &layout, toolbar, held)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use screengauge_core::session::Rect;
     use screengauge_core::settings::Tool;
 
     #[test]
     fn the_layout_is_the_cores_with_each_right_and_bottom_one_past_the_last_pixel() {
-        let monitor = Rect {
-            left: 3840,
-            top: 0,
-            width: 1920,
-            height: 1080,
+        let corner = Point {
+            x: 3840 + 18,
+            y: 980,
         };
         let scale = Scale::from_dpi(120).expect("a scale");
-        let core = core_toolbar::layout(monitor, scale);
-        let layout = Layout::of(monitor, scale).expect("a monitor's size");
+        let core = core_toolbar::layout(corner, scale);
+        let layout = Layout::of(corner, scale).expect("a corner on the virtual screen");
         let edges = |rect: Rect| (rect.left, rect.top, rect.right() + 1, rect.bottom() + 1);
         let sides = |rect: RECT| (rect.left, rect.top, rect.right, rect.bottom);
         assert_eq!(sides(layout.toolbar), edges(core.toolbar));
@@ -158,6 +159,7 @@ mod tests {
     fn toolbar(hovered: Option<ToolbarButton>) -> Toolbar {
         Toolbar {
             monitor: 0,
+            corner: Point { x: 14, y: 14 },
             active: Tool::Dimensions,
             mode: None,
             minimized: false,
