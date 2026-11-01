@@ -57,7 +57,7 @@ pub(super) enum Reaction {
     /// The cursor is on it, and no button is held down.
     Hovered,
     /// It is held down and the cursor is on it, so letting go clicks it. Moved off it, it looks at rest again, as a
-    /// Windows button does, and letting go does nothing (WPC-310).
+    /// Windows button does, and letting go does nothing (WPC-310; the owner's choice in WPC-311).
     Pressed,
 }
 
