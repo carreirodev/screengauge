@@ -12,8 +12,9 @@
 //! shrink on `:active`; H, V and C don't react. The minimized toolbar is `#tbMini`: a lit button with the active tool's
 //! icon and a small arrow in its corner.
 //!
-//! Left out on purpose: `backdrop-filter: blur(14px)` of the panels, which the owner agreed to do without, and the
-//! 0.12 s the prototype takes to move and shrink a button, which here happens at once.
+//! Left out on purpose: `backdrop-filter: blur(14px)` of the panels, which the owner agreed to do without. Not done yet:
+//! the 0.12 s the prototype takes to move and shrink a button, which here happens at once; whether it should is the
+//! owner's to decide (WPC-311).
 
 use screengauge_core::session::toolbar::Hit;
 use screengauge_core::session::{Point, Toolbar, ToolbarButton};
