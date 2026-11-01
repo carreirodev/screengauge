@@ -36,7 +36,7 @@ pub struct Icon {
     pub shapes: &'static [Shape],
 }
 
-/// The ruler of Dimensions.
+/// Dimensions' icon, a ruler.
 const DIMENSIONS: Icon = Icon {
     size: 20,
     stroke: 2.0,
@@ -207,6 +207,8 @@ mod tests {
             (ToolbarButton::Minimize, 1),
             (ToolbarButton::Close, 2),
         ];
+        // Every icon of the table, in the toolbar's order: a broken icon string fails here and not in a frame.
+        assert_eq!(figures.map(|(button, _)| button), BUTTONS);
         for (button, wanted) in figures {
             let icon = icon_for(&button).expect("an icon");
             let mut got = 0;
@@ -218,7 +220,7 @@ mod tests {
                     for figure in &parsed {
                         let mut points = vec![figure.start];
                         points.extend(figure.segments.iter().map(|segment| match segment {
-                            Segment::Line(to) | Segment::Cubic { to, .. } => *to,
+                            Segment::Line(to) => *to,
                             Segment::Arc(arc) => arc.to,
                         }));
                         for point in points {

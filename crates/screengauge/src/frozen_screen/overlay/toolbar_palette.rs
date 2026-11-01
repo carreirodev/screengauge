@@ -3,27 +3,12 @@
 //! as the CSS lists them, so a shadow list reads top to bottom as the stylesheet does: the first is painted on top.
 //! Sizes are in logical pixels, which `toolbar_paint` scales for the monitor.
 
+use super::palette::{Color, color};
 use crate::theme::Mode;
 
-/// An sRGB color, with the opacity CSS gives it in `rgba()`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Rgba {
-    pub rgb: [u8; 3],
-    pub alpha: f32,
-}
-
-const fn rgb(r: u8, g: u8, b: u8) -> Rgba {
-    Rgba {
-        rgb: [r, g, b],
-        alpha: 1.0,
-    }
-}
-
-const fn rgba(r: u8, g: u8, b: u8, alpha: f32) -> Rgba {
-    Rgba {
-        rgb: [r, g, b],
-        alpha,
-    }
+/// An opaque color, as CSS writes `#rrggbb`.
+const fn rgb(r: u8, g: u8, b: u8) -> Color {
+    color(r, g, b, 1.0)
 }
 
 /// A color stop of a gradient that runs from the top of its box to the bottom (`linear-gradient(180deg, ...)`).
@@ -31,10 +16,10 @@ const fn rgba(r: u8, g: u8, b: u8, alpha: f32) -> Rgba {
 pub struct Stop {
     /// Where it is along the box's height: 0 at the top, 1 at the bottom.
     pub at: f32,
-    pub color: Rgba,
+    pub color: Color,
 }
 
-const fn stop(at: f32, color: Rgba) -> Stop {
+const fn stop(at: f32, color: Color) -> Stop {
     Stop { at, color }
 }
 
@@ -45,10 +30,10 @@ pub struct Shadow {
     pub y: i32,
     pub blur: u32,
     pub spread: i32,
-    pub color: Rgba,
+    pub color: Color,
 }
 
-const fn shadow(y: i32, blur: u32, spread: i32, color: Rgba) -> Shadow {
+const fn shadow(y: i32, blur: u32, spread: i32, color: Color) -> Shadow {
     Shadow {
         y,
         blur,
@@ -61,9 +46,9 @@ const fn shadow(y: i32, blur: u32, spread: i32, color: Rgba) -> Shadow {
 /// base color, then the gradient over it), then its border, then its inset shadows, again the last listed lowest.
 #[derive(Debug, Clone, Copy)]
 pub struct Surface {
-    pub base: Option<Rgba>,
+    pub base: Option<Color>,
     pub gradient: &'static [Stop],
-    pub border: Option<Rgba>,
+    pub border: Option<Color>,
     /// In the order of the stylesheet, so the painter goes through them backwards.
     pub outer: &'static [Shadow],
     pub inset: &'static [Shadow],
@@ -81,27 +66,27 @@ pub struct Palette {
     /// `.sbtn`: the gear, minimize and close.
     pub small: Surface,
     /// `--ink`, `--ink-on` (the lit button's) and `--sbtn-ink`: the icons.
-    pub ink: Rgba,
-    pub ink_on: Rgba,
-    pub small_ink: Rgba,
+    pub ink: Color,
+    pub ink_on: Color,
+    pub small_ink: Color,
 }
 
 /// `.sbtn`'s `box-shadow`, which the themes don't change.
-const SMALL_INSET: [Shadow; 1] = [shadow(1, 1, 0, rgba(255, 255, 255, 0.2))];
-const SMALL_OUTER: [Shadow; 1] = [shadow(3, 6, 0, rgba(0, 0, 0, 0.35))];
+const SMALL_INSET: [Shadow; 1] = [shadow(1, 1, 0, color(255, 255, 255, 0.2))];
+const SMALL_OUTER: [Shadow; 1] = [shadow(3, 6, 0, color(0, 0, 0, 0.35))];
 
 const DARK: Palette = Palette {
     group: Surface {
-        base: Some(rgba(24, 25, 29, 0.86)),
+        base: Some(color(24, 25, 29, 0.86)),
         gradient: &[
-            stop(0.0, rgba(255, 255, 255, 0.09)),
-            stop(1.0, rgba(255, 255, 255, 0.02)),
+            stop(0.0, color(255, 255, 255, 0.09)),
+            stop(1.0, color(255, 255, 255, 0.02)),
         ],
-        border: Some(rgba(255, 255, 255, 0.08)),
-        outer: &[shadow(18, 40, -12, rgba(0, 0, 0, 0.8))],
+        border: Some(color(255, 255, 255, 0.08)),
+        outer: &[shadow(18, 40, -12, color(0, 0, 0, 0.8))],
         inset: &[
-            shadow(1, 0, 0, rgba(255, 255, 255, 0.12)),
-            shadow(-8, 16, 0, rgba(0, 0, 0, 0.35)),
+            shadow(1, 0, 0, color(255, 255, 255, 0.12)),
+            shadow(-8, 16, 0, color(0, 0, 0, 0.35)),
         ],
     },
     button: Surface {
@@ -112,10 +97,10 @@ const DARK: Palette = Palette {
             stop(1.0, rgb(0x1a, 0x1b, 0x1f)),
         ],
         border: None,
-        outer: &[shadow(4, 8, 0, rgba(0, 0, 0, 0.55))],
+        outer: &[shadow(4, 8, 0, color(0, 0, 0, 0.55))],
         inset: &[
-            shadow(1, 1, 0, rgba(255, 255, 255, 0.25)),
-            shadow(-3, 6, 0, rgba(0, 0, 0, 0.5)),
+            shadow(1, 1, 0, color(255, 255, 255, 0.25)),
+            shadow(-3, 6, 0, color(0, 0, 0, 0.5)),
         ],
     },
     lit: Surface {
@@ -131,12 +116,12 @@ const DARK: Palette = Palette {
         border: None,
         outer: &[
             // The glow: oklch(0.75 0.15 205 / .6)
-            shadow(0, 22, 0, rgba(0x00, 0xc8, 0xdb, 0.6)),
-            shadow(4, 8, 0, rgba(0, 0, 0, 0.5)),
+            shadow(0, 22, 0, color(0x00, 0xc8, 0xdb, 0.6)),
+            shadow(4, 8, 0, color(0, 0, 0, 0.5)),
         ],
         inset: &[
-            shadow(1, 1, 0, rgba(255, 255, 255, 0.6)),
-            shadow(-3, 6, 0, rgba(0, 0, 0, 0.3)),
+            shadow(1, 1, 0, color(255, 255, 255, 0.6)),
+            shadow(-3, 6, 0, color(0, 0, 0, 0.3)),
         ],
     },
     small: Surface {
@@ -156,17 +141,17 @@ const DARK: Palette = Palette {
 
 const LIGHT: Palette = Palette {
     group: Surface {
-        base: Some(rgba(226, 224, 219, 0.8)),
+        base: Some(color(226, 224, 219, 0.8)),
         gradient: &[
-            stop(0.0, rgba(255, 255, 255, 0.85)),
-            stop(1.0, rgba(255, 255, 255, 0.45)),
+            stop(0.0, color(255, 255, 255, 0.85)),
+            stop(1.0, color(255, 255, 255, 0.45)),
         ],
-        border: Some(rgba(255, 255, 255, 0.9)),
+        border: Some(color(255, 255, 255, 0.9)),
         outer: &[
-            shadow(18, 36, -14, rgba(70, 60, 45, 0.45)),
-            shadow(2, 4, 0, rgba(70, 60, 45, 0.12)),
+            shadow(18, 36, -14, color(70, 60, 45, 0.45)),
+            shadow(2, 4, 0, color(70, 60, 45, 0.12)),
         ],
-        inset: &[shadow(-6, 14, 0, rgba(70, 60, 45, 0.08))],
+        inset: &[shadow(-6, 14, 0, color(70, 60, 45, 0.08))],
     },
     button: Surface {
         base: None,
@@ -176,10 +161,10 @@ const LIGHT: Palette = Palette {
             stop(1.0, rgb(0xd6, 0xd2, 0xcb)),
         ],
         border: None,
-        outer: &[shadow(4, 8, 0, rgba(70, 60, 45, 0.22))],
+        outer: &[shadow(4, 8, 0, color(70, 60, 45, 0.22))],
         inset: &[
             shadow(1, 1, 0, rgb(0xff, 0xff, 0xff)),
-            shadow(-3, 5, 0, rgba(70, 60, 45, 0.15)),
+            shadow(-3, 5, 0, color(70, 60, 45, 0.15)),
         ],
     },
     lit: Surface {
@@ -195,12 +180,12 @@ const LIGHT: Palette = Palette {
         border: None,
         outer: &[
             // The glow: oklch(0.62 0.16 235 / .45)
-            shadow(0, 18, 0, rgba(0x00, 0x92, 0xd7, 0.45)),
-            shadow(4, 8, 0, rgba(40, 50, 80, 0.3)),
+            shadow(0, 18, 0, color(0x00, 0x92, 0xd7, 0.45)),
+            shadow(4, 8, 0, color(40, 50, 80, 0.3)),
         ],
         inset: &[
-            shadow(1, 1, 0, rgba(255, 255, 255, 0.6)),
-            shadow(-3, 6, 0, rgba(0, 0, 0, 0.2)),
+            shadow(1, 1, 0, color(255, 255, 255, 0.6)),
+            shadow(-3, 6, 0, color(0, 0, 0, 0.2)),
         ],
     },
     small: Surface {

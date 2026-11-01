@@ -15,12 +15,10 @@
 //! The two differ by up to 27 levels at a pixel, and by 2 to 4 on average over the toolbar (`toolbar_tests` measures
 //! it). A toolbar is always drawn through the bitmap, so what is drawn does not depend on the cache's state.
 
-use screengauge_core::session::Toolbar;
-use screengauge_core::settings::{DimensionsMode, Tool};
+use screengauge_core::session::{Point, Toolbar};
 use windows::Win32::Foundation::E_FAIL;
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_RECT_F, D2D_SIZE_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F,
-    D2D1_PIXEL_FORMAT,
+    D2D_RECT_F, D2D_SIZE_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
     D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE,
@@ -30,21 +28,21 @@ use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::core::Error;
 
 use super::Overlay;
+use super::palette::d2d_color;
 use super::toolbar::Layout;
 use super::toolbar_paint::{self, Margins};
 use super::toolbar_palette;
 use crate::log;
-
-/// What the bitmap shows: the lit tool, and the lit mode while there is one. The groups and the buttons are always the
-/// same, and so are the monitor, the scale and the palette, which an `Overlay` is made for.
-type Shows = (Tool, Option<DimensionsMode>);
 
 /// The bitmap and what it is of.
 struct Kept {
     /// What the toolbar was drawn on, kept to draw the next state on it.
     target: ID2D1BitmapRenderTarget,
     bitmap: ID2D1Bitmap,
-    shows: Shows,
+    /// What the bitmap shows: the lit tool, and the lit mode while there is one. The groups and the buttons are always
+    /// the same, and so are the monitor, the scale and the palette, which an `Overlay` is made for; the toolbar's own
+    /// monitor never changes for a window, so the whole scene's toolbar is the key.
+    shows: Toolbar,
     /// How much of the bitmap is left, above and to the left of the toolbar, for the shadows.
     margins: Margins,
     width: i32,
@@ -75,9 +73,8 @@ impl Overlay {
                 "the toolbar was drawn again while it was being drawn",
             )
         })?;
-        let shows = (toolbar.active, toolbar.mode);
         let kept = match cache.kept.take() {
-            Some(kept) if kept.shows == shows => kept,
+            Some(kept) if kept.shows == *toolbar => kept,
             old => {
                 #[cfg(test)]
                 {
@@ -138,17 +135,12 @@ impl Overlay {
             }
         };
         // The bitmap's pixel (0, 0) is the virtual screen's point `margins` up and left of the toolbar's corner.
-        let origin = (
-            layout.toolbar.left - margins.left,
-            layout.toolbar.top - margins.top,
-        );
-        // Premultiplied transparent: nothing of the bitmap's earlier contents, and nothing under the shadows.
-        let clear = D2D1_COLOR_F {
-            r: 0.0,
-            g: 0.0,
-            b: 0.0,
-            a: 0.0,
+        let origin = Point {
+            x: layout.toolbar.left - margins.left,
+            y: layout.toolbar.top - margins.top,
         };
+        // Premultiplied transparent: nothing of the bitmap's earlier contents, and nothing under the shadows.
+        let clear = d2d_color([0, 0, 0], 0.0);
         // SAFETY: the bitmap target is ours, and ended below whatever happens in between.
         unsafe {
             bitmap_target.BeginDraw();
@@ -171,7 +163,7 @@ impl Overlay {
         Ok(Kept {
             target: bitmap_target,
             bitmap,
-            shows: (toolbar.active, toolbar.mode),
+            shows: *toolbar,
             margins,
             width,
             height,

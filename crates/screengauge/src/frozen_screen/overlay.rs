@@ -24,9 +24,9 @@ mod toolbar_tests;
 
 use std::cell::RefCell;
 
-use screengauge_core::session::{Measurement, Notice, Rect, Scale, ToleranceIndicator};
+use screengauge_core::session::{Measurement, Notice, Point, Rect, Scale, ToleranceIndicator};
 use windows::Win32::Foundation::{E_FAIL, RECT};
-use windows::Win32::Graphics::Direct2D::Common::{D2D_RECT_F, D2D1_COLOR_F};
+use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_CAP_STYLE_ROUND,
     D2D1_COMBINE_MODE_EXCLUDE, D2D1_DASH_STYLE_SOLID, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
@@ -46,7 +46,7 @@ use windows::core::{BOOL, Error, PCWSTR, w};
 use crate::log;
 use crate::theme::Mode;
 use geometry::{Parts, scaled};
-use palette::Surfaces;
+use palette::{Surfaces, color, solid_brush};
 
 /// The label's font. Its digits differ in width unless asked for tabular figures (a 1 is two pixels narrower than a 0
 /// at this size), which the label does, so the pill keeps its width while the number keeps its length.
@@ -284,16 +284,7 @@ impl Overlay {
         mode: Mode,
     ) -> windows::core::Result<Overlay> {
         let dpi = scale.dpi();
-        let brush = |[r, g, b]: [u8; 3]| {
-            let color = D2D1_COLOR_F {
-                r: f32::from(r) / 255.0,
-                g: f32::from(g) / 255.0,
-                b: f32::from(b) / 255.0,
-                a: 1.0,
-            };
-            // SAFETY: `color` outlives the call, which keeps nothing of it.
-            unsafe { target.CreateSolidColorBrush(&color, None) }
-        };
+        let brush = |r, g, b| solid_brush(target, color(r, g, b, 1.0));
         // SAFETY: no arguments.
         let figures = unsafe { fonts.factory.CreateTypography() }?;
         // SAFETY: plain values.
@@ -318,10 +309,10 @@ impl Overlay {
         let stroke = unsafe { factory.CreateStrokeStyle(&round, None) }?;
         Ok(Overlay {
             // #22d3ee, the same cyan whatever the Windows theme.
-            cyan: brush([0x22, 0xd3, 0xee])?,
-            shade: brush([0, 0, 0])?,
+            cyan: brush(0x22, 0xd3, 0xee)?,
+            shade: brush(0, 0, 0)?,
             // #04161b
-            ink: brush([0x04, 0x16, 0x1b])?,
+            ink: brush(0x04, 0x16, 0x1b)?,
             surfaces: Surfaces::new(target, mode)?,
             factory,
             stroke,
@@ -727,14 +718,17 @@ impl Overlay {
         Ok(layout)
     }
 
+    /// The virtual screen's point at the window's own pixel (0, 0): its monitor's corner.
+    fn window_origin(&self) -> Point {
+        Point {
+            x: self.monitor.left,
+            y: self.monitor.top,
+        }
+    }
+
     /// `rect`, from the virtual screen to the window's own pixels.
     fn in_window(&self, rect: &RECT) -> D2D_RECT_F {
-        D2D_RECT_F {
-            left: px(rect.left - self.monitor.left),
-            top: px(rect.top - self.monitor.top),
-            right: px(rect.right - self.monitor.left),
-            bottom: px(rect.bottom - self.monitor.top),
-        }
+        in_surface(self.window_origin(), rect)
     }
 
     /// The pill's rounded rectangle, grown by `grow` pixels on every side and moved `down` pixels.
@@ -745,17 +739,63 @@ impl Overlay {
     /// `rect` with corners of `radius` pixels, grown by `grow` pixels on every side (or smaller, should it be negative)
     /// and moved `down` pixels. The corners grow with it, as a CSS shadow's do.
     fn shaped(&self, rect: &RECT, radius: i32, grow: i32, down: i32) -> D2D1_ROUNDED_RECT {
-        let mut rect = self.in_window(rect);
-        rect.left -= px(grow);
-        rect.right += px(grow);
-        rect.top += px(down - grow);
-        rect.bottom += px(down + grow);
-        let radius = px(radius + grow);
-        D2D1_ROUNDED_RECT {
-            rect,
-            radiusX: radius,
-            radiusY: radius,
+        // None of these shapes is shrunk past half its height, so none needs the toolbar's clamp.
+        rounded_at(self.window_origin(), rect, radius, grow, down, false)
+    }
+}
+
+/// `rect`, from the virtual screen to the pixels of a surface whose pixel (0, 0) is the virtual screen's `origin`: the
+/// window's own, or a bitmap's.
+fn in_surface(origin: Point, rect: &RECT) -> D2D_RECT_F {
+    D2D_RECT_F {
+        left: px(rect.left - origin.x),
+        top: px(rect.top - origin.y),
+        right: px(rect.right - origin.x),
+        bottom: px(rect.bottom - origin.y),
+    }
+}
+
+/// `rect` as a rounded rectangle in the pixels of the surface at `origin`, with corners of `radius` pixels, grown by
+/// `grow` pixels on every side (or smaller, should it be negative) and moved `down` pixels. The corners grow with it, as
+/// a CSS shadow's do.
+///
+/// `clamp` is for a shape that may be shrunk past nothing: the toolbar's shadow layers and inset holes shrink a group's
+/// box by up to three deviations of the blur, which can pass half its height. Then a side that would cross the other
+/// goes to the middle instead of turning the rectangle inside out, and a corner's radius is never negative. The
+/// notice's, the tolerance indicator's and the labels' shapes never shrink that far, so they are left as they were.
+fn rounded_at(
+    origin: Point,
+    rect: &RECT,
+    radius: i32,
+    grow: i32,
+    down: i32,
+    clamp: bool,
+) -> D2D1_ROUNDED_RECT {
+    let span = |near: i32, far: i32| {
+        let (near_grown, far_grown) = (near - grow, far + grow);
+        if !clamp || near_grown <= far_grown {
+            (near_grown, far_grown)
+        } else {
+            let middle = near + (far - near) / 2;
+            (middle, middle)
         }
+    };
+    let (left, right) = span(rect.left - origin.x, rect.right - origin.x);
+    let (top, bottom) = span(rect.top - origin.y + down, rect.bottom - origin.y + down);
+    let radius = if clamp {
+        (radius + grow).max(0)
+    } else {
+        radius + grow
+    };
+    D2D1_ROUNDED_RECT {
+        rect: D2D_RECT_F {
+            left: px(left),
+            top: px(top),
+            right: px(right),
+            bottom: px(bottom),
+        },
+        radiusX: px(radius),
+        radiusY: px(radius),
     }
 }
 
@@ -814,7 +854,7 @@ mod tests {
     use std::ptr;
 
     use windows::Win32::Graphics::Direct2D::Common::{
-        D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT,
+        D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
     };
     use windows::Win32::Graphics::Direct2D::{
         D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,

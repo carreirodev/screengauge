@@ -1,5 +1,5 @@
 //! The subset of SVG path data the toolbar's icons are written in (the prototype's `<path d="...">`, WPC-279): moveto,
-//! lineto, horizontal and vertical lineto, cubic curves, elliptical arcs and closepath, each absolute or relative.
+//! lineto, horizontal and vertical lineto, elliptical arcs and closepath, each absolute or relative.
 //! Parsing needs no Windows, so it is tested without a graphics card; `toolbar_paint` turns the figures it returns
 //! into Direct2D geometry.
 
@@ -29,7 +29,6 @@ pub struct Arc {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Segment {
     Line(Pt),
-    Cubic { c1: Pt, c2: Pt, to: Pt },
     Arc(Arc),
 }
 
@@ -53,7 +52,7 @@ pub struct ParseError {
 pub enum ErrorKind {
     /// A path starts with a moveto.
     MissingMoveto,
-    /// A letter that is no command of the subset (smooth curves and quadratic ones are not used by the icons).
+    /// A letter that is no command of the subset (the icons draw no curve but arcs).
     UnknownCommand(char),
     /// A number was due and something else, or the end of the text, came.
     ExpectedNumber,
@@ -126,8 +125,8 @@ impl Reader<'_> {
         self.at - from
     }
 
-    /// A number: an optional sign, digits with an optional point, and an optional exponent. A second point, or a sign,
-    /// ends it, so `1.5-1` and `.1.1` are two numbers each.
+    /// A number: an optional sign, and digits with an optional point. A second point, or a sign, ends it, so `1.5-1` and
+    /// `.1.1` are two numbers each.
     fn number(&mut self) -> Result<f32, ParseError> {
         self.skip_separators();
         let from = self.at;
@@ -144,18 +143,7 @@ impl Reader<'_> {
             self.at = from;
             return Err(self.error(ErrorKind::ExpectedNumber));
         }
-        // An exponent counts only when digits follow its `e`, which no path command is.
-        if matches!(self.peek(), Some(b'e' | b'E')) {
-            let before = self.at;
-            self.at += 1;
-            if matches!(self.peek(), Some(b'+' | b'-')) {
-                self.at += 1;
-            }
-            if self.digits() == 0 {
-                self.at = before;
-            }
-        }
-        // Only ASCII digits, signs, points and `e` were taken, so the slice is valid text.
+        // Only ASCII digits, signs and points were taken, so the slice is valid text.
         let text = std::str::from_utf8(&self.text[from..self.at])
             .map_err(|_| self.error(ErrorKind::ExpectedNumber))?;
         let value: f32 = text.parse().map_err(|_| ParseError {
@@ -269,7 +257,7 @@ pub fn parse(d: &str) -> Result<Vec<Figure>, ParseError> {
             }
             continue;
         }
-        if !"MmLlHhVvCcAa".contains(command) {
+        if !"MmLlHhVvAa".contains(command) {
             return Err(ParseError {
                 at: reader.at - 1,
                 kind: ErrorKind::UnknownCommand(command),
@@ -331,12 +319,6 @@ fn run(reader: &mut Reader<'_>, pen: &mut Pen, command: char) -> Result<(), Pars
                 y: origin.y + y,
             };
             pen.push(Segment::Line(to), to);
-        }
-        'C' => {
-            let c1 = place(reader.point()?);
-            let c2 = place(reader.point()?);
-            let to = place(reader.point()?);
-            pen.push(Segment::Cubic { c1, c2, to }, to);
         }
         _ => {
             let radii = reader.point()?;
@@ -486,30 +468,10 @@ mod tests {
     }
 
     #[test]
-    fn commas_white_space_signs_and_exponents_are_numbers_too() {
-        let figure = only(" M +1,2\n L\t3 ,4 1e1 -2.5E-1 ");
+    fn commas_white_space_and_signs_separate_and_start_numbers() {
+        let figure = only(" M +1,2\n L\t3 ,4 10 -2.5 ");
         assert_eq!(figure.start, pt(1.0, 2.0));
-        assert_eq!(lines(&figure), [pt(3.0, 4.0), pt(10.0, -0.25)]);
-    }
-
-    #[test]
-    fn a_cubic_takes_three_points_absolute_or_relative() {
-        let figure = only("M0 0C1 2 3 4 5 6c1 1 2 2 3 3");
-        assert_eq!(
-            figure.segments,
-            [
-                Segment::Cubic {
-                    c1: pt(1.0, 2.0),
-                    c2: pt(3.0, 4.0),
-                    to: pt(5.0, 6.0)
-                },
-                Segment::Cubic {
-                    c1: pt(6.0, 7.0),
-                    c2: pt(7.0, 8.0),
-                    to: pt(8.0, 9.0)
-                },
-            ]
-        );
+        assert_eq!(lines(&figure), [pt(3.0, 4.0), pt(10.0, -2.5)]);
     }
 
     #[test]
@@ -653,7 +615,6 @@ mod tests {
             end = match segment {
                 Segment::Line(to) => *to,
                 Segment::Arc(arc) => arc.to,
-                Segment::Cubic { to, .. } => *to,
             };
             assert!(
                 (0.0..=24.0).contains(&end.x) && (0.0..=24.0).contains(&end.y),
@@ -677,7 +638,15 @@ mod tests {
 
     #[test]
     fn a_command_outside_the_subset_is_an_error() {
-        for d in ["M0 0S1 1 2 2", "M0 0Q1 1 2 2", "M0 0T1 1", "M0 0x"] {
+        for d in [
+            "M0 0S1 1 2 2",
+            "M0 0Q1 1 2 2",
+            "M0 0T1 1",
+            "M0 0C1 2 3 4 5 6",
+            "M0 0c1 2 3 4 5 6",
+            "M0 0x",
+            "M0 0L1 1e1",
+        ] {
             assert!(
                 matches!(parse(d).unwrap_err().kind, ErrorKind::UnknownCommand(_)),
                 "{d}"
@@ -701,7 +670,6 @@ mod tests {
             "M0 0L",
             "M0 0L1",
             "M0 0h",
-            "M0 0C1 2 3 4 5",
             "M0 0a1 1 0 0 0 1",
             "M0 0L1 x",
             "M0 0L-",
@@ -733,8 +701,10 @@ mod tests {
 
     #[test]
     fn a_number_too_large_to_hold_is_an_error() {
+        // Far past what an f32 holds.
+        let huge = "9".repeat(60);
         assert_eq!(
-            parse("M1e999 0L1 1").unwrap_err().kind,
+            parse(&format!("M{huge} 0L1 1")).unwrap_err().kind,
             ErrorKind::NumberOutOfRange
         );
     }

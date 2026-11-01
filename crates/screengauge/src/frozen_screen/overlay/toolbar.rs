@@ -19,8 +19,8 @@ use super::geometry::{self, scaled};
 const MARGIN: u32 = 14;
 /// The room between two groups (`#toolbar`'s `gap`).
 const GROUP_GAP: u32 = 12;
-/// Each group's border (`.grp`'s `border: 1px`).
-const RING: u32 = 1;
+/// Each group's border (`.grp`'s `border: 1px`), which the painting of the panels shares.
+pub(super) const RING: u32 = 1;
 /// The tools' group (`.grp`): its padding and the room between its buttons, which are this wide and tall (`.tbtn`).
 const TOOLS_PAD: u32 = 9;
 const TOOLS_GAP: u32 = 10;
@@ -31,6 +31,42 @@ const SMALL_PAD: u32 = 8;
 const MODES_GAP: u32 = 6;
 const CONTROLS_GAP: u32 = 8;
 const SMALL: u32 = 34;
+
+/// How a button is styled and which group it is in: the tools' big buttons, the modes (H, V and C), and the small buttons
+/// that act on the toolbar itself (the gear, minimize and close).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ButtonKind {
+    Tool,
+    Mode,
+    Control,
+}
+
+/// What `button` is. A button is listed here, and a new one fails to compile until it is, so the painting and the clicks
+/// never style it by default.
+pub(super) fn kind(button: ToolbarButton) -> ButtonKind {
+    match button {
+        ToolbarButton::Tool(_) => ButtonKind::Tool,
+        ToolbarButton::Mode(_) => ButtonKind::Mode,
+        // The restore button, which only the minimized toolbar has, is not drawn by this toolbar: it is small, and it is
+        // not a mode, which is as much as the clicks need to know of it.
+        ToolbarButton::Settings
+        | ToolbarButton::Minimize
+        | ToolbarButton::Restore
+        | ToolbarButton::Close => ButtonKind::Control,
+    }
+}
+
+/// Whether `toolbar` draws `button` lit: the active tool's, and the mode's while there is one.
+pub(super) fn is_lit(toolbar: &Toolbar, button: ToolbarButton) -> bool {
+    match button {
+        ToolbarButton::Tool(tool) => tool == toolbar.active,
+        ToolbarButton::Mode(mode) => toolbar.mode == Some(mode),
+        ToolbarButton::Settings
+        | ToolbarButton::Minimize
+        | ToolbarButton::Restore
+        | ToolbarButton::Close => false,
+    }
+}
 
 /// The buttons, in the toolbar's order, left to right.
 pub const BUTTONS: [ToolbarButton; 10] = [
@@ -100,14 +136,14 @@ pub fn layout(monitor: RECT, dpi: u32) -> Layout {
     // The smaller groups are centered in the toolbar's height (CSS `align-items: center`), an odd pixel left below them.
     let small_top = top + (height - small_height + 1) / 2;
 
-    let tools = rect(left, top, tools_width, height);
-    let modes = rect(
+    let tools = sized(left, top, tools_width, height);
+    let modes = sized(
         tools.right + s(GROUP_GAP),
         small_top,
         modes_width,
         small_height,
     );
-    let controls = rect(
+    let controls = sized(
         modes.right + s(GROUP_GAP),
         small_top,
         controls_width,
@@ -116,7 +152,7 @@ pub fn layout(monitor: RECT, dpi: u32) -> Layout {
     let row = |group: &RECT, pad: u32, gap: u32, button: u32, index: i32| {
         let inset = ring + s(pad);
         let size = s(button);
-        rect(
+        sized(
             group.left + inset + index * (size + s(gap)),
             group.top + inset,
             size,
@@ -140,12 +176,7 @@ pub fn layout(monitor: RECT, dpi: u32) -> Layout {
     ];
     let buttons = std::array::from_fn(|index| (BUTTONS[index], places[index]));
     Layout {
-        toolbar: RECT {
-            left,
-            top,
-            right: left + width,
-            bottom: top + height,
-        },
+        toolbar: sized(left, top, width, height),
         tools,
         modes,
         controls,
@@ -168,14 +199,15 @@ impl Layout {
         let button = self
             .buttons
             .iter()
-            .filter(|(button, _)| modes_shown || !matches!(button, ToolbarButton::Mode(_)))
+            .filter(|(button, _)| modes_shown || kind(*button) != ButtonKind::Mode)
             .find(|(_, place)| contains(place, at))
             .map(|&(button, _)| Hit::Button(button));
         Some(button.unwrap_or(Hit::Background))
     }
 }
 
-fn rect(left: i32, top: i32, width: i32, height: i32) -> RECT {
+/// The rectangle at (`left`, `top`) that is `width` by `height`.
+fn sized(left: i32, top: i32, width: i32, height: i32) -> RECT {
     RECT {
         left,
         top,

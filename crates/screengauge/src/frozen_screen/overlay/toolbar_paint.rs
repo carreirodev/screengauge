@@ -10,11 +10,11 @@
 //! Left out on purpose: `backdrop-filter: blur(14px)` of the panels, which the owner agreed to do without, and the
 //! reactions to the mouse hovering and pressing (WPC-311).
 
-use screengauge_core::session::{Toolbar, ToolbarButton};
+use screengauge_core::session::{Point, Toolbar, ToolbarButton};
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_RECT_F, D2D_SIZE_F, D2D1_BEZIER_SEGMENT, D2D1_COLOR_F, D2D1_FIGURE_BEGIN_HOLLOW,
-    D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN, D2D1_GRADIENT_STOP,
+    D2D_RECT_F, D2D_SIZE_F, D2D1_FIGURE_BEGIN_HOLLOW, D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN,
+    D2D1_GRADIENT_STOP,
 };
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_ARC_SEGMENT, D2D1_ARC_SIZE_LARGE, D2D1_ARC_SIZE_SMALL,
@@ -26,12 +26,13 @@ use windows::Win32::Graphics::Direct2D::{
 use windows::core::Error;
 
 use super::geometry::scaled;
+use super::palette::{Color, color, d2d_color, solid_brush};
 use super::shadow::{self, Profile};
 use super::svg_path::{self, Figure, Pt, Segment};
-use super::toolbar::Layout;
+use super::toolbar::{ButtonKind, Layout, RING, is_lit, kind};
 use super::toolbar_icons::{self, Icon, Shape, VIEW_BOX};
-use super::toolbar_palette::{self, Palette, Rgba, Shadow, Stop, Surface};
-use super::{Overlay, dot, px, ring};
+use super::toolbar_palette::{self, Palette, Shadow, Stop, Surface};
+use super::{Overlay, dot, in_surface, px, ring, rounded_at};
 
 // Every size below is in logical pixels, which `scaled` turns into physical pixels for the monitor's scale.
 
@@ -39,46 +40,13 @@ use super::{Overlay, dot, px, ring};
 const GROUP_RADIUS: u32 = 20;
 const TOOL_RADIUS: u32 = 13;
 const SMALL_RADIUS: u32 = 10;
-/// A group's border (`.grp`'s `border: 1px`), which the layout leaves room for.
-const BORDER: u32 = 1;
 
-/// A rounded rectangle of `rect`, grown by `grow` pixels on every side (smaller, should it be negative) and moved `down`
-/// pixels, its corners growing with it as a CSS shadow's do. Shrunk past nothing it is a line, never turned inside out.
-fn shape(rect: &RECT, radius: i32, grow: i32, down: i32) -> D2D1_ROUNDED_RECT {
-    let (left, right) = squeeze(rect.left, rect.right, grow);
-    let (top, bottom) = squeeze(rect.top + down, rect.bottom + down, grow);
-    let radius = px((radius + grow).max(0));
-    D2D1_ROUNDED_RECT {
-        rect: D2D_RECT_F {
-            left: px(left),
-            top: px(top),
-            right: px(right),
-            bottom: px(bottom),
-        },
-        radiusX: radius,
-        radiusY: radius,
-    }
-}
-
-/// The span from `near` to `far` grown by `grow` at both ends; shrunk so far that the ends would cross, the middle.
-fn squeeze(near: i32, far: i32, grow: i32) -> (i32, i32) {
-    let (near_grown, far_grown) = (near - grow, far + grow);
-    if near_grown <= far_grown {
-        (near_grown, far_grown)
-    } else {
-        let middle = near + (far - near) / 2;
-        (middle, middle)
-    }
-}
-
-/// `color` as Direct2D takes it, with `alpha` for its opacity.
-fn d2d(rgb: [u8; 3], alpha: f32) -> D2D1_COLOR_F {
-    let [r, g, b] = rgb;
-    D2D1_COLOR_F {
-        r: f32::from(r) / 255.0,
-        g: f32::from(g) / 255.0,
-        b: f32::from(b) / 255.0,
-        a: alpha,
+/// How a kind of button is painted: its surface, and the radius of its corners.
+fn style(palette: &Palette, kind: ButtonKind) -> (&Surface, u32) {
+    match kind {
+        ButtonKind::Tool => (&palette.button, TOOL_RADIUS),
+        ButtonKind::Mode => (&palette.button, SMALL_RADIUS),
+        ButtonKind::Control => (&palette.small, SMALL_RADIUS),
     }
 }
 
@@ -157,10 +125,7 @@ pub(super) fn reach(palette: &Palette, layout: &Layout, dpi: u32) -> Margins {
         take(&[&palette.group], group);
     }
     for (button, place) in &layout.buttons {
-        let surface = match button {
-            ToolbarButton::Tool(_) | ToolbarButton::Mode(_) => &palette.button,
-            _ => &palette.small,
-        };
+        let (surface, _) = style(palette, kind(*button));
         take(&[surface, &palette.lit], place);
     }
     margins
@@ -172,7 +137,7 @@ struct Painter<'a> {
     overlay: &'a Overlay,
     target: &'a ID2D1RenderTarget,
     palette: &'static Palette,
-    origin: (i32, i32),
+    origin: Point,
     /// Recolored for every fill, so the layers of a shadow share one.
     brush: ID2D1SolidColorBrush,
 }
@@ -200,28 +165,23 @@ impl Overlay {
         target: &ID2D1RenderTarget,
         layout: &Layout,
         toolbar: &Toolbar,
-        origin: (i32, i32),
+        origin: Point,
     ) -> windows::core::Result<()> {
-        // SAFETY: the color outlives the call, which keeps nothing of it.
-        let brush = unsafe { target.CreateSolidColorBrush(&d2d([0, 0, 0], 1.0), None) }?;
         let painter = Painter {
             overlay: self,
             target,
             palette: toolbar_palette::palette(self.mode),
             origin,
-            brush,
+            brush: solid_brush(target, color(0, 0, 0, 1.0))?,
         };
         // SAFETY: a drawing call on a live render target. Out of BeginDraw and EndDraw, Direct2D only fails the frame
         // at EndDraw. The corners need antialiasing, which the target may have been left without.
         unsafe { target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };
-        let is_tool = |button: &ToolbarButton| matches!(button, ToolbarButton::Tool(_));
-        let is_mode = |button: &ToolbarButton| matches!(button, ToolbarButton::Mode(_));
-        let is_control = |button: &ToolbarButton| !is_tool(button) && !is_mode(button);
-        painter.group(layout, &layout.tools, toolbar, is_tool)?;
+        painter.group(layout, &layout.tools, toolbar, ButtonKind::Tool)?;
         if toolbar.mode.is_some() {
-            painter.group(layout, &layout.modes, toolbar, is_mode)?;
+            painter.group(layout, &layout.modes, toolbar, ButtonKind::Mode)?;
         }
-        painter.group(layout, &layout.controls, toolbar, is_control)
+        painter.group(layout, &layout.controls, toolbar, ButtonKind::Control)
     }
 }
 
@@ -231,7 +191,7 @@ impl Painter<'_> {
     }
 
     /// `logical` pixels of the monitor's scale, whole.
-    fn s(&self, logical: u32) -> i32 {
+    fn scaled(&self, logical: u32) -> i32 {
         scaled(logical, self.dpi())
     }
 
@@ -243,23 +203,20 @@ impl Painter<'_> {
         sigma(blur, self.dpi())
     }
 
-    /// `rect`, from the virtual screen to the target's own pixels.
-    fn local(&self, rect: &RECT) -> RECT {
-        RECT {
-            left: rect.left - self.origin.0,
-            top: rect.top - self.origin.1,
-            right: rect.right - self.origin.0,
-            bottom: rect.bottom - self.origin.1,
-        }
+    /// `rect`, grown by `grow` pixels on every side and moved `down`, as a rounded rectangle in the target's own pixels.
+    /// Shadow layers and holes shrink a box by up to three deviations of the blur, which may pass half its height, so
+    /// what shrinks past nothing is clamped.
+    fn shape(&self, rect: &RECT, radius: i32, grow: i32, down: i32) -> D2D1_ROUNDED_RECT {
+        rounded_at(self.origin, rect, radius, grow, down, true)
     }
 
     /// Sets the shared brush to `rgb` at `alpha`.
     fn set(&self, rgb: [u8; 3], alpha: f32) {
         // SAFETY: the color outlives the call, which keeps nothing of it.
-        unsafe { self.brush.SetColor(&d2d(rgb, alpha)) };
+        unsafe { self.brush.SetColor(&d2d_color(rgb, alpha)) };
     }
 
-    fn fill(&self, shape: &D2D1_ROUNDED_RECT, color: Rgba) {
+    fn fill(&self, shape: &D2D1_ROUNDED_RECT, color: Color) {
         self.set(color.rgb, color.alpha);
         // SAFETY: a drawing call on a live render target with arguments that outlive it. Out of BeginDraw and EndDraw,
         // Direct2D only fails the frame at EndDraw.
@@ -272,43 +229,32 @@ impl Painter<'_> {
         layout: &Layout,
         group: &RECT,
         toolbar: &Toolbar,
-        member: impl Fn(&ToolbarButton) -> bool,
+        members: ButtonKind,
     ) -> windows::core::Result<()> {
         // The panel is a little see-through, so what falls under it is cut out of its shadow.
-        self.surface(
-            &self.palette.group,
-            &self.local(group),
-            GROUP_RADIUS,
-            BORDER,
-            true,
-        )?;
-        for (button, place) in layout.buttons.iter().filter(|(button, _)| member(button)) {
-            let lit = match button {
-                ToolbarButton::Tool(tool) => *tool == toolbar.active,
-                ToolbarButton::Mode(mode) => toolbar.mode == Some(*mode),
-                _ => false,
-            };
-            self.button(button, &self.local(place), lit)?;
+        self.surface(&self.palette.group, group, GROUP_RADIUS, RING, true)?;
+        for (button, place) in layout
+            .buttons
+            .iter()
+            .filter(|(button, _)| kind(*button) == members)
+        {
+            self.button(button, place, is_lit(toolbar, *button))?;
         }
         Ok(())
     }
 
     /// One button: its own box and, when it is lit, the lit box over it, which hides it and shows its glow around it.
     fn button(&self, button: &ToolbarButton, place: &RECT, lit: bool) -> windows::core::Result<()> {
-        let (surface, radius) = match button {
-            ToolbarButton::Tool(_) => (&self.palette.button, TOOL_RADIUS),
-            ToolbarButton::Mode(_) => (&self.palette.button, SMALL_RADIUS),
-            _ => (&self.palette.small, SMALL_RADIUS),
-        };
+        let (surface, radius) = style(self.palette, kind(*button));
         self.surface(surface, place, radius, 0, false)?;
         if lit {
             self.surface(&self.palette.lit, place, radius, 0, false)?;
         }
         // The icon is over the lit box, in the lit ink.
-        let ink = match (lit, button) {
+        let ink = match (lit, kind(*button)) {
             (true, _) => self.palette.ink_on,
-            (false, ToolbarButton::Tool(_) | ToolbarButton::Mode(_)) => self.palette.ink,
-            (false, _) => self.palette.small_ink,
+            (false, ButtonKind::Tool | ButtonKind::Mode) => self.palette.ink,
+            (false, ButtonKind::Control) => self.palette.small_ink,
         };
         self.icon(button, place, ink)
     }
@@ -316,14 +262,15 @@ impl Painter<'_> {
     /// The icon of `button` in `ink`, centered in `place`: its view box at its CSS size, scaled for the monitor, with its
     /// top left corner on a whole pixel (a half pixel of room goes to the left and top), and its strokes round at their
     /// ends and corners.
-    fn icon(&self, button: &ToolbarButton, place: &RECT, ink: Rgba) -> windows::core::Result<()> {
+    fn icon(&self, button: &ToolbarButton, place: &RECT, ink: Color) -> windows::core::Result<()> {
         let Some(icon) = toolbar_icons::icon_for(button) else {
             return Ok(());
         };
-        let side = self.s(icon.size);
+        let side = self.scaled(icon.size);
+        let corner = in_surface(self.origin, place);
         let at = Placement {
-            left: px(place.left + (place.right - place.left - side + 1) / 2),
-            top: px(place.top + (place.bottom - place.top - side + 1) / 2),
+            left: corner.left + px((place.right - place.left - side + 1) / 2),
+            top: corner.top + px((place.bottom - place.top - side + 1) / 2),
             unit: px(side) / VIEW_BOX,
         };
         self.set(ink.rgb, ink.alpha);
@@ -404,11 +351,6 @@ impl Painter<'_> {
                 for segment in &figure.segments {
                     match *segment {
                         Segment::Line(to) => sink.AddLine(at.point(to).point),
-                        Segment::Cubic { c1, c2, to } => sink.AddBezier(&D2D1_BEZIER_SEGMENT {
-                            point1: at.point(c1).point,
-                            point2: at.point(c2).point,
-                            point3: at.point(to).point,
-                        }),
                         Segment::Arc(arc) => sink.AddArc(&D2D1_ARC_SEGMENT {
                             point: at.point(arc.to).point,
                             size: D2D_SIZE_F {
@@ -452,9 +394,9 @@ impl Painter<'_> {
         ring_width: u32,
         see_through: bool,
     ) -> windows::core::Result<()> {
-        let radius = self.s(radius);
-        let ring_width = self.s(ring_width);
-        let outer = shape(rect, radius, 0, 0);
+        let radius = self.scaled(radius);
+        let ring_width = self.scaled(ring_width);
+        let outer = self.shape(rect, radius, 0, 0);
         let hole = if see_through {
             Some(self.overlay.geometry_of(&outer)?)
         } else {
@@ -471,8 +413,8 @@ impl Painter<'_> {
             self.gradient(
                 &outer,
                 surface.gradient,
-                px(rect.top + ring_width),
-                px(rect.bottom - ring_width),
+                outer.rect.top + px(ring_width),
+                outer.rect.bottom - px(ring_width),
             )?;
         }
         if let Some(border) = surface.border {
@@ -521,7 +463,7 @@ impl Painter<'_> {
                 continue;
             }
             self.set(shadow.color.rgb, layer.opacity);
-            let layer = shape(rect, radius, grow, drop);
+            let layer = self.shape(rect, radius, grow, drop);
             match hole {
                 Some(hole) => self
                     .overlay
@@ -545,12 +487,15 @@ impl Painter<'_> {
         let spread = self.signed(shadow.spread);
         let drop = self.signed(shadow.y);
         let layers = shadow::layers(self.sigma(shadow.blur), shadow.color.alpha, Profile::Edge);
-        let inside = shape(padding, radius, 0, 0);
+        let inside = self.shape(padding, radius, 0, 0);
         for layer in &layers.layers {
             // A layer's reach is how far into the hole the shadow goes: the hole is that much smaller.
-            let hole =
-                self.overlay
-                    .geometry_of(&shape(padding, radius, -spread - layer.grow, drop))?;
+            let hole = self.overlay.geometry_of(&self.shape(
+                padding,
+                radius,
+                -spread - layer.grow,
+                drop,
+            ))?;
             self.set(shadow.color.rgb, layer.opacity);
             self.overlay
                 .fill_except(self.target, &inside, &hole, &self.brush)?;
@@ -571,7 +516,7 @@ impl Painter<'_> {
             .iter()
             .map(|stop| D2D1_GRADIENT_STOP {
                 position: stop.at,
-                color: d2d(stop.color.rgb, stop.color.alpha),
+                color: d2d_color(stop.color.rgb, stop.color.alpha),
             })
             .collect();
         // SAFETY: the stops outlive the call, which copies them.

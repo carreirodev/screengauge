@@ -11,17 +11,38 @@ use crate::theme::Mode;
 pub const SHADOW_LAYERS: usize = 10;
 
 /// An sRGB color, with the opacity CSS gives it in `rgba()`.
-#[derive(Clone, Copy)]
-struct Color {
-    rgb: [u8; 3],
-    alpha: f32,
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Color {
+    pub(super) rgb: [u8; 3],
+    pub(super) alpha: f32,
 }
 
-const fn color(r: u8, g: u8, b: u8, alpha: f32) -> Color {
+pub(super) const fn color(r: u8, g: u8, b: u8, alpha: f32) -> Color {
     Color {
         rgb: [r, g, b],
         alpha,
     }
+}
+
+/// `rgb` at `alpha`, as Direct2D takes a color.
+pub(super) fn d2d_color(rgb: [u8; 3], alpha: f32) -> D2D1_COLOR_F {
+    let [r, g, b] = rgb;
+    D2D1_COLOR_F {
+        r: f32::from(r) / 255.0,
+        g: f32::from(g) / 255.0,
+        b: f32::from(b) / 255.0,
+        a: alpha,
+    }
+}
+
+/// A solid brush of `color` for `target`, which a render target that is lost takes with it.
+pub(super) fn solid_brush(
+    target: &ID2D1RenderTarget,
+    color: Color,
+) -> windows::core::Result<ID2D1SolidColorBrush> {
+    let color = d2d_color(color.rgb, color.alpha);
+    // SAFETY: `color` outlives the call, which keeps nothing of it.
+    unsafe { target.CreateSolidColorBrush(&color, None) }
 }
 
 /// One mode's colors.
@@ -102,19 +123,7 @@ impl Surfaces {
             Mode::Light => LIGHT,
             Mode::Dark => DARK,
         };
-        let brush = |Color {
-                         rgb: [r, g, b],
-                         alpha,
-                     }: Color| {
-            let color = D2D1_COLOR_F {
-                r: f32::from(r) / 255.0,
-                g: f32::from(g) / 255.0,
-                b: f32::from(b) / 255.0,
-                a: alpha,
-            };
-            // SAFETY: `color` outlives the call, which keeps nothing of it.
-            unsafe { target.CreateSolidColorBrush(&color, None) }
-        };
+        let brush = |color: Color| solid_brush(target, color);
         Ok(Surfaces {
             panel: brush(palette.panel)?,
             ink: brush(palette.ink)?,

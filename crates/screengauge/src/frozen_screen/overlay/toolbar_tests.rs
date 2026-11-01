@@ -6,12 +6,13 @@
 use screengauge_core::settings::{DimensionsMode, Tool};
 
 use super::geometry::{self, scaled};
+use super::palette::d2d_color;
 use super::panel_tests::{MODES, over};
 use super::tests::{BACKGROUND, Canvas, Picture, SCALES, near};
 use super::toolbar::{Layout, layout};
 use super::*;
 use super::{toolbar_paint, toolbar_palette};
-use screengauge_core::session::{Toolbar, ToolbarButton};
+use screengauge_core::session::{Point, Toolbar, ToolbarButton};
 
 /// A window wide enough for the toolbar at 175% and tall enough for its shadow, over a monitor left of and below the main
 /// one, so coordinates in the virtual screen and in the window are different numbers.
@@ -163,13 +164,7 @@ fn draw(canvas: &Canvas, mode: Mode, dpi: u32, toolbar: &Toolbar) -> Drawn {
 
 /// As `draw`, over a photo that is all `photo`.
 fn draw_over(canvas: &Canvas, mode: Mode, dpi: u32, toolbar: &Toolbar, photo: [u8; 3]) -> Drawn {
-    let [r, g, b] = photo;
-    let photo = D2D1_COLOR_F {
-        r: f32::from(r) / 255.0,
-        g: f32::from(g) / 255.0,
-        b: f32::from(b) / 255.0,
-        a: 1.0,
-    };
+    let photo = d2d_color(photo, 1.0);
     let picture = canvas.render_in(mode, TOOLBAR_MONITOR, dpi, |overlay, target| {
         // SAFETY: a drawing call between BeginDraw and EndDraw on a live target.
         unsafe { target.Clear(Some(&photo)) };
@@ -768,13 +763,7 @@ fn each_icon_is_in_its_ink_centered_in_its_button_at_its_size() {
 
 /// Clears the target to the test's photo, as the start of another frame does.
 fn clear_to_photo(target: &ID2D1RenderTarget) {
-    let [r, g, b] = BACKGROUND;
-    let photo = D2D1_COLOR_F {
-        r: f32::from(r) / 255.0,
-        g: f32::from(g) / 255.0,
-        b: f32::from(b) / 255.0,
-        a: 1.0,
-    };
+    let photo = d2d_color(BACKGROUND, 1.0);
     // SAFETY: a drawing call between BeginDraw and EndDraw on a live target.
     unsafe { target.Clear(Some(&photo)) };
 }
@@ -855,7 +844,10 @@ fn the_cached_toolbar_is_where_and_what_it_is_when_every_layer_is_drawn_straight
             let cached = draw(&canvas, mode, dpi, &toolbar);
             let direct = canvas.render_in(mode, TOOLBAR_MONITOR, dpi, |overlay, target| {
                 let layout = layout(bounds(), dpi);
-                let corner = (TOOLBAR_MONITOR.left, TOOLBAR_MONITOR.top);
+                let corner = Point {
+                    x: TOOLBAR_MONITOR.left,
+                    y: TOOLBAR_MONITOR.top,
+                };
                 overlay
                     .paint_toolbar(target, &layout, &toolbar, corner)
                     .expect("the toolbar");
@@ -942,7 +934,10 @@ fn toolbar_draw_times() {
         for dpi in [96, 168] {
             let scale = Scale::from_dpi(dpi).expect("a scale");
             let place = layout(bounds(), dpi);
-            let corner = (TOOLBAR_MONITOR.left, TOOLBAR_MONITOR.top);
+            let corner = Point {
+                x: TOOLBAR_MONITOR.left,
+                y: TOOLBAR_MONITOR.top,
+            };
             let (one, other) = (
                 scene(Tool::Dimensions, Some(DimensionsMode::Horizontal)),
                 scene(Tool::Snip, None),
