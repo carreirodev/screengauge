@@ -10,6 +10,8 @@ mod bounds_tests;
 mod floating;
 mod geometry;
 mod magnified_view;
+#[cfg(test)]
+mod magnified_view_tests;
 mod notice;
 mod palette;
 #[cfg(test)]
@@ -203,6 +205,8 @@ pub struct Overlay {
     /// face the prototype's `<b>` gets (see `tolerance`).
     word_format: IDWriteTextFormat,
     number_format: IDWriteTextFormat,
+    /// The magnified view's tag: bold, at its own size.
+    tag_format: IDWriteTextFormat,
     /// Asks for tabular figures; applied to each label's text.
     figures: IDWriteTypography,
     fonts: Fonts,
@@ -332,6 +336,11 @@ impl Overlay {
             logical_format: fonts.text_format(LOGICAL_WEIGHT, geometry::TEXT, dpi)?,
             word_format: fonts.text_format(DWRITE_FONT_WEIGHT_SEMI_BOLD, tolerance::TEXT, dpi)?,
             number_format: fonts.text_format(tolerance::NUMBER_WEIGHT, tolerance::TEXT, dpi)?,
+            tag_format: fonts.text_format(
+                magnified_view::TAG_WEIGHT,
+                magnified_view::TAG_TEXT,
+                dpi,
+            )?,
             figures,
             fonts: fonts.clone(),
             mode,

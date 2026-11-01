@@ -51,6 +51,8 @@ struct Palette {
     panel: Color,
     /// `--panel-ink`: the text on the panel.
     ink: Color,
+    /// `--panel-dim`: the text on the panel that names what the ink gives, such as the magnified view's X and Y.
+    dim: Color,
     /// `--panel-border`.
     border: Color,
     /// `--accent`: the notice's ok sign.
@@ -59,6 +61,8 @@ struct Palette {
     warn: Color,
     /// The 1px highlight inside the notice's top border (the inset part of `--panel-shadow`).
     highlight: Color,
+    /// `--blank`: what the magnified view shows where its frame reaches past the monitor.
+    blank: Color,
     /// The notice's shadow, which the opacities below are laid over.
     shadow: Color,
     /// The opacity of each layer of the notice's shadow, from the innermost to the outermost.
@@ -74,12 +78,14 @@ struct Palette {
 const DARK: Palette = Palette {
     panel: color(26, 27, 31, 0.94),
     ink: color(0xe9, 0xeb, 0xef, 1.0),
+    dim: color(0x9a, 0xa0, 0xaa, 1.0),
     border: color(255, 255, 255, 0.1),
     // oklch(0.8 0.13 200)
     accent: color(0x28, 0xd6, 0xdf, 1.0),
     // oklch(0.82 0.14 80)
     warn: color(0xf3, 0xb9, 0x4c, 1.0),
     highlight: color(255, 255, 255, 0.08),
+    blank: color(0x2a, 0x2c, 0x31, 1.0),
     shadow: color(0, 0, 0, 1.0),
     shadow_opacities: [
         0.064, 0.060, 0.059, 0.051, 0.040, 0.028, 0.018, 0.011, 0.006, 0.006,
@@ -89,12 +95,14 @@ const DARK: Palette = Palette {
 const LIGHT: Palette = Palette {
     panel: color(250, 249, 247, 0.96),
     ink: color(0x1d, 0x1c, 0x1a, 1.0),
+    dim: color(0x6b, 0x68, 0x62, 1.0),
     border: color(70, 60, 45, 0.16),
     // oklch(0.55 0.15 235)
     accent: color(0x00, 0x7c, 0xbb, 1.0),
     // oklch(0.58 0.15 60)
     warn: color(0xb8, 0x60, 0x00, 1.0),
     highlight: color(255, 255, 255, 1.0),
+    blank: color(0xd9, 0xd6, 0xd0, 1.0),
     shadow: color(70, 60, 45, 1.0),
     shadow_opacities: [
         0.034, 0.033, 0.033, 0.029, 0.023, 0.017, 0.011, 0.007, 0.004, 0.003,
@@ -108,10 +116,12 @@ pub struct Surfaces {
     /// Each use sets its opacity first, like the live label's ink: the text is in full ink, the bar and the logical
     /// part fainter.
     pub ink: ID2D1SolidColorBrush,
+    pub dim: ID2D1SolidColorBrush,
     pub border: ID2D1SolidColorBrush,
     pub accent: ID2D1SolidColorBrush,
     pub warn: ID2D1SolidColorBrush,
     pub highlight: ID2D1SolidColorBrush,
+    pub blank: ID2D1SolidColorBrush,
     /// Each layer of the notice's shadow sets its opacity first.
     pub shadow: ID2D1SolidColorBrush,
     pub shadow_opacities: [f32; SHADOW_LAYERS],
@@ -127,10 +137,12 @@ impl Surfaces {
         Ok(Surfaces {
             panel: brush(palette.panel)?,
             ink: brush(palette.ink)?,
+            dim: brush(palette.dim)?,
             border: brush(palette.border)?,
             accent: brush(palette.accent)?,
             warn: brush(palette.warn)?,
             highlight: brush(palette.highlight)?,
+            blank: brush(palette.blank)?,
             shadow: brush(palette.shadow)?,
             shadow_opacities: palette.shadow_opacities,
         })
