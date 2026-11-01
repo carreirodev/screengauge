@@ -1,8 +1,8 @@
 //! The tolerance indicator: "Tolerance", the tolerance as a number and a bar of ten segments on a small panel above and
 //! to the left of the cursor, which follows the cursor (the prototype's variant A, WPC-279), or below and to the left of
-//! it in Dimensions' horizontal mode, whose label it would otherwise cover (the owner's choice in WPC-309). Where it
-//! goes needs no Windows, so [`size`], [`place_for`] and [`lit_segments`] are tested without a monitor; the rest draws
-//! it onto the overlay's render target.
+//! it in Dimensions' horizontal mode and wherever above it would cover the live label (the owner's choices in WPC-309).
+//! Where it goes needs no Windows, so [`size`], [`place_for`] and [`lit_segments`] are tested without a monitor; the
+//! rest draws it onto the overlay's render target.
 //!
 //! The prototype's markup is `Tolerance <b>N</b> <span class="meter">...</span>` in a flex row with an 8px gap. The
 //! word, the number and the bar are separate flex items, so the spaces between them collapse and the room between them
@@ -21,7 +21,7 @@ use windows::Win32::Graphics::DirectWrite::{DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIG
 
 use super::floating;
 use super::geometry::{self, Size, scaled};
-use super::{Overlay, dot, px};
+use super::{Look, Overlay, dot, px};
 
 // Every size below is in logical pixels, which `scaled` turns into physical pixels for the monitor's scale.
 
@@ -114,29 +114,43 @@ pub fn place(at: Point, size: Size, monitor: RECT, dpi: u32) -> RECT {
     )
 }
 
-/// Where the panel goes with `live` measured on its monitor. Above the cursor, by [`place`], except when Dimensions
-/// measures along the cursor's row alone with its label above the line, where the panel would hide the number the
-/// wheel is changing: then it takes the line's other side, its top `REACH` below `at`, its right side as ever (the
-/// owner's choice in WPC-309). Where the monitor has no room for it there, it stays above.
+/// Where the panel goes with `live` measured on its monitor and its label at `label`, so the panel doesn't hide the
+/// number the wheel is changing (the owner's choices in WPC-309). Above the cursor, by [`place`], unless:
+///
+/// - Dimensions measures along the cursor's row alone with its label above the line: then the panel takes the line's
+///   other side, below the cursor, wherever the cursor is along the row;
+/// - the panel above would cover the label, as near a monitor's side, where the label mirrors: then it goes below.
+///
+/// Below, its top is `REACH` under `at` and its right side as ever. Where the monitor has no room for it there, or the
+/// label is there too, it stays above.
 pub fn place_for(
     at: Point,
     size: Size,
     live: Option<&Measurement>,
+    label: Option<RECT>,
     monitor: RECT,
     dpi: u32,
 ) -> RECT {
     let above = place(at, size, monitor, dpi);
     let top = at.y + scaled(REACH, dpi);
-    let room_below = top + size.height <= monitor.bottom - scaled(floating::MARGIN, dpi);
-    if live.is_some_and(|live| geometry::label_above_row(live, monitor, dpi)) && room_below {
-        RECT {
-            top,
-            bottom: top + size.height,
-            ..above
-        }
+    let below = RECT {
+        top,
+        bottom: top + size.height,
+        ..above
+    };
+    let covers = |panel: &RECT| label.is_some_and(|label| overlap(panel, &label));
+    let room_below = below.bottom <= monitor.bottom - scaled(floating::MARGIN, dpi);
+    let along_row = live.is_some_and(|live| geometry::label_above_row(live, monitor, dpi));
+    if room_below && (along_row || covers(&above)) && !covers(&below) {
+        below
     } else {
         above
     }
+}
+
+/// Whether the rectangles `a` and `b`, right and bottom one past their last pixels, share a pixel.
+fn overlap(a: &RECT, b: &RECT) -> bool {
+    a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
 }
 
 // The bar divides by the highest tolerance; should the calibration ever make it 0, this stops the build.
@@ -164,10 +178,16 @@ impl Overlay {
     ) -> windows::core::Result<()> {
         let word = self.typeset_plain(WORD, &self.word_format)?;
         let number = self.typeset(&tolerance.get().to_string(), &self.number_format)?;
+        // Where the live label is, laid out as `draw` lays it out.
+        let label = match live {
+            Some(live) => self.label(live, Look::Live)?.map(|placed| placed.pill),
+            None => None,
+        };
         let panel = place_for(
             at,
             size(word.width, number.width, self.dpi),
             live,
+            label,
             self.monitor,
             self.dpi,
         );
@@ -357,6 +377,64 @@ mod tests {
         }
     }
 
+    /// Where the live label of `live` goes, for a text 60 pixels wide.
+    fn label_of(live: &Measurement, dpi: u32) -> Option<RECT> {
+        geometry::place_label(live, geometry::pill_size(60, dpi), MONITOR, dpi)
+    }
+
+    #[test]
+    fn where_it_would_cover_a_label_mirrored_by_the_monitors_side_the_indicator_goes_below_the_cursor()
+     {
+        // Near the monitor's right side the vertical mode's label goes to the left of the line, centered on the span;
+        // with the cursor 40 below the span's middle, the panel above the cursor would cover it (owner's choice in
+        // WPC-309: the panel moves away from the label when there is room).
+        let at = point(3830, 640);
+        let live = along_column(500, 700, 3830);
+        let label = label_of(&live, 96);
+        let label_rect = label.expect("a span");
+        assert!(overlap(&place(at, PANEL, MONITOR, 96), &label_rect));
+        let placed = place_for(at, PANEL, Some(&live), label, MONITOR, 96);
+        assert_eq!((placed.top, placed.right), (640 + 14, 3830 - 14));
+        assert!(!overlap(&placed, &label_rect));
+    }
+
+    #[test]
+    fn in_the_horizontal_mode_the_indicator_stays_below_wherever_the_cursor_is_along_the_row() {
+        // A long span's label sits in the span's middle, far from a cursor near one end, where the panel above would
+        // cover nothing; it stays below all the same, so it doesn't jump from side to side as the cursor moves along.
+        let at = point(2990, 600);
+        let live = along_row(2000, 2999, 600);
+        let label = label_of(&live, 96);
+        assert!(!overlap(
+            &place(at, PANEL, MONITOR, 96),
+            &label.expect("a span")
+        ));
+        assert_eq!(
+            place_for(at, PANEL, Some(&live), label, MONITOR, 96).top,
+            600 + 14
+        );
+    }
+
+    #[test]
+    fn where_neither_side_is_free_of_the_label_the_indicator_stays_above_the_cursor() {
+        // In the Cross mode's bottom right corner the label mirrors above and to the left of the crossing, and there is
+        // no room below; 10 under the monitor's top the horizontal mode's label goes below the line, where the panel
+        // below would cover it too. Both keep the prototype's place.
+        let mut corner = along_row(3700, 3839, 1170);
+        corner.vertical = along_column(1100, 1179, 3830).vertical;
+        let top = along_row(2476, 2524, MONITOR.top + 10);
+        for (at, live) in [
+            (point(3830, 1170), corner),
+            (point(2500, MONITOR.top + 10), top),
+        ] {
+            assert_eq!(
+                place_for(at, PANEL, Some(&live), label_of(&live, 96), MONITOR, 96),
+                place(at, PANEL, MONITOR, 96),
+                "{live:?}"
+            );
+        }
+    }
+
     #[test]
     fn with_the_horizontal_modes_label_above_the_line_the_indicator_goes_below_the_cursor() {
         // The label sits above the row the cursor is on, where the panel would cover it, so the panel takes the line's
@@ -364,11 +442,11 @@ mod tests {
         let at = point(2500, 600);
         let live = along_row(2476, 2524, 600);
         assert_eq!(
-            place_for(at, PANEL, Some(&live), MONITOR, 96),
+            place_for(at, PANEL, Some(&live), label_of(&live, 96), MONITOR, 96),
             rect(2500 - 14 - 156, 600 + 14, 2500 - 14, 600 + 14 + 25)
         );
         let panel = size(48, 14, 144);
-        let placed = place_for(at, panel, Some(&live), MONITOR, 144);
+        let placed = place_for(at, panel, Some(&live), label_of(&live, 144), MONITOR, 144);
         assert_eq!((placed.right, placed.top), (2500 - 21, 600 + 21), "at 150%");
     }
 
@@ -380,7 +458,12 @@ mod tests {
         let mut cross = along_row(2476, 2524, 600);
         cross.vertical = column.vertical;
         for live in [None, Some(&column), Some(&cross)] {
-            assert_eq!(place_for(at, PANEL, live, MONITOR, 96), above, "{live:?}");
+            let label = live.and_then(|live| label_of(live, 96));
+            assert_eq!(
+                place_for(at, PANEL, live, label, MONITOR, 96),
+                above,
+                "{live:?}"
+            );
         }
     }
 
@@ -392,7 +475,7 @@ mod tests {
         let at = point(2500, MONITOR.top + 10);
         let live = along_row(2476, 2524, MONITOR.top + 10);
         assert_eq!(
-            place_for(at, PANEL, Some(&live), MONITOR, 96),
+            place_for(at, PANEL, Some(&live), label_of(&live, 96), MONITOR, 96),
             place(at, PANEL, MONITOR, 96)
         );
     }
@@ -402,14 +485,14 @@ mod tests {
         let at = point(2500, MONITOR.bottom - 30);
         let live = along_row(2476, 2524, MONITOR.bottom - 30);
         assert_eq!(
-            place_for(at, PANEL, Some(&live), MONITOR, 96),
+            place_for(at, PANEL, Some(&live), label_of(&live, 96), MONITOR, 96),
             place(at, PANEL, MONITOR, 96)
         );
         // With just room for it, 14 below the cursor and 2 above the monitor's bottom, it goes below.
         let at = point(2500, MONITOR.bottom - 2 - 25 - 14);
         let live = along_row(2476, 2524, at.y);
         assert_eq!(
-            place_for(at, PANEL, Some(&live), MONITOR, 96).top,
+            place_for(at, PANEL, Some(&live), label_of(&live, 96), MONITOR, 96).top,
             at.y + 14
         );
     }

@@ -39,7 +39,7 @@ How much a pixel's color may differ from the reference color and still count as 
 _Avoid_: threshold, sensitivity, pixel difference
 
 **Tolerance indicator**:
-The small panel to the left of the cursor, above it or below it so it never hides the measurement's number, that shows the tolerance while the mouse wheel changes it, and goes a second after the wheel stops.
+The small panel to the left of the cursor, above it, or below it where above it would hide the measurement's number, that shows the tolerance while the mouse wheel changes it, and goes a second after the wheel stops.
 _Avoid_: notice (a message that something was done, a different thing), tooltip, pill (the label of a measurement)
 
 **Edge**:

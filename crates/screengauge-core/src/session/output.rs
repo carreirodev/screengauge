@@ -30,9 +30,9 @@ pub struct Scene<'a> {
 
 /// What the mouse wheel has just made the tolerance (v1 spec WPC-296, Tolerance): "Tolerance N" and a bar of ten
 /// segments, as many of them lit as the tolerance's share of the highest one, on a small panel to the left of the
-/// cursor: above it, or below it where it would hide the label of Dimensions' horizontal mode (the owner's choice in
-/// WPC-309). It follows the cursor, and goes a second after the wheel stops. It is no notice: it says what a value is
-/// now, not that something was done.
+/// cursor: above it, or below it in Dimensions' horizontal mode and wherever above it would hide the measurement's
+/// label (the owner's choices in WPC-309). It follows the cursor, and goes a second after the wheel stops. It is no
+/// notice: it says what a value is now, not that something was done.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ToleranceIndicator {
     /// The tolerance now: the number Settings' − / + shows for the default tolerance.

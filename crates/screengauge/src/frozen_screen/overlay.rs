@@ -387,7 +387,8 @@ impl Overlay {
 
     /// Draws the tolerance indicator over the measurements and under any notice, inside the window's monitor, between
     /// BeginDraw and EndDraw: the palette's panel with its border and shadow, "Tolerance N" and the bar, to the left of
-    /// the cursor and above it, or below it when it would hide the label of `live`, what Dimensions measures here.
+    /// the cursor and above it, or below it in the horizontal mode or where above it would hide the label of `live`,
+    /// what Dimensions measures here.
     pub fn draw_tolerance(
         &self,
         target: &ID2D1RenderTarget,

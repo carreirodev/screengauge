@@ -606,7 +606,10 @@ fn in_the_horizontal_mode_the_indicator_goes_below_the_cursor_and_leaves_the_lab
                 found = Some((tolerance::size(word, number, dpi), label));
             });
             let (size, label_width) = found.expect("the indicator was drawn");
-            let panel = tolerance::place_for(CURSOR, size, Some(&live), bounds, dpi);
+            let label =
+                geometry::place_label(&live, geometry::pill_size(label_width, dpi), bounds, dpi)
+                    .expect("a span");
+            let panel = tolerance::place_for(CURSOR, size, Some(&live), Some(label), bounds, dpi);
             // Below the cursor, its top the reach of 14 under it, and its right side as ever.
             let reach = scaled(14, dpi);
             assert_eq!(
@@ -636,9 +639,6 @@ fn in_the_horizontal_mode_the_indicator_goes_below_the_cursor_and_leaves_the_lab
                 }
             }
             // And the label of the live measurement, above the line, is clear of the panel.
-            let label =
-                geometry::place_label(&live, geometry::pill_size(label_width, dpi), bounds, dpi)
-                    .expect("a span");
             assert!(
                 label.bottom <= CURSOR.y && panel.top > CURSOR.y,
                 "{mode:?} at {dpi}: label {label:?}, panel {panel:?}"
