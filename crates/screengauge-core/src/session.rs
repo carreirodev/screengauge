@@ -17,8 +17,8 @@ mod units;
 pub use event::{Event, Held, Input, Key, LocalTime, ToolbarButton};
 pub use frozen_screen::{Colors, Image, Photo, Point, Rect, Scale};
 pub use output::{
-    Cursor, DrawnRectangle, Effect, Label, Measurement, Message, Notice, Scene, Sign, Span,
-    ToleranceIndicator, Toolbar,
+    Coordinate, Cursor, DrawnRectangle, Effect, Label, MagnifiedView, Measurement, Message, Notice,
+    Scene, Sign, Span, ToleranceIndicator, Toolbar,
 };
 
 use std::fmt;
@@ -746,6 +746,8 @@ impl Session {
             live: self.live.as_ref(),
             drawn_rectangle: self.drawn_rectangle(),
             pinned: &self.pinned,
+            // Inspect's magnified view comes with WPC-315's core.
+            magnified_view: None,
             tolerance_indicator: self.tolerance_indicator(),
             notice: self.notice.as_ref().map(|timed| &timed.notice),
             toolbar: Toolbar {

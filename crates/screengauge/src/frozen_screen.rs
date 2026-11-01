@@ -20,8 +20,8 @@ use std::time::Duration;
 
 use screengauge_core::session::toolbar::Hit;
 use screengauge_core::session::{
-    Cursor, DrawnRectangle, Effect, Event, Input, Key, Measurement, Notice, Photo, Point, Rect,
-    Session, ToleranceIndicator, Toolbar,
+    Cursor, DrawnRectangle, Effect, Event, Input, Key, MagnifiedView, Measurement, Notice, Photo,
+    Point, Rect, Session, ToleranceIndicator, Toolbar,
 };
 use windows::Win32::Foundation::{
     D2DERR_RECREATE_TARGET, E_FAIL, ERROR_SUCCESS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT,
@@ -376,6 +376,7 @@ impl SharedSession {
                     live: scene.live.cloned(),
                     drawn_rectangle: scene.drawn_rectangle,
                     pinned: scene.pinned.to_vec(),
+                    magnified_view: scene.magnified_view,
                     tolerance_indicator: scene.tolerance_indicator,
                     notice: scene.notice.copied(),
                     toolbar: Some(scene.toolbar),
@@ -483,6 +484,7 @@ struct Shown {
     live: Option<Measurement>,
     drawn_rectangle: Option<DrawnRectangle>,
     pinned: Vec<Measurement>,
+    magnified_view: Option<MagnifiedView>,
     tolerance_indicator: Option<ToleranceIndicator>,
     notice: Option<Notice>,
     /// `None` only when the scene couldn't be read.
@@ -498,6 +500,7 @@ struct OnMonitor<'a> {
     pinned: Vec<&'a Measurement>,
     live: Option<&'a Measurement>,
     drawn_rectangle: Option<&'a DrawnRectangle>,
+    magnified_view: Option<&'a MagnifiedView>,
     tolerance_indicator: Option<&'a ToleranceIndicator>,
     notice: Option<&'a Notice>,
     toolbar: Option<&'a Toolbar>,
@@ -519,6 +522,10 @@ impl Shown {
                 .drawn_rectangle
                 .as_ref()
                 .filter(|drawn| drawn.monitor == monitor),
+            magnified_view: self
+                .magnified_view
+                .as_ref()
+                .filter(|view| view.monitor == monitor),
             tolerance_indicator: self
                 .tolerance_indicator
                 .as_ref()
@@ -542,11 +549,13 @@ impl Shown {
             .chain(&self.live)
             .map(|measurement| measurement.monitor)
             .chain(self.drawn_rectangle.iter().map(|drawn| drawn.monitor));
+        let magnified = self.magnified_view.iter().map(|view| view.monitor);
         let indicated = self
             .tolerance_indicator
             .iter()
             .map(|indicator| indicator.monitor);
         measured
+            .chain(magnified)
             .chain(indicated)
             .chain(self.notice.iter().map(|notice| notice.monitor))
             .chain(self.toolbar.iter().map(|toolbar| toolbar.monitor))
@@ -555,7 +564,8 @@ impl Shown {
 
 /// The monitors whose windows show something different from `before` to `after`, each once and in order: the one a
 /// measurement left, which must lose its line, the one it is on now, the one a measurement was pinned on or taken off,
-/// the one Bounds draws a rectangle on while it appears, changes or goes, the ones the tolerance indicator appeared on,
+/// the one Bounds draws a rectangle on while it appears, changes or goes, the ones Inspect's magnified view appeared on,
+/// changed on, followed the cursor between or went from, the ones the tolerance indicator appeared on,
 /// followed the cursor between or went from, the one a notice appeared on or went from, and the toolbar's when another
 /// of its buttons lights up or it moves.
 fn monitors_to_draw_again(before: &Shown, after: &Shown) -> Vec<usize> {
@@ -918,8 +928,8 @@ fn paint(hwnd: HWND, window: &Window) {
 }
 
 /// Draws the window's part of the scene: its monitor's photo, and over it the measurements pinned on this monitor, what
-/// Dimensions measures when that is on this monitor, and the toolbar, the tolerance indicator and the notice when they
-/// are here.
+/// Dimensions measures when that is on this monitor, and Inspect's magnified view, the toolbar, the tolerance indicator
+/// and the notice when they are here, in that order.
 fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
     // A copy, so the session is borrowed only for a moment.
     let shown = window.session.shown();
@@ -949,6 +959,13 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
     let measured = ready
         .overlay
         .draw(&ready.target, &here.pinned, here.live, here.drawn_rectangle);
+    // The magnified view enlarges the photo itself, never what is drawn over it.
+    let magnified = match here.magnified_view {
+        Some(view) => ready
+            .overlay
+            .draw_magnified_view(&ready.target, view, &ready.bitmap),
+        None => Ok(()),
+    };
     let toolbar = match here.toolbar {
         Some(toolbar) => ready.overlay.draw_toolbar(
             &ready.target,
@@ -969,6 +986,7 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
     };
     let overlaid = first_failure([
         ("frozen screen: drawing the measurements", measured),
+        ("frozen screen: drawing the magnified view", magnified),
         ("frozen screen: drawing the toolbar", toolbar),
         ("frozen screen: drawing the tolerance indicator", indicated),
         ("frozen screen: drawing the notice", noticed),
@@ -1196,6 +1214,76 @@ mod tests {
         };
         let after = live(on(0, "24"));
         assert_eq!(monitors_to_draw_again(&before, &after), [1]);
+    }
+
+    /// A magnified view on `monitor` around the pixel `(x, 100)`, with its tag showing when `tag`.
+    fn magnified_on(monitor: usize, x: i32, tag: bool) -> Shown {
+        let square = |left: i32, top: i32, side: u32| Rect {
+            left,
+            top,
+            width: side,
+            height: side,
+        };
+        let coordinate = |text: &str, line: Rect| screengauge_core::session::Coordinate {
+            label: Label {
+                physical: text.to_owned(),
+                logical: None,
+            },
+            line,
+        };
+        Shown {
+            magnified_view: Some(MagnifiedView {
+                monitor,
+                panel: square(x + 22, 122, 200),
+                frame: square(x + 29, 129, 168),
+                source: square(x - 10, 90, 21),
+                shown: square(x - 10, 90, 21),
+                center: Point { x, y: 100 },
+                magnification: screengauge_core::settings::Magnification::X8,
+                grid: true,
+                tag,
+                x: coordinate(&x.to_string(), square(x + 33, 304, 16)),
+                y: coordinate("100", square(x + 120, 304, 16)),
+            }),
+            ..Shown::default()
+        }
+    }
+
+    #[test]
+    fn a_magnified_view_that_appears_moves_or_goes_redraws_its_monitor() {
+        let nothing = Shown::default();
+        assert_eq!(
+            monitors_to_draw_again(&nothing, &magnified_on(1, 500, false)),
+            [1]
+        );
+        assert_eq!(
+            monitors_to_draw_again(&magnified_on(1, 500, false), &magnified_on(1, 501, false)),
+            [1]
+        );
+        assert_eq!(
+            monitors_to_draw_again(&magnified_on(1, 501, false), &nothing),
+            [1]
+        );
+        assert_eq!(
+            monitors_to_draw_again(&magnified_on(1, 501, false), &magnified_on(1, 501, false)),
+            Vec::<usize>::new()
+        );
+    }
+
+    #[test]
+    fn the_magnifications_tag_that_goes_redraws_the_views_monitor() {
+        assert_eq!(
+            monitors_to_draw_again(&magnified_on(0, 500, true), &magnified_on(0, 500, false)),
+            [0]
+        );
+    }
+
+    #[test]
+    fn a_magnified_view_that_follows_the_cursor_to_another_monitor_redraws_both() {
+        assert_eq!(
+            monitors_to_draw_again(&magnified_on(0, 500, false), &magnified_on(2, 500, false)),
+            [0, 2]
+        );
     }
 
     fn tolerance_on(monitor: usize, value: u8) -> ToleranceIndicator {

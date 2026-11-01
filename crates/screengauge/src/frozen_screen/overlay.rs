@@ -9,6 +9,7 @@ mod bounds;
 mod bounds_tests;
 mod floating;
 mod geometry;
+mod magnified_view;
 mod notice;
 mod palette;
 #[cfg(test)]

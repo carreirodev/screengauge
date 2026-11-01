@@ -4,10 +4,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use super::{Image, Photo, Point, Rect, ToolbarButton};
-use crate::settings::{DimensionsMode, Folder, Remembered, Tolerance, Tool};
+use crate::settings::{DimensionsMode, Folder, Magnification, Remembered, Tolerance, Tool};
 
 /// What the Windows layer draws while the tools are open.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Scene<'a> {
     /// Every monitor's photo, drawn pixel for pixel over its monitor, in the frozen screen's order. Nothing marks the
     /// screen as frozen.
@@ -25,6 +25,10 @@ pub struct Scene<'a> {
     /// monitor the cursor is on. Their labels are in the theme's colors, the live one's in cyan, so the one that still
     /// changes stands out (v1 spec WPC-296, Como as medidas aparecem).
     pub pinned: &'a [Measurement],
+    /// Inspect's magnified view, drawn over the measurements on its monitor and under the toolbar, as the prototype
+    /// stacks them (WPC-279). `None` while another tool is active, and while the cursor hasn't been off the toolbar since
+    /// the tools opened.
+    pub magnified_view: Option<MagnifiedView>,
     /// The tolerance indicator, drawn over the measurements on the cursor's monitor and under the notice. `None` once
     /// the mouse wheel hasn't changed the tolerance for a second.
     pub tolerance_indicator: Option<ToleranceIndicator>,
@@ -82,6 +86,54 @@ pub struct ToleranceIndicator {
     pub at: Point,
     /// The monitor the cursor is on, as an index in the frozen screen's order.
     pub monitor: usize,
+}
+
+/// Inspect's magnified view (v1 spec WPC-296, Inspect; the prototype's variant A, WPC-279): a panel a little below and
+/// to the right of the cursor, or on the other side of it near the monitor's limits, never leaving the current monitor.
+/// It holds a square of the frozen screen's pixels around the cursor, each enlarged to a square of the magnification's
+/// side without smoothing, and under it a strip with the cursor's position. Every rectangle is in physical pixels of
+/// the virtual screen, worked out in the session core from sizes in logical pixels, so nothing in it depends on a font.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MagnifiedView {
+    /// The current monitor, as an index in the frozen screen's order. Everything below is inside it.
+    pub monitor: usize,
+    /// The panel, its border included: the palette's floating panel, with corners of 14 logical pixels.
+    pub panel: Rect,
+    /// Where the enlarged pixels go, inside the panel: a square `source.width` times the magnification a side, its
+    /// corners rounded by 9 logical pixels.
+    pub frame: Rect,
+    /// The frozen screen's pixels the frame stands for: an odd number of them a side, so the pixel under the cursor is
+    /// the exact middle one. Near the current monitor's limit part of it is past that limit: the frame is plain and
+    /// empty there, in the palette's blank color, with no grid and no pixel of the monitor beside it.
+    pub source: Rect,
+    /// The part of `source` on the current monitor, which is what the frame draws, each pixel enlarged to a square of
+    /// the magnification's side. Never empty: the pixel under the cursor is on it.
+    pub shown: Rect,
+    /// The pixel under the cursor, in the middle of `source`, outlined in black and then white in the frame.
+    pub center: Point,
+    pub magnification: Magnification,
+    /// Whether a 1-pixel grid parts the enlarged pixels: from 8× up. It covers `shown` alone.
+    pub grid: bool,
+    /// Whether the magnification shows, as `8×`, in the frame's top left corner: for a second after the mouse wheel
+    /// turns, even when it turned past a limit and changed nothing (the owner's choice in WPC-315).
+    pub tag: bool,
+    /// The cursor's position on the strip under the frame: how far it is from the current monitor's left side.
+    pub x: Coordinate,
+    /// How far it is from the current monitor's top.
+    pub y: Coordinate,
+}
+
+/// One of the cursor's coordinates on the magnified view's strip: `X` or `Y`, the physical pixels, and, after a thin
+/// bar and fainter, the logical pixels, by the rule of Units (v1 spec WPC-296, Inspect).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Coordinate {
+    /// Counted from the current monitor's left side (X) or top (Y), so it is never below zero, whichever monitor it
+    /// is: the monitor's first column is 0.
+    pub label: Label,
+    /// Where its text goes on the strip: the line's height, starting at the text's left. X and Y share a line, side by
+    /// side, when the label has no logical part, and take one line each, X above Y, when it has (the owner's choice in
+    /// WPC-315: both side by side don't fit the strip).
+    pub line: Rect,
 }
 
 /// A short message ScreenGauge draws on screen itself (v1 spec WPC-296, Como as medidas aparecem): small, with an ok or
