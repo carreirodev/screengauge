@@ -243,6 +243,8 @@ fn the_last_tool_used_is_kept_and_the_next_call_starts_with_it() {
             monitor: 0,
             active: Tool::Snip,
             mode: None,
+            minimized: false,
+            hovered: None,
         }
     );
     assert_eq!(next.scene().live, None);
@@ -286,18 +288,12 @@ fn a_toolbar_button_clicked_as_the_second_click_of_the_calling_double_click_does
 }
 
 #[test]
-fn the_gear_minimize_and_restore_do_nothing_yet() {
+fn the_gear_does_nothing_yet() {
     let mut session = open(Tool::Dimensions, DimensionsMode::Horizontal, BETWEEN_CARDS);
     session.handle(event(BETWEEN_CARDS, 1000, Input::Press));
     let before = format!("{:?}", session.scene());
-    for button in [
-        ToolbarButton::Settings,
-        ToolbarButton::Minimize,
-        ToolbarButton::Restore,
-    ] {
-        assert_eq!(session.handle(press(button)), [], "{button:?}");
-        assert_eq!(format!("{:?}", session.scene()), before, "{button:?}");
-    }
+    assert_eq!(session.handle(press(ToolbarButton::Settings)), []);
+    assert_eq!(format!("{:?}", session.scene()), before);
 }
 
 fn pin_count(session: &Session) -> usize {
@@ -391,6 +387,8 @@ fn the_toolbar_opens_on_the_cursors_monitor_with_the_last_tool_lit() {
             monitor: 1,
             active: Tool::Dimensions,
             mode: Some(DimensionsMode::Vertical),
+            minimized: false,
+            hovered: None,
         }
     );
     let session = open(Tool::Bounds, DimensionsMode::Vertical, BETWEEN_CARDS);
@@ -400,6 +398,8 @@ fn the_toolbar_opens_on_the_cursors_monitor_with_the_last_tool_lit() {
             monitor: 0,
             active: Tool::Bounds,
             mode: None,
+            minimized: false,
+            hovered: None,
         }
     );
 }
@@ -418,6 +418,8 @@ fn the_toolbar_stays_on_its_monitor_while_the_tool_measures_on_the_other() {
             monitor: 1,
             active: Tool::Inspect,
             mode: None,
+            minimized: false,
+            hovered: None,
         }
     );
 }

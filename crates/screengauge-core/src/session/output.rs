@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use super::{Image, Photo, Point};
+use super::{Image, Photo, Point, ToolbarButton};
 use crate::settings::{DimensionsMode, Folder, Remembered, Tolerance, Tool};
 
 /// What the Windows layer draws while the tools are open.
@@ -12,7 +12,8 @@ pub struct Scene<'a> {
     /// Every monitor's photo, drawn pixel for pixel over its monitor, in the frozen screen's order. Nothing marks the
     /// screen as frozen.
     pub frozen_screen: &'a [Photo],
-    /// The cursor over the frozen screen.
+    /// The cursor over the frozen screen: the normal arrow on the toolbar, and a thin cross everywhere else (v1 spec
+    /// WPC-296, Toolbar).
     pub cursor: Cursor,
     /// What Dimensions measures around the cursor right now, drawn over the photo of its monitor, over the pinned
     /// measurements. `None` while no tool measures.
@@ -32,8 +33,9 @@ pub struct Scene<'a> {
 }
 
 /// The toolbar (v1 spec WPC-296, Toolbar): the tools' buttons with the active tool's lit, then H, V and C in a room kept
-/// for them, then the gear, minimize and close. It sits at the top center of its monitor; dragging it elsewhere is
-/// WPC-312's.
+/// for them, then the gear, minimize and close; or, minimized, one small cyan button with the active tool's icon and a
+/// small arrow, in the same place. It sits at the top center of its monitor, where
+/// [`toolbar::layout`](super::toolbar::layout) puts it; dragging it elsewhere is WPC-312's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Toolbar {
     /// The monitor it is on, as an index in the frozen screen's order: the current monitor as the tools opened. It stays
@@ -44,6 +46,11 @@ pub struct Toolbar {
     /// Dimensions' mode, whose button is lit, while Dimensions is the active tool. `None` with any other tool: then H, V
     /// and C don't show, and their room stays empty so no other button moves.
     pub mode: Option<DimensionsMode>,
+    /// Whether it is minimized to its small button. Every call opens it whole.
+    pub minimized: bool,
+    /// The button the cursor is on, which reacts to it as the prototype's buttons do to hovering. `None` with the cursor
+    /// off every button.
+    pub hovered: Option<ToolbarButton>,
 }
 
 /// What the mouse wheel has just made the tolerance (v1 spec WPC-296, Tolerance): "Tolerance N" and a bar of ten
@@ -107,8 +114,10 @@ pub enum Sign {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cursor {
-    /// Windows' thin cross.
+    /// Windows' thin cross, everywhere but on the toolbar.
     Cross,
+    /// Windows' normal arrow, on the toolbar, where the tool pauses.
+    Arrow,
 }
 
 /// A Dimensions measurement: the span around the cursor along its row, its column or both (Cross), on one monitor.

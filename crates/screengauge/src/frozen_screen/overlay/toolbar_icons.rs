@@ -146,7 +146,16 @@ const CLOSE: Icon = Icon {
     shapes: &[Shape::Path("M6 6l12 12M18 6L6 18")],
 };
 
-/// The icon on `button`, or `None` for the button the minimized toolbar becomes, which this toolbar does not draw.
+/// The small arrow in the corner of the minimized toolbar's button (`#tbMini .chev`): a chevron pointing right, toward
+/// where the toolbar opens.
+pub const OPEN: Icon = Icon {
+    size: 10,
+    stroke: 3.0,
+    shapes: &[Shape::Path("M9 6l6 6-6 6")],
+};
+
+/// The icon on `button`, or `None` for the button the minimized toolbar becomes, which shows the active tool's icon
+/// with [`OPEN`] in its corner.
 pub fn icon_for(button: &ToolbarButton) -> Option<&'static Icon> {
     Some(match button {
         ToolbarButton::Tool(Tool::Dimensions) => &DIMENSIONS,
@@ -166,8 +175,8 @@ pub fn icon_for(button: &ToolbarButton) -> Option<&'static Icon> {
 #[cfg(test)]
 mod tests {
     use super::super::svg_path::{self, Segment};
-    use super::super::toolbar::BUTTONS;
     use super::*;
+    use screengauge_core::session::toolbar::BUTTONS;
 
     #[test]
     fn every_button_but_the_minimized_ones_has_an_icon_at_the_prototypes_size() {
@@ -190,6 +199,14 @@ mod tests {
             assert_eq!((icon.size, icon.stroke), (size, stroke), "{button:?}");
         }
         assert_eq!(icon_for(&ToolbarButton::Restore), None);
+        // `#tbMini`'s chevron: `sv(10, '<path d="M9 6l6 6-6 6"></path>', 3)`.
+        assert_eq!((OPEN.size, OPEN.stroke), (10, 3.0));
+        let figures = match OPEN.shapes {
+            [Shape::Path(d)] => svg_path::parse(d).expect("the chevron parses"),
+            other => panic!("one path, not {other:?}"),
+        };
+        assert_eq!(figures.len(), 1);
+        assert_eq!(figures[0].segments.len(), 2);
     }
 
     #[test]

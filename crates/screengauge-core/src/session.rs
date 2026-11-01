@@ -9,6 +9,7 @@ mod dimensions;
 mod event;
 mod frozen_screen;
 mod output;
+pub mod toolbar;
 mod units;
 
 pub use event::{Event, Held, Input, Key, LocalTime, ToolbarButton};
@@ -82,6 +83,10 @@ pub struct Session {
     frozen_screen: Vec<Photo>,
     /// Where the cursor is, as far as the session knows: the last event's place, or where the arrow keys put it.
     cursor: Point,
+    /// Where the tool measures: the cursor's place, or, while the cursor is on the toolbar and the tool pauses, the last
+    /// place it had off the toolbar, so the measurement stays as it was (the owner's choice in WPC-311). `None` while
+    /// the cursor hasn't been off the toolbar since the tools opened.
+    measured_at: Option<Point>,
     /// The tolerance Dimensions, Bounds and Snip share: the default tolerance from Settings, until the mouse wheel
     /// changes it. It lasts until the tools close and is never kept.
     tolerance: Tolerance,
@@ -105,6 +110,10 @@ pub struct Session {
     second_click_until: Option<Duration>,
     /// The monitor the toolbar is on: the current monitor as the tools opened, for as long as they are open.
     toolbar_monitor: usize,
+    /// Where the toolbar's parts are on that monitor.
+    toolbar_layout: toolbar::Layout,
+    /// Whether the toolbar is minimized to its small button. Every call opens it whole, so it is never kept.
+    toolbar_minimized: bool,
     /// Set by the effect that closes the tools, after which events do nothing.
     closed: bool,
 }
@@ -140,9 +149,14 @@ impl Session {
         }
         // The cursor is always on a monitor; should it not be, the toolbar goes on the first one.
         let toolbar_monitor = frozen_screen::monitor_at(&frozen_screen, cursor).unwrap_or(0);
+        let toolbar_layout = frozen_screen
+            .get(toolbar_monitor)
+            .map(|photo| toolbar::layout(photo.rect, photo.scale))
+            .ok_or(Refused::NoMonitor)?;
         let mut session = Session {
             frozen_screen,
             cursor,
+            measured_at: None,
             tolerance: options.default_tolerance,
             also_show_logical_pixels: options.also_show_logical_pixels,
             remembered_at_opening: remembered.clone(),
@@ -154,6 +168,8 @@ impl Session {
             wheel_turned: 0,
             second_click_until,
             toolbar_monitor,
+            toolbar_layout,
+            toolbar_minimized: false,
             closed: false,
         };
         session.measure();
@@ -206,6 +222,8 @@ impl Session {
             Input::KeyDown(Key::Digit4) => self.switch_tool(Tool::Snip),
             Input::Toolbar(ToolbarButton::Tool(tool)) => self.switch_tool(tool),
             Input::Toolbar(ToolbarButton::Mode(mode)) => self.switch_mode(mode),
+            Input::Toolbar(ToolbarButton::Minimize) => self.minimize(true),
+            Input::Toolbar(ToolbarButton::Restore) => self.minimize(false),
             Input::KeyDown(Key::H) => self.switch_mode(DimensionsMode::Horizontal),
             Input::KeyDown(Key::V) => self.switch_mode(DimensionsMode::Vertical),
             Input::KeyDown(Key::C) => self.switch_mode(DimensionsMode::Cross),
@@ -218,6 +236,9 @@ impl Session {
                 self.measure();
                 Vec::new()
             }
+            // A press on the toolbar is the toolbar's, never the tool's, which pauses there: the Windows layer makes it
+            // the click of a button.
+            Input::Press if self.toolbar_hit(event.cursor).is_some() => Vec::new(),
             Input::Press => self.pin(event.held, event.uptime),
             Input::KeyDown(Key::Backspace | Key::Delete) => self.unpin(),
             Input::Wheel(delta) => self.turn_wheel(delta, event.uptime),
@@ -287,9 +308,10 @@ impl Session {
     /// and measures again at once (v1 spec WPC-296, Tolerance). A precision touchpad turns it a part of a notch at a
     /// time, so the parts add up until they make a notch, and turning the other way starts counting again. Any turn
     /// shows the tolerance indicator, which goes a second after the wheel stops. Dimensions, Bounds and Snip share the
-    /// tolerance; with Inspect active, which uses none, the wheel leaves it alone.
+    /// tolerance; with Inspect active, which uses none, the wheel leaves it alone. On the toolbar, where the tool pauses,
+    /// the wheel does nothing (the owner's choice in WPC-311).
     fn turn_wheel(&mut self, delta: i32, uptime: Duration) -> Vec<Effect> {
-        if self.remembered.last_tool == Tool::Inspect {
+        if self.remembered.last_tool == Tool::Inspect || self.toolbar_hit(self.cursor).is_some() {
             return Vec::new();
         }
         if self.wheel_turned.signum() == -delta.signum() {
@@ -359,6 +381,26 @@ impl Session {
         Vec::new()
     }
 
+    /// Shrinks the toolbar to its small button in the same place, or brings it back whole (v1 spec WPC-296, Toolbar). The
+    /// tool goes on measuring: where the rest of the toolbar was is the tool's again, so with the cursor left there it
+    /// measures at once, and the toolbar coming back over the cursor pauses it.
+    fn minimize(&mut self, minimized: bool) -> Vec<Effect> {
+        self.toolbar_minimized = minimized;
+        self.measure();
+        Vec::new()
+    }
+
+    /// What `at`, in physical pixels of the virtual screen, is on in the toolbar as it is now: `None` off it. Minimized,
+    /// the toolbar is its small button alone; whole, H, V and C count only while they show. The Windows layer asks this
+    /// which button a click is on, and the tool pauses wherever it isn't `None`.
+    pub fn toolbar_hit(&self, at: Point) -> Option<toolbar::Hit> {
+        if self.toolbar_minimized {
+            self.toolbar_layout.hit_minimized(at)
+        } else {
+            self.toolbar_layout.hit(at, self.dimensions_is_active())
+        }
+    }
+
     /// Moves the cursor one pixel the arrow's way, or ten with Shift, and measures there (v1 spec WPC-296, Dimensions).
     /// The step goes on from where the session last put the cursor, never from the event's place: a key held down
     /// repeats, and a repeat may carry the cursor's place from before Windows carried out the last move. A step that
@@ -395,19 +437,27 @@ impl Session {
         self.remembered.last_tool == Tool::Dimensions
     }
 
-    /// Measures again around the cursor. Only Dimensions measures yet: the other tools come with their own tickets.
+    /// Measures again around the cursor, or, with the cursor on the toolbar, where the tool paused: there it measures as
+    /// before, so a mode switched from the toolbar shows at once where the user was measuring (v1 spec WPC-296, Toolbar;
+    /// the owner's choice in WPC-311). The photo has no toolbar and no pinned measurement in it, so the tool measures
+    /// through both. Only Dimensions measures yet: the other tools come with their own tickets.
     fn measure(&mut self) {
+        if self.toolbar_hit(self.cursor).is_none() {
+            self.measured_at = Some(self.cursor);
+        }
         if !self.dimensions_is_active() {
             self.live = None;
             return;
         }
-        self.live = dimensions::measure(
-            &self.frozen_screen,
-            self.cursor,
-            self.remembered.dimensions_mode,
-            self.tolerance,
-            self.also_show_logical_pixels,
-        );
+        self.live = self.measured_at.and_then(|at| {
+            dimensions::measure(
+                &self.frozen_screen,
+                at,
+                self.remembered.dimensions_mode,
+                self.tolerance,
+                self.also_show_logical_pixels,
+            )
+        });
     }
 
     /// Closes the tools, erasing every pinned measurement, the notice and the tolerance indicator, and has the remembered
@@ -439,9 +489,13 @@ impl Session {
 
     /// What to draw now.
     pub fn scene(&self) -> Scene<'_> {
+        let on_toolbar = self.toolbar_hit(self.cursor);
         Scene {
             frozen_screen: &self.frozen_screen,
-            cursor: Cursor::Cross,
+            cursor: match on_toolbar {
+                Some(_) => Cursor::Arrow,
+                None => Cursor::Cross,
+            },
             live: self.live.as_ref(),
             pinned: &self.pinned,
             tolerance_indicator: self.tolerance_indicator(),
@@ -452,6 +506,11 @@ impl Session {
                 mode: self
                     .dimensions_is_active()
                     .then_some(self.remembered.dimensions_mode),
+                minimized: self.toolbar_minimized,
+                hovered: match on_toolbar {
+                    Some(toolbar::Hit::Button(button)) => Some(button),
+                    Some(toolbar::Hit::Background) | None => None,
+                },
             },
         }
     }

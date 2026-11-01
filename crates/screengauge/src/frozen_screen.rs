@@ -4,9 +4,10 @@
 //! front, or the monitors changed. Over its monitor's photo, each window draws the measurements pinned there, what
 //! Dimensions measures right now when the cursor is there, the toolbar, and the tolerance indicator and the notice when
 //! they are there, and is drawn again whenever one of them changes. A click on the toolbar goes to the core as that
-//! button's, never as a press of the tool. The first window also keeps the timer that wakes the session when the
-//! indicator or the notice is due to go. The windows share the session; destroying them when the tools close, by dropping
-//! [`FrozenScreen`], drops the session and erases the photos with it.
+//! button's, never as a press of the tool; the core says where the toolbar is, and which of its buttons a point is on.
+//! The first window also keeps the timer that wakes the session when the indicator or the notice is due to go. The
+//! windows share the session; destroying them when the tools close, by dropping [`FrozenScreen`], drops the session and
+//! erases the photos with it.
 
 mod overlay;
 
@@ -16,6 +17,7 @@ use std::ffi::c_void;
 use std::rc::Rc;
 use std::time::Duration;
 
+use screengauge_core::session::toolbar::Hit;
 use screengauge_core::session::{
     Cursor, Effect, Event, Input, Measurement, Notice, Photo, Point, Rect, Session,
     ToleranceIndicator, Toolbar,
@@ -44,12 +46,12 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos,
-    GetWindowLongPtrW, HTCLIENT, IDC_CROSS, KillTimer, LoadCursorW, PostMessageW, RegisterClassExW,
-    SW_SHOWNA, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, ShowWindow,
-    USER_TIMER_MAXIMUM, USER_TIMER_MINIMUM, WM_APP, WM_CAPTURECHANGED, WM_CLOSE, WM_DISPLAYCHANGE,
-    WM_ERASEBKGND, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-    WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER,
-    WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    GetWindowLongPtrW, HTCLIENT, IDC_ARROW, IDC_CROSS, KillTimer, LoadCursorW, PostMessageW,
+    RegisterClassExW, SW_SHOWNA, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
+    ShowWindow, USER_TIMER_MAXIMUM, USER_TIMER_MINIMUM, WM_APP, WM_CAPTURECHANGED, WM_CLOSE,
+    WM_DISPLAYCHANGE, WM_ERASEBKGND, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SYSKEYDOWN,
+    WM_SYSKEYUP, WM_TIMER, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{Error, PCWSTR, w};
 
@@ -57,7 +59,6 @@ use crate::theme::Mode;
 use crate::win32::{low_word, struct_size};
 use crate::{event, foreground, log};
 use overlay::Overlay;
-use overlay::toolbar::{self, Hit};
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.FrozenScreen");
 
@@ -294,8 +295,10 @@ impl Drop for FrozenScreen {
 }
 
 impl SharedSession {
-    /// Hands `event` to the session core, and draws again the windows whose part of the scene it changed. Here rather
-    /// than in `input`, so an event that comes from the resident window redraws too.
+    /// Hands `event` to the session core, draws again the windows whose part of the scene it changed, and shows the
+    /// cursor the scene names when that changed. Here rather than in `input`, so an event that comes from the resident
+    /// window redraws too. Windows asks for the cursor's shape before it reports the move that brought the cursor onto
+    /// the toolbar or off it, so the shape is set again here, once the core knows where the cursor is.
     fn handle(&self, event: Event) -> Vec<Effect> {
         let before = self.shown();
         let effects = match self.core.try_borrow_mut() {
@@ -312,6 +315,9 @@ impl SharedSession {
         let after = self.shown();
         // Moving along the same row often measures the same span, and then nothing is drawn again.
         self.redraw(&monitors_to_draw_again(&before, &after));
+        if before.cursor != after.cursor {
+            self.show_cursor();
+        }
         effects
     }
 
@@ -326,6 +332,7 @@ impl SharedSession {
                     tolerance_indicator: scene.tolerance_indicator,
                     notice: scene.notice.copied(),
                     toolbar: Some(scene.toolbar),
+                    cursor: Some(scene.cursor),
                 }
             }
             // Can't happen: this is read outside the moment the core handles an event.
@@ -353,43 +360,21 @@ impl SharedSession {
                 );
                 continue;
             };
-            // SAFETY: our own window. WM_ERASEBKGND is handled, so nothing is erased first.
-            if !unsafe { InvalidateRect(Some(window), None, false) }.as_bool() {
-                log::failure(
-                    "frozen screen: drawing a measurement",
-                    &"InvalidateRect returned FALSE",
-                );
-            }
+            redraw(window);
         }
     }
 
-    /// What `at`, a point over the window of `monitor`, is on in the toolbar: `None` when the toolbar isn't on that
-    /// monitor or the point is off it. H, V and C count only while they show.
-    fn toolbar_hit(&self, monitor: usize, at: Point) -> Option<Hit> {
-        let Ok(session) = self.core.try_borrow() else {
+    /// What `at` is on in the toolbar as it is now, as the core says: `None` off it. Minimized, the toolbar is its small
+    /// button alone; whole, H, V and C count only while they show.
+    fn toolbar_hit(&self, at: Point) -> Option<Hit> {
+        match self.core.try_borrow() {
+            Ok(session) => session.toolbar_hit(at),
             // Can't happen: this is read outside the moment the core handles an event.
-            log::failure(
-                "frozen screen",
-                &"the toolbar was asked for while an event was handled",
-            );
-            return None;
-        };
-        let scene = session.scene();
-        if scene.toolbar.monitor != monitor {
-            return None;
-        }
-        let Some(photo) = scene.frozen_screen.get(monitor) else {
-            // Can't happen: the toolbar is on a monitor of the frozen screen.
-            log::failure(
-                "frozen screen",
-                &"the toolbar is on a monitor with no photo",
-            );
-            return None;
-        };
-        match toolbar::on_monitor(photo.rect, photo.scale) {
-            Ok(layout) => layout.hit(at, scene.toolbar.mode.is_some()),
-            Err(e) => {
-                log::failure("frozen screen: placing the toolbar", &e);
+            Err(_) => {
+                log::failure(
+                    "frozen screen",
+                    &"the toolbar was asked for while an event was handled",
+                );
                 None
             }
         }
@@ -432,6 +417,7 @@ impl SharedSession {
         };
         let name = match session.scene().cursor {
             Cursor::Cross => IDC_CROSS,
+            Cursor::Arrow => IDC_ARROW,
         };
         // SAFETY: loads a shared system cursor, which is never freed.
         match unsafe { LoadCursorW(None, name) } {
@@ -453,6 +439,8 @@ struct Shown {
     notice: Option<Notice>,
     /// `None` only when the scene couldn't be read.
     toolbar: Option<Toolbar>,
+    /// The cursor the scene names, which no window draws: Windows shows it. `None` only when the scene couldn't be read.
+    cursor: Option<Cursor>,
 }
 
 /// One window's part of what is shown: what is on its monitor.
@@ -523,6 +511,17 @@ fn monitors_to_draw_again(before: &Shown, after: &Shown) -> Vec<usize> {
         .collect()
 }
 
+/// Marks `window` for drawing.
+fn redraw(window: HWND) {
+    // SAFETY: our own window. WM_ERASEBKGND is handled, so nothing is erased first.
+    if !unsafe { InvalidateRect(Some(window), None, false) }.as_bool() {
+        log::failure(
+            "frozen screen: drawing a window again",
+            &"InvalidateRect returned FALSE",
+        );
+    }
+}
+
 /// The first of `results` that failed, with every later failure logged under its name.
 fn first_failure<const N: usize>(
     results: [(&str, windows::core::Result<()>); N],
@@ -559,7 +558,8 @@ struct Window {
     /// Made at the first draw, and again when Direct2D says the graphics device was lost.
     drawing: RefCell<Option<Drawing>>,
     /// What on the toolbar the left button went down on, while it is held: the window has the mouse until it comes up,
-    /// and a button acts only when it comes up on the same button (WPC-310).
+    /// and a button acts only when it comes up on the same button (WPC-310). The button looks pressed meanwhile while the
+    /// cursor is on it (WPC-311).
     pressed: Cell<Option<Hit>>,
 }
 
@@ -660,15 +660,14 @@ extern "system" fn window_proc(
             WM_MOUSEMOVE => deliver(Input::Move),
             // A press anywhere on the toolbar is the toolbar's: it never reaches the tool, which would pin and copy what
             // lies under the toolbar. The window keeps the mouse until the button comes up, wherever that is.
-            WM_LBUTTONDOWN => match window
-                .session
-                .toolbar_hit(window.monitor, event::message_cursor())
-            {
+            WM_LBUTTONDOWN => match window.session.toolbar_hit(event::message_cursor()) {
                 Some(hit) => {
                     window.pressed.set(Some(hit));
                     // SAFETY: our own window, on its thread, with the left button down. It returns the window that had
                     // the mouse before, which needs nothing.
                     let _ = unsafe { SetCapture(hwnd) };
+                    // The button under the cursor looks pressed.
+                    redraw(hwnd);
                     Some(LRESULT(0))
                 }
                 None => deliver(Input::Press),
@@ -683,9 +682,9 @@ extern "system" fn window_proc(
                     if let Err(e) = unsafe { ReleaseCapture() } {
                         log::failure("frozen screen: giving back the mouse", &e);
                     }
-                    let released = window
-                        .session
-                        .toolbar_hit(window.monitor, event::message_cursor());
+                    let released = window.session.toolbar_hit(event::message_cursor());
+                    // The button no longer looks pressed, whatever the click does.
+                    redraw(hwnd);
                     match pressed {
                         Hit::Button(button) if released == Some(pressed) => {
                             deliver(Input::Toolbar(button))
@@ -697,7 +696,9 @@ extern "system" fn window_proc(
             },
             // Another window took the mouse while a toolbar button was held, so its release will never come here.
             WM_CAPTURECHANGED => {
-                window.pressed.set(None);
+                if window.pressed.take().is_some() {
+                    redraw(hwnd);
+                }
                 Some(LRESULT(0))
             }
             WM_MOUSEWHEEL => deliver(Input::Wheel(event::wheel(wparam))),
@@ -839,7 +840,9 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
     // failure is returned once the frame is finished, and any later one is logged.
     let measured = ready.overlay.draw(&ready.target, &here.pinned, here.live);
     let toolbar = match here.toolbar {
-        Some(toolbar) => ready.overlay.draw_toolbar(&ready.target, toolbar),
+        Some(toolbar) => ready
+            .overlay
+            .draw_toolbar(&ready.target, toolbar, window.pressed.get()),
         None => Ok(()),
     };
     let indicated = match here.tolerance_indicator {
@@ -966,7 +969,7 @@ impl Window {
 mod tests {
     use super::*;
 
-    use screengauge_core::session::{Label, Message};
+    use screengauge_core::session::{Label, Message, ToolbarButton};
     use screengauge_core::settings::{DimensionsMode, Tolerance, Tool};
 
     /// A measurement on `monitor` whose label reads `text`, so two of them on one monitor differ.
@@ -1094,6 +1097,8 @@ mod tests {
                 monitor,
                 active,
                 mode,
+                minimized: false,
+                hovered: None,
             }),
             ..Shown::default()
         }
@@ -1110,6 +1115,37 @@ mod tests {
             monitors_to_draw_again(&dimensions, &dimensions),
             Vec::<usize>::new()
         );
+    }
+
+    /// `shown` with its toolbar changed by `change`.
+    fn with_toolbar(shown: &Shown, change: impl FnOnce(&mut Toolbar)) -> Shown {
+        let mut changed = shown.clone();
+        if let Some(toolbar) = changed.toolbar.as_mut() {
+            change(toolbar);
+        }
+        changed
+    }
+
+    #[test]
+    fn the_cursor_onto_another_button_or_minimizing_redraws_the_toolbars_monitor_and_the_cursor_alone_nothing()
+     {
+        let rest = toolbar_on(1, Tool::Dimensions, None);
+        let on_close = with_toolbar(&rest, |toolbar| {
+            toolbar.hovered = Some(ToolbarButton::Close);
+        });
+        let on_gear = with_toolbar(&rest, |toolbar| {
+            toolbar.hovered = Some(ToolbarButton::Settings);
+        });
+        let small = with_toolbar(&rest, |toolbar| toolbar.minimized = true);
+        assert_eq!(monitors_to_draw_again(&rest, &on_close), [1]);
+        assert_eq!(monitors_to_draw_again(&on_close, &on_gear), [1]);
+        assert_eq!(monitors_to_draw_again(&rest, &small), [1]);
+        // The cursor's shape is Windows' to show: it changing alone draws nothing again.
+        let arrow = Shown {
+            cursor: Some(Cursor::Arrow),
+            ..rest.clone()
+        };
+        assert_eq!(monitors_to_draw_again(&rest, &arrow), Vec::<usize>::new());
     }
 
     #[test]

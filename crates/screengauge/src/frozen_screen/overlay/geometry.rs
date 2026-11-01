@@ -2,7 +2,7 @@
 //! Nothing here calls Windows, so the pixel counts the owner checks by eye are tested without a monitor: [`parts`]
 //! gives the line, its ticks and their outline, and [`place_label`] gives the label's place.
 
-use screengauge_core::session::{Measurement, Rect, Span};
+use screengauge_core::session::{Measurement, Rect, Span, toolbar};
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::core::Error;
 
@@ -34,10 +34,11 @@ const BAR_DROP: u32 = 1;
 pub const RING: u32 = 1;
 const STRIP: u32 = 3;
 
-/// `logical` pixels on a monitor of `dpi` (96 is 100%), in whole physical pixels, halves up.
+/// `logical` pixels on a monitor of `dpi` (96 is 100%), in whole physical pixels, halves up: the session core's
+/// [`toolbar::scaled`], as a coordinate.
 pub fn scaled(logical: u32, dpi: u32) -> i32 {
-    // The saturated product divided by 96 is at most 44 million, so the sign never flips.
-    (logical.saturating_mul(dpi).saturating_add(48) / 96).cast_signed()
+    // The core saturates the product, and divided by 96 it is at most 44 million, so the sign never flips.
+    toolbar::scaled(logical, dpi).cast_signed()
 }
 
 /// A monitor's rectangle, with its right and bottom sides one past its last pixel, as Windows has it.
@@ -445,22 +446,6 @@ mod tests {
 
     fn overlap(a: &RECT, b: &RECT) -> bool {
         a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
-    }
-
-    #[test]
-    fn scaled_rounds_halves_up_at_each_scale() {
-        // 100%, 125%, 150%, 175%, 200%
-        assert_eq!(
-            [96, 120, 144, 168, 192].map(|dpi| scaled(4, dpi)),
-            [4, 5, 6, 7, 8]
-        );
-        assert_eq!(
-            [96, 120, 168].map(|dpi| scaled(22, dpi)),
-            [22, 28, 39],
-            "27.5 and 38.5 round up"
-        );
-        assert_eq!(scaled(5, 120), 6, "6.25");
-        assert_eq!(scaled(5, 168), 9, "8.75");
     }
 
     #[test]

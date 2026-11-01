@@ -9,9 +9,10 @@ use super::geometry::{self, scaled};
 use super::palette::d2d_color;
 use super::panel_tests::{MODES, over};
 use super::tests::{BACKGROUND, Canvas, Picture, SCALES, near};
-use super::toolbar::{Layout, layout};
+use super::toolbar::Layout;
 use super::*;
 use super::{toolbar_paint, toolbar_palette};
+use screengauge_core::session::toolbar::Hit;
 use screengauge_core::session::{Point, Toolbar, ToolbarButton};
 
 /// A window wide enough for the toolbar at 175% and tall enough for its shadow, over a monitor left of and below the main
@@ -45,7 +46,12 @@ struct Tokens {
     ink: [u8; 3],
     ink_on: [u8; 3],
     small_ink: [u8; 3],
+    /// `--sbtn-ink-hover`.
+    small_ink_hover: [u8; 3],
 }
+
+/// `.sbtn.close:hover`'s background, in both palettes: oklch(0.75 0.17 25), then oklch(0.5 0.17 25) from 85% down.
+const CLOSE_RED: Stops = &[(0.0, [0xff, 0x7d, 0x76]), (0.85, [0xb0, 0x2a, 0x2d])];
 
 fn tokens(mode: Mode) -> Tokens {
     match mode {
@@ -69,6 +75,7 @@ fn tokens(mode: Mode) -> Tokens {
             ink: [0xc3, 0xc7, 0xcf],
             ink_on: [0x06, 0x14, 0x1a],
             small_ink: [0xae, 0xb3, 0xbd],
+            small_ink_hover: [0xff, 0xff, 0xff],
         },
         Mode::Light => Tokens {
             button: &[
@@ -90,6 +97,7 @@ fn tokens(mode: Mode) -> Tokens {
             ink: [0x4b, 0x48, 0x43],
             ink_on: [0xff, 0xff, 0xff],
             small_ink: [0x5b, 0x58, 0x52],
+            small_ink_hover: [0x11, 0x11, 0x11],
         },
     }
 }
@@ -154,7 +162,14 @@ fn scene(active: Tool, mode: Option<DimensionsMode>) -> Toolbar {
         monitor: 0,
         active,
         mode,
+        minimized: false,
+        hovered: None,
     }
+}
+
+/// Where the core puts the toolbar on the tests' monitor at `dpi`.
+fn toolbar_layout(dpi: u32) -> Layout {
+    Layout::of(TOOLBAR_MONITOR, Scale::from_dpi(dpi).expect("a scale")).expect("the monitor")
 }
 
 /// `toolbar` drawn over `BACKGROUND` in the palette of `mode` for a window of `dpi`.
@@ -168,11 +183,13 @@ fn draw_over(canvas: &Canvas, mode: Mode, dpi: u32, toolbar: &Toolbar, photo: [u
     let picture = canvas.render_in(mode, TOOLBAR_MONITOR, dpi, |overlay, target| {
         // SAFETY: a drawing call between BeginDraw and EndDraw on a live target.
         unsafe { target.Clear(Some(&photo)) };
-        overlay.draw_toolbar(target, toolbar).expect("the toolbar");
+        overlay
+            .draw_toolbar(target, toolbar, None)
+            .expect("the toolbar");
     });
     Drawn {
         picture,
-        layout: layout(bounds(), dpi),
+        layout: toolbar_layout(dpi),
         dpi,
     }
 }
@@ -771,13 +788,26 @@ fn clear_to_photo(target: &ID2D1RenderTarget) {
 /// The scenes drawn in order, each over a cleared target as in a window's frames, with the pixels of the last and how many
 /// times the toolbar was drawn on its bitmap after each.
 fn frames(canvas: &Canvas, mode: Mode, dpi: u32, scenes: &[Toolbar]) -> (Picture, Vec<u32>) {
+    let held: Vec<_> = scenes.iter().map(|toolbar| (*toolbar, None)).collect();
+    frames_held(canvas, mode, dpi, &held)
+}
+
+/// As `frames`, each scene with what the left button is held down on.
+fn frames_held(
+    canvas: &Canvas,
+    mode: Mode,
+    dpi: u32,
+    scenes: &[(Toolbar, Option<Hit>)],
+) -> (Picture, Vec<u32>) {
     let mut fills = Vec::new();
     let picture = canvas.render_in(mode, TOOLBAR_MONITOR, dpi, |overlay, target| {
-        for (frame, toolbar) in scenes.iter().enumerate() {
+        for (frame, (toolbar, held)) in scenes.iter().enumerate() {
             if frame > 0 {
                 clear_to_photo(target);
             }
-            overlay.draw_toolbar(target, toolbar).expect("the toolbar");
+            overlay
+                .draw_toolbar(target, toolbar, *held)
+                .expect("the toolbar");
             fills.push(overlay.toolbar_cache.borrow().fills);
         }
     });
@@ -843,18 +873,18 @@ fn the_cached_toolbar_is_where_and_what_it_is_when_every_layer_is_drawn_straight
         for dpi in SCALES {
             let cached = draw(&canvas, mode, dpi, &toolbar);
             let direct = canvas.render_in(mode, TOOLBAR_MONITOR, dpi, |overlay, target| {
-                let layout = layout(bounds(), dpi);
+                let layout = toolbar_layout(dpi);
                 let corner = Point {
                     x: TOOLBAR_MONITOR.left,
                     y: TOOLBAR_MONITOR.top,
                 };
                 overlay
-                    .paint_toolbar(target, &layout, &toolbar, corner)
+                    .paint_toolbar(target, &layout, &toolbar, None, corner)
                     .expect("the toolbar");
             });
             // How far apart the two are at their worst, and on average over the toolbar's own rectangle.
             let (mut most, mut total, mut count) = (0, 0u64, 0u64);
-            let toolbar_area = layout(bounds(), dpi).toolbar;
+            let toolbar_area = toolbar_layout(dpi).toolbar;
             for y in toolbar_area.top..toolbar_area.bottom {
                 for x in toolbar_area.left..toolbar_area.right {
                     let (a, b) = (at(&cached.picture, x, y), at(&direct, x, y));
@@ -894,7 +924,7 @@ fn the_bitmap_has_room_for_the_shadows_and_not_much_more() {
     for mode in MODES {
         let (sides, above, below) = shadow_reach(mode);
         for dpi in SCALES {
-            let place = layout(bounds(), dpi);
+            let place = toolbar_layout(dpi);
             let margins = toolbar_paint::reach(toolbar_palette::palette(mode), &place, dpi);
             // The prototype's reach is three deviations out; the layers stop where they add under half a level, a few
             // pixels short of that, so each side is within ten (scaled) pixels under it and, with the groups' own
@@ -933,7 +963,7 @@ fn toolbar_draw_times() {
     for mode in MODES {
         for dpi in [96, 168] {
             let scale = Scale::from_dpi(dpi).expect("a scale");
-            let place = layout(bounds(), dpi);
+            let place = toolbar_layout(dpi);
             let corner = Point {
                 x: TOOLBAR_MONITOR.left,
                 y: TOOLBAR_MONITOR.top,
@@ -960,13 +990,15 @@ fn toolbar_draw_times() {
                 let show = |toolbar: &Toolbar| {
                     let toolbar = *toolbar;
                     move |overlay: &Overlay, target: &ID2D1RenderTarget| {
-                        overlay.draw_toolbar(target, &toolbar).expect("the toolbar");
+                        overlay
+                            .draw_toolbar(target, &toolbar, None)
+                            .expect("the toolbar");
                     }
                 };
                 frame(0, &|_, _| {});
                 frame(1, &|overlay, target| {
                     overlay
-                        .paint_toolbar(target, &place, &one, corner)
+                        .paint_toolbar(target, &place, &one, None, corner)
                         .expect("the toolbar");
                 });
                 frame(2, &show(&one));
@@ -1067,7 +1099,7 @@ fn the_toolbar_draws_on_a_windows_own_render_target_which_ignores_alpha() {
                 scene(Tool::Snip, None),
             ] {
                 overlay
-                    .draw_toolbar(&target, &toolbar)
+                    .draw_toolbar(&target, &toolbar, None)
                     .expect("the toolbar");
             }
             // SAFETY: ends the BeginDraw above.
@@ -1276,6 +1308,398 @@ fn each_icons_strokes_are_where_its_svg_draws_them() {
                             );
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+// The toolbar reacting to the mouse, and minimized (WPC-311).
+
+/// `toolbar` with the cursor on `button`.
+fn hovering(toolbar: Toolbar, button: ToolbarButton) -> Toolbar {
+    Toolbar {
+        hovered: Some(button),
+        ..toolbar
+    }
+}
+
+/// `toolbar` minimized.
+fn minimized(toolbar: Toolbar) -> Toolbar {
+    Toolbar {
+        minimized: true,
+        ..toolbar
+    }
+}
+
+/// `toolbar` drawn over `BACKGROUND` with the left button held down on `held`.
+fn draw_held(canvas: &Canvas, mode: Mode, dpi: u32, toolbar: &Toolbar, held: Option<Hit>) -> Drawn {
+    let picture = canvas.render_in(mode, TOOLBAR_MONITOR, dpi, |overlay, target| {
+        overlay
+            .draw_toolbar(target, toolbar, held)
+            .expect("the toolbar");
+    });
+    Drawn {
+        picture,
+        layout: toolbar_layout(dpi),
+        dpi,
+    }
+}
+
+/// Where the prototype puts the icon of `css_size` covering `extent` of its view box, centered in `place`, at `dpi`.
+fn icon_box(place: &RECT, css_size: u32, extent: [f64; 4], dpi: u32) -> [f64; 4] {
+    let side = f64::from(scaled(css_size, dpi));
+    let unit = side / 24.0;
+    let left = f64::from(place.left) + (f64::from(place.right - place.left) - side) / 2.0;
+    let top = f64::from(place.top) + (f64::from(place.bottom - place.top) - side) / 2.0;
+    [
+        left + extent[0] * unit,
+        top + extent[1] * unit,
+        left + extent[2] * unit,
+        top + extent[3] * unit,
+    ]
+}
+
+/// The icon of `button` (one of `ICONS`) in `drawn`, in `place`, over `stops` in `ink`: inked, in that ink alone, and where
+/// the prototype puts it, within a pixel and a half.
+fn assert_icon(
+    drawn: &Drawn,
+    button: ToolbarButton,
+    place: &RECT,
+    stops: Stops,
+    ink: [u8; 3],
+    context: &str,
+) {
+    let (_, css_size, extent) = ICONS
+        .into_iter()
+        .find(|(each, _, _)| *each == button)
+        .expect("an icon of the table");
+    let wanted = icon_box(place, css_size, extent, drawn.dpi);
+    let inked = ink_in(drawn, place, stops, ink, wanted);
+    assert!(
+        inked.most >= 0.6 && inked.inky >= 8,
+        "the inkiest pixel is {:.2} ink and {} are over half: {context}",
+        inked.most,
+        inked.inky
+    );
+    assert!(
+        inked.off_the_line <= 12.0,
+        "the inkiest pixel is {:.1} off the ink-background line: {context}",
+        inked.off_the_line
+    );
+    let [left, top, right, bottom] = inked.found;
+    for (got, want) in [
+        (left, wanted[0]),
+        (top, wanted[1]),
+        (right, wanted[2]),
+        (bottom, wanted[3]),
+    ] {
+        assert!(
+            (f64::from(got) - want).abs() <= 1.5,
+            "the icon is at {:?}, the prototype puts it at {wanted:.2?}: {context}",
+            inked.found
+        );
+    }
+}
+
+#[test]
+fn a_tools_button_rises_two_pixels_with_the_cursor_on_it() {
+    let canvas = canvas();
+    let toolbar = scene(Tool::Dimensions, None);
+    for mode in MODES {
+        for dpi in SCALES {
+            let rest = draw(&canvas, mode, dpi, &toolbar);
+            let lift = scaled(2, dpi);
+            let radius = scaled(13, dpi);
+            // The lit button and a plain one.
+            for button in [
+                ToolbarButton::Tool(Tool::Dimensions),
+                ToolbarButton::Tool(Tool::Bounds),
+            ] {
+                let hovered = draw(&canvas, mode, dpi, &hovering(toolbar, button));
+                let place = rest.place(button);
+                // The whole button, clear of its rounded corners, is where it was, two (scaled) pixels higher: its
+                // gradient runs down it, so a button that rose by another amount, or not at all, is a different color.
+                for y in place.top + 1..place.bottom - 1 {
+                    for x in place.left + radius..place.right - radius {
+                        assert!(
+                            near(hovered.at(x, y - lift), rest.at(x, y), 1),
+                            "{button:?} at ({x}, {y}) is {:?} risen and {:?} at rest: {mode:?} at {dpi} DPI",
+                            hovered.at(x, y - lift),
+                            rest.at(x, y)
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_held_tools_button_shrinks_and_sinks_where_it_is_and_only_while_the_cursor_is_on_it() {
+    let canvas = canvas();
+    let button = ToolbarButton::Tool(Tool::Inspect);
+    let toolbar = scene(Tool::Snip, None);
+    let held = Some(Hit::Button(button));
+    for mode in MODES {
+        for dpi in [96, 168] {
+            let rest = draw(&canvas, mode, dpi, &toolbar);
+            let hovered = draw(&canvas, mode, dpi, &hovering(toolbar, button));
+            let pressed = draw_held(&canvas, mode, dpi, &hovering(toolbar, button), held);
+            let context = format!("{mode:?} at {dpi} DPI");
+            assert!(
+                pressed.picture.pixels != hovered.picture.pixels,
+                "{context}"
+            );
+            // What changed is the button and its shadow, nothing around them.
+            let place = rest.place(button);
+            let reach = scaled(16, dpi);
+            let mut on_the_button = 0;
+            let window = bounds();
+            for y in window.top..window.bottom {
+                for x in window.left..window.right {
+                    if near(pressed.at(x, y), rest.at(x, y), 1) {
+                        continue;
+                    }
+                    let near_it = x >= place.left - reach
+                        && x < place.right + reach
+                        && y >= place.top - reach
+                        && y < place.bottom + reach;
+                    assert!(
+                        near_it,
+                        "({x}, {y}) changed, away from {place:?}: {context}"
+                    );
+                    on_the_button += 1;
+                }
+            }
+            assert!(on_the_button > 0, "nothing changed: {context}");
+            // Held but moved off it, it looks at rest, as a Windows button does.
+            let off = draw_held(&canvas, mode, dpi, &toolbar, held);
+            assert!(off.picture.pixels == rest.picture.pixels, "{context}");
+        }
+    }
+}
+
+#[test]
+fn with_the_cursor_on_them_the_gear_and_minimize_brighten_and_close_turns_red() {
+    let canvas = canvas();
+    let toolbar = scene(Tool::Bounds, None);
+    for mode in MODES {
+        let t = tokens(mode);
+        for dpi in SCALES {
+            for button in [ToolbarButton::Settings, ToolbarButton::Minimize] {
+                let drawn = draw(&canvas, mode, dpi, &hovering(toolbar, button));
+                let place = drawn.place(button);
+                let context = format!("{button:?}: {mode:?} at {dpi} DPI");
+                // Its own gradient, the brighter ink on it.
+                let (x, y) = sample_point(&place, dpi);
+                assert!(
+                    near(drawn.at(x, y), gradient_at(t.small, down(&place, y)), 4),
+                    "{context}"
+                );
+                assert_icon(&drawn, button, &place, t.small, t.small_ink_hover, &context);
+            }
+            let drawn = draw(&canvas, mode, dpi, &hovering(toolbar, ToolbarButton::Close));
+            let place = drawn.place(ToolbarButton::Close);
+            let context = format!("Close: {mode:?} at {dpi} DPI");
+            let (x, y) = sample_point(&place, dpi);
+            let red = gradient_at(CLOSE_RED, down(&place, y));
+            assert!(
+                near(drawn.at(x, y), red, 4),
+                "{:?}, wanted {red:?}: {context}",
+                drawn.at(x, y)
+            );
+            assert_icon(
+                &drawn,
+                ToolbarButton::Close,
+                &place,
+                CLOSE_RED,
+                [255, 255, 255],
+                &context,
+            );
+        }
+    }
+}
+
+#[test]
+fn h_v_and_c_do_not_react_to_the_cursor() {
+    let canvas = canvas();
+    let toolbar = scene(Tool::Dimensions, Some(DimensionsMode::Cross));
+    for mode in MODES {
+        let rest = draw(&canvas, mode, 120, &toolbar);
+        for each in [
+            DimensionsMode::Horizontal,
+            DimensionsMode::Vertical,
+            DimensionsMode::Cross,
+        ] {
+            let button = ToolbarButton::Mode(each);
+            let hovered = draw(&canvas, mode, 120, &hovering(toolbar, button));
+            let held = draw_held(
+                &canvas,
+                mode,
+                120,
+                &hovering(toolbar, button),
+                Some(Hit::Button(button)),
+            );
+            assert!(
+                hovered.picture.pixels == rest.picture.pixels,
+                "{each:?}: {mode:?}"
+            );
+            assert!(
+                held.picture.pixels == rest.picture.pixels,
+                "{each:?}: {mode:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_minimized_toolbar_is_its_lit_button_alone_with_the_tools_icon_and_a_small_arrow() {
+    let canvas = canvas();
+    for mode in MODES {
+        let t = tokens(mode);
+        for dpi in SCALES {
+            for active in [Tool::Inspect, Tool::Snip] {
+                let toolbar = minimized(scene(active, None));
+                let drawn = draw(&canvas, mode, dpi, &toolbar);
+                let place = drawn.layout.minimized;
+                let context = format!("{active:?}: {mode:?} at {dpi} DPI");
+                assert_eq!(
+                    (place.left, place.top, place.right - place.left),
+                    (
+                        drawn.layout.toolbar.left,
+                        drawn.layout.toolbar.top,
+                        scaled(52, dpi)
+                    ),
+                    "{context}"
+                );
+                // Cyan, with the active tool's icon in the lit ink in its middle.
+                let (x, y) = sample_point(&place, dpi);
+                assert!(
+                    near(drawn.at(x, y), gradient_at(t.lit, down(&place, y)), 4),
+                    "{context}"
+                );
+                assert_icon(
+                    &drawn,
+                    ToolbarButton::Tool(active),
+                    &place,
+                    t.lit,
+                    t.ink_on,
+                    &context,
+                );
+                // The arrow's box, 14 pixels 3 in from the right and bottom sides: the cyan darkened, a white arrow in it.
+                let side = scaled(14, dpi);
+                let inset = scaled(3, dpi);
+                let (right, bottom) = (place.right - inset, place.bottom - inset);
+                let (left, top) = (right - side, bottom - side);
+                let y = top + side / 2;
+                let shaded = blend([0, 0, 0], 0.35, gradient_at(t.lit, down(&place, y)));
+                assert!(
+                    near(drawn.at(left + scaled(2, dpi), y), shaded, 6),
+                    "{:?} in the arrow's box, wanted {shaded:?}: {context}",
+                    drawn.at(left + scaled(2, dpi), y)
+                );
+                let whitest = (top..bottom)
+                    .flat_map(|y| (left..right).map(move |x| (x, y)))
+                    .map(|(x, y)| drawn.at(x, y).into_iter().min().unwrap_or(0))
+                    .max()
+                    .unwrap_or(0);
+                assert!(
+                    whitest >= 200,
+                    "the whitest pixel of the arrow's box is {whitest}: {context}"
+                );
+                // And nothing else of the toolbar: where Snip and close were is the photo.
+                for gone in [ToolbarButton::Tool(Tool::Snip), ToolbarButton::Close] {
+                    let was = drawn.place(gone);
+                    let (x, y) = ((was.left + was.right) / 2, (was.top + was.bottom) / 2);
+                    assert!(
+                        near(drawn.at(x, y), BACKGROUND, 1),
+                        "{gone:?} at ({x}, {y}): {context}"
+                    );
+                }
+                // The cursor on it changes nothing.
+                let hovered = draw(
+                    &canvas,
+                    mode,
+                    dpi,
+                    &hovering(toolbar, ToolbarButton::Restore),
+                );
+                assert!(hovered.picture.pixels == drawn.picture.pixels, "{context}");
+            }
+        }
+    }
+}
+
+#[test]
+fn hovering_holding_or_minimizing_draws_the_bitmap_again_and_back_draws_the_first_pixels() {
+    let canvas = canvas();
+    let rest = scene(Tool::Dimensions, Some(DimensionsMode::Cross));
+    let gear = hovering(rest, ToolbarButton::Settings);
+    let held = Some(Hit::Button(ToolbarButton::Settings));
+    for mode in MODES {
+        let fresh = draw(&canvas, mode, 144, &rest);
+        let (picture, fills) = frames_held(
+            &canvas,
+            mode,
+            144,
+            &[
+                (rest, None),
+                (gear, None),
+                (gear, None),
+                (gear, held),
+                (minimized(rest), None),
+                (rest, None),
+            ],
+        );
+        assert_eq!(fills, [1, 2, 2, 3, 4, 5], "{mode:?}");
+        assert!(picture.pixels == fresh.picture.pixels, "{mode:?}");
+    }
+}
+
+#[test]
+fn the_bitmap_cuts_off_no_shadow_of_a_button_risen_held_red_or_minimized() {
+    let canvas = canvas();
+    let lit = scene(Tool::Dimensions, Some(DimensionsMode::Horizontal));
+    let dimensions = ToolbarButton::Tool(Tool::Dimensions);
+    let scenes = [
+        (hovering(lit, dimensions), None),
+        (hovering(lit, dimensions), Some(Hit::Button(dimensions))),
+        (hovering(lit, ToolbarButton::Close), None),
+        (
+            hovering(lit, ToolbarButton::Close),
+            Some(Hit::Button(ToolbarButton::Close)),
+        ),
+        (minimized(lit), None),
+    ];
+    for mode in MODES {
+        for dpi in SCALES {
+            let layout = toolbar_layout(dpi);
+            let margins = toolbar_paint::reach(toolbar_palette::palette(mode), &layout, dpi);
+            let bitmap = RECT {
+                left: layout.toolbar.left - margins.left,
+                top: layout.toolbar.top - margins.top,
+                right: layout.toolbar.right + margins.right,
+                bottom: layout.toolbar.bottom + margins.bottom,
+            };
+            let window = bounds();
+            for (toolbar, held) in &scenes {
+                let drawn = draw_held(&canvas, mode, dpi, toolbar, *held);
+                // The bitmap's outermost pixels that are in the window: every shadow has faded out before them, or the
+                // bitmap would show a hard edge there.
+                let rows = (bitmap.top.max(window.top)..bitmap.bottom)
+                    .flat_map(|y| [(bitmap.left, y), (bitmap.right - 1, y)]);
+                let bottom = (bitmap.left..bitmap.right).map(|x| (x, bitmap.bottom - 1));
+                let top = (bitmap.top >= window.top)
+                    .then_some(bitmap.left..bitmap.right)
+                    .into_iter()
+                    .flatten()
+                    .map(|x| (x, bitmap.top));
+                for (x, y) in rows.chain(bottom).chain(top) {
+                    assert!(
+                        near(drawn.at(x, y), BACKGROUND, 3),
+                        "({x}, {y}) on the bitmap's edge is {:?}: {toolbar:?} held {held:?}, {mode:?} at {dpi} DPI",
+                        drawn.at(x, y)
+                    );
                 }
             }
         }

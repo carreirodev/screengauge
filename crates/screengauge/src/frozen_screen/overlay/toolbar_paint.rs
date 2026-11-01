@@ -7,10 +7,17 @@
 //! before the next, so one group's shadow falls over the edge of the one before it, as in a browser. An outer shadow is
 //! never painted inside its own box: where the box is see-through, as the groups' panels are, it is cut out.
 //!
+//! The buttons react to the mouse as the prototype's do (WPC-311): a tool's button rises on `:hover` and sinks and
+//! shrinks on `:active`; the gear's and minimize's icon brightens on `:hover`, the close button turns red, and the three
+//! shrink on `:active`; H, V and C don't react. The minimized toolbar is `#tbMini`: a lit button with the active tool's
+//! icon and a small arrow in its corner.
+//!
 //! Left out on purpose: `backdrop-filter: blur(14px)` of the panels, which the owner agreed to do without, and the
-//! reactions to the mouse hovering and pressing (WPC-311).
+//! 0.12 s the prototype takes to move and shrink a button, which here happens at once.
 
+use screengauge_core::session::toolbar::Hit;
 use screengauge_core::session::{Point, Toolbar, ToolbarButton};
+use screengauge_core::settings::Tool;
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D_SIZE_F, D2D1_FIGURE_BEGIN_HOLLOW, D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN,
@@ -29,9 +36,11 @@ use super::geometry::scaled;
 use super::palette::{Color, color, d2d_color, solid_brush};
 use super::shadow::{self, Profile};
 use super::svg_path::{self, Figure, Pt, Segment};
-use super::toolbar::{ButtonKind, Layout, RING, is_lit, kind};
+use super::toolbar::{ButtonKind, Layout, RING, Reaction, is_lit, kind, reaction};
 use super::toolbar_icons::{self, Icon, Shape, VIEW_BOX};
-use super::toolbar_palette::{self, Palette, Shadow, Stop, Surface};
+use super::toolbar_palette::{
+    self, CLOSE_HOVER, CLOSE_INK_HOVER, OPEN_BOX, OPEN_INK, Palette, Shadow, Stop, Surface,
+};
 use super::{Overlay, dot, in_surface, px, ring, rounded_at};
 
 // Every size below is in logical pixels, which `scaled` turns into physical pixels for the monitor's scale.
@@ -40,6 +49,18 @@ use super::{Overlay, dot, in_surface, px, ring, rounded_at};
 const GROUP_RADIUS: u32 = 20;
 const TOOL_RADIUS: u32 = 13;
 const SMALL_RADIUS: u32 = 10;
+/// The minimized toolbar's button (`#tbMini`), and the box of the small arrow in its corner (`.chev`): its side, its
+/// corners, and how far it is from the button's right and bottom sides.
+const MINIMIZED_RADIUS: u32 = 15;
+const OPEN_SIDE: u32 = 14;
+const OPEN_RADIUS: u32 = 5;
+const OPEN_INSET: u32 = 3;
+/// How far a tool's button rises with the cursor on it (`.tbtn:hover`), and sinks while held down (`.tbtn:active`),
+/// and how much a held tool's and small button shrink (`.tbtn:active` and `.sbtn:active`).
+const LIFT: i32 = 2;
+const SINK: i32 = 1;
+const TOOL_PRESSED: f32 = 0.95;
+const SMALL_PRESSED: f32 = 0.92;
 
 /// How a kind of button is painted: its surface, and the radius of its corners.
 fn style(palette: &Palette, kind: ButtonKind) -> (&Surface, u32) {
@@ -47,6 +68,34 @@ fn style(palette: &Palette, kind: ButtonKind) -> (&Surface, u32) {
         ButtonKind::Tool => (&palette.button, TOOL_RADIUS),
         ButtonKind::Mode => (&palette.button, SMALL_RADIUS),
         ButtonKind::Control => (&palette.small, SMALL_RADIUS),
+        ButtonKind::Minimized => (&palette.lit, MINIMIZED_RADIUS),
+    }
+}
+
+/// How a button reacting to the mouse is moved and shrunk, as its CSS `transform`: `scale` around its middle, then
+/// `down` logical pixels down (up when below zero).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Moved {
+    scale: f32,
+    down: i32,
+}
+
+/// How a button of `kind` reacting as `reaction` is moved, or `None` when it stays where it is.
+fn moved(kind: ButtonKind, reaction: Reaction) -> Option<Moved> {
+    match (kind, reaction) {
+        (ButtonKind::Tool, Reaction::Hovered) => Some(Moved {
+            scale: 1.0,
+            down: -LIFT,
+        }),
+        (ButtonKind::Tool, Reaction::Pressed) => Some(Moved {
+            scale: TOOL_PRESSED,
+            down: SINK,
+        }),
+        (ButtonKind::Control, Reaction::Pressed) => Some(Moved {
+            scale: SMALL_PRESSED,
+            down: 0,
+        }),
+        _ => None,
     }
 }
 
@@ -98,8 +147,8 @@ pub(super) struct Margins {
     pub bottom: i32,
 }
 
-/// The reach of every outer shadow of every box of the toolbar at `layout`, whichever buttons are lit and whether or
-/// not H, V and C show, so one bitmap holds them all.
+/// The reach of every outer shadow of every box of the toolbar at `layout`, whichever buttons are lit, hovered or held
+/// down, whether or not H, V and C show, and of the minimized toolbar's button, so one bitmap holds them all.
 pub(super) fn reach(palette: &Palette, layout: &Layout, dpi: u32) -> Margins {
     let mut margins = Margins::default();
     let toolbar = layout.toolbar;
@@ -126,8 +175,21 @@ pub(super) fn reach(palette: &Palette, layout: &Layout, dpi: u32) -> Margins {
     }
     for (button, place) in &layout.buttons {
         let (surface, _) = style(palette, kind(*button));
-        take(&[surface, &palette.lit], place);
+        take(&[surface, &palette.lit, &CLOSE_HOVER], place);
+        // A tool's button risen with the cursor on it casts its shadows from higher up. Held down, it shrinks, and sinks
+        // by less than it shrinks, so its shadows stay inside those it casts at rest.
+        if kind(*button) == ButtonKind::Tool {
+            let lift = signed(LIFT, dpi);
+            let risen = RECT {
+                top: place.top - lift,
+                bottom: place.bottom - lift,
+                ..*place
+            };
+            take(&[surface, &palette.lit], &risen);
+        }
     }
+    let (minimized, _) = style(palette, ButtonKind::Minimized);
+    take(&[minimized], &layout.minimized);
     margins
 }
 
@@ -158,13 +220,15 @@ impl Placement {
 
 impl Overlay {
     /// Paints `toolbar` at `layout` onto `target`, whose pixel (0, 0) is the virtual screen's `origin`: for each group
-    /// its panel and then its buttons, the ones the scene lights lit. H, V and C are left out while `toolbar.mode` is
-    /// `None`: their room stays as it was. Between BeginDraw and EndDraw.
+    /// its panel and then its buttons, the ones the scene lights lit and the one under the cursor reacting to it, with
+    /// `held` what the left button is held down on. H, V and C are left out while `toolbar.mode` is `None`: their room
+    /// stays as it was. Minimized, it is the minimized toolbar's button alone. Between BeginDraw and EndDraw.
     pub(super) fn paint_toolbar(
         &self,
         target: &ID2D1RenderTarget,
         layout: &Layout,
         toolbar: &Toolbar,
+        held: Option<Hit>,
         origin: Point,
     ) -> windows::core::Result<()> {
         let painter = Painter {
@@ -177,11 +241,14 @@ impl Overlay {
         // SAFETY: a drawing call on a live render target. Out of BeginDraw and EndDraw, Direct2D only fails the frame
         // at EndDraw. The corners need antialiasing, which the target may have been left without.
         unsafe { target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };
-        painter.group(layout, &layout.tools, toolbar, ButtonKind::Tool)?;
-        if toolbar.mode.is_some() {
-            painter.group(layout, &layout.modes, toolbar, ButtonKind::Mode)?;
+        if toolbar.minimized {
+            return painter.minimized(&layout.minimized, toolbar.active);
         }
-        painter.group(layout, &layout.controls, toolbar, ButtonKind::Control)
+        painter.group(layout, &layout.tools, toolbar, held, ButtonKind::Tool)?;
+        if toolbar.mode.is_some() {
+            painter.group(layout, &layout.modes, toolbar, held, ButtonKind::Mode)?;
+        }
+        painter.group(layout, &layout.controls, toolbar, held, ButtonKind::Control)
     }
 }
 
@@ -229,6 +296,7 @@ impl Painter<'_> {
         layout: &Layout,
         group: &RECT,
         toolbar: &Toolbar,
+        held: Option<Hit>,
         members: ButtonKind,
     ) -> windows::core::Result<()> {
         // The panel is a little see-through, so what falls under it is cut out of its shadow.
@@ -238,34 +306,113 @@ impl Painter<'_> {
             .iter()
             .filter(|(button, _)| kind(*button) == members)
         {
-            self.button(button, place, is_lit(toolbar, *button))?;
+            let reacts = reaction(toolbar, held, *button);
+            let lit = is_lit(toolbar, *button);
+            match moved(members, reacts) {
+                Some(how) => self.moved(place, how, || self.button(button, place, lit, reacts))?,
+                None => self.button(button, place, lit, reacts)?,
+            }
         }
         Ok(())
     }
 
     /// One button: its own box and, when it is lit, the lit box over it, which hides it and shows its glow around it.
-    fn button(&self, button: &ToolbarButton, place: &RECT, lit: bool) -> windows::core::Result<()> {
-        let (surface, radius) = style(self.palette, kind(*button));
+    /// With the cursor on it, or held down, the close button is red and the gear's and minimize's icon brighter.
+    fn button(
+        &self,
+        button: &ToolbarButton,
+        place: &RECT,
+        lit: bool,
+        reacts: Reaction,
+    ) -> windows::core::Result<()> {
+        let pointed = reacts != Reaction::Rest;
+        let (surface, radius) = match button {
+            ToolbarButton::Close if pointed => (&CLOSE_HOVER, SMALL_RADIUS),
+            _ => style(self.palette, kind(*button)),
+        };
         self.surface(surface, place, radius, 0, false)?;
         if lit {
             self.surface(&self.palette.lit, place, radius, 0, false)?;
         }
         // The icon is over the lit box, in the lit ink.
         let ink = match (lit, kind(*button)) {
-            (true, _) => self.palette.ink_on,
+            (true, _) | (false, ButtonKind::Minimized) => self.palette.ink_on,
             (false, ButtonKind::Tool | ButtonKind::Mode) => self.palette.ink,
-            (false, ButtonKind::Control) => self.palette.small_ink,
+            (false, ButtonKind::Control) if !pointed => self.palette.small_ink,
+            (false, ButtonKind::Control) => match button {
+                ToolbarButton::Close => CLOSE_INK_HOVER,
+                _ => self.palette.small_ink_hover,
+            },
         };
-        self.icon(button, place, ink)
+        match toolbar_icons::icon_for(button) {
+            Some(icon) => self.icon(icon, place, ink),
+            None => Ok(()),
+        }
     }
 
-    /// The icon of `button` in `ink`, centered in `place`: its view box at its CSS size, scaled for the monitor, with its
-    /// top left corner on a whole pixel (a half pixel of room goes to the left and top), and its strokes round at their
-    /// ends and corners.
-    fn icon(&self, button: &ToolbarButton, place: &RECT, ink: Color) -> windows::core::Result<()> {
-        let Some(icon) = toolbar_icons::icon_for(button) else {
-            return Ok(());
+    /// The minimized toolbar's button at `place`, with `active` the active tool: lit, with the tool's icon in the middle
+    /// and, in its bottom right corner, a small dark box with a white arrow pointing right.
+    fn minimized(&self, place: &RECT, active: Tool) -> windows::core::Result<()> {
+        let (surface, radius) = style(self.palette, ButtonKind::Minimized);
+        self.surface(surface, place, radius, 0, false)?;
+        if let Some(icon) = toolbar_icons::icon_for(&ToolbarButton::Tool(active)) {
+            self.icon(icon, place, self.palette.ink_on)?;
+        }
+        let side = self.scaled(OPEN_SIDE);
+        let inset = self.scaled(OPEN_INSET);
+        let corner = RECT {
+            left: place.right - inset - side,
+            top: place.bottom - inset - side,
+            right: place.right - inset,
+            bottom: place.bottom - inset,
         };
+        self.fill(
+            &self.shape(&corner, self.scaled(OPEN_RADIUS), 0, 0),
+            OPEN_BOX,
+        );
+        self.icon(&toolbar_icons::OPEN, &corner, OPEN_INK)
+    }
+
+    /// Runs `paint` with the target moved and shrunk as `how` says, around the middle of `place`, as CSS transforms a
+    /// box and all it draws, shadows included. The target's own transform is put back afterwards, whatever `paint` did.
+    fn moved(
+        &self,
+        place: &RECT,
+        how: Moved,
+        paint: impl FnOnce() -> windows::core::Result<()>,
+    ) -> windows::core::Result<()> {
+        let area = in_surface(self.origin, place);
+        let (x, y) = (
+            (area.left + area.right) / 2.0,
+            (area.top + area.bottom) / 2.0,
+        );
+        // The windows crate takes its matrix from windows-numerics, which ScreenGauge doesn't name as a dependency: the
+        // target's own transform is a value of that type, and the move is a copy of it with every entry set.
+        let mut before = Default::default();
+        // SAFETY: fills a local.
+        unsafe { self.target.GetTransform(&mut before) };
+        let mut around = before;
+        // A point p goes to (x, y) + scale × (p − (x, y)), then `down` pixels down. Direct2D multiplies a row vector by
+        // the matrix, so the last row is the move.
+        around.M11 = how.scale;
+        around.M12 = 0.0;
+        around.M21 = 0.0;
+        around.M22 = how.scale;
+        around.M31 = x * (1.0 - how.scale);
+        around.M32 = y * (1.0 - how.scale) + px(self.signed(how.down));
+        let both = around * before;
+        // SAFETY: the matrix outlives the call, which copies it.
+        unsafe { self.target.SetTransform(&both) };
+        let painted = paint();
+        // SAFETY: as above.
+        unsafe { self.target.SetTransform(&before) };
+        painted
+    }
+
+    /// `icon` in `ink`, centered in `place`: its view box at its CSS size, scaled for the monitor, with its top left
+    /// corner on a whole pixel (a half pixel of room goes to the left and top), and its strokes round at their ends and
+    /// corners.
+    fn icon(&self, icon: &Icon, place: &RECT, ink: Color) -> windows::core::Result<()> {
         let side = self.scaled(icon.size);
         let corner = in_surface(self.origin, place);
         let at = Placement {

@@ -1,7 +1,8 @@
 //! The toolbar's colors and shadows in the light and the dark palette: the prototype's theme tokens (WPC-279, variant
-//! A: `--grp-*`, `--btn-*`, `--on-*`, `--sbtn-*` and `--ink*`), where the `oklch` colors are converted to sRGB. Written
-//! as the CSS lists them, so a shadow list reads top to bottom as the stylesheet does: the first is painted on top.
-//! Sizes are in logical pixels, which `toolbar_paint` scales for the monitor.
+//! A: `--grp-*`, `--btn-*`, `--on-*`, `--sbtn-*` and `--ink*`, and the colors `.sbtn:hover`, `.sbtn.close:hover` and
+//! `#tbMini .chev` write out), where the `oklch` colors are converted to sRGB. Written as the CSS lists them, so a
+//! shadow list reads top to bottom as the stylesheet does: the first is painted on top. Sizes are in logical pixels,
+//! which `toolbar_paint` scales for the monitor.
 
 use super::palette::{Color, color};
 use crate::theme::Mode;
@@ -69,7 +70,29 @@ pub struct Palette {
     pub ink: Color,
     pub ink_on: Color,
     pub small_ink: Color,
+    /// `--sbtn-ink-hover`: the gear's and minimize's icon with the cursor on them.
+    pub small_ink_hover: Color,
 }
+
+/// `.sbtn.close:hover`: the close button with the cursor on it, red with a white cross in both palettes. Its shadows are
+/// `.sbtn`'s.
+pub const CLOSE_HOVER: Surface = Surface {
+    base: None,
+    gradient: &[
+        // oklch(0.75 0.17 25)
+        stop(0.0, rgb(0xff, 0x7d, 0x76)),
+        // oklch(0.5 0.17 25)
+        stop(0.85, rgb(0xb0, 0x2a, 0x2d)),
+    ],
+    border: None,
+    outer: &SMALL_OUTER,
+    inset: &SMALL_INSET,
+};
+pub const CLOSE_INK_HOVER: Color = rgb(0xff, 0xff, 0xff);
+
+/// `#tbMini .chev`: the box of the small arrow in the minimized toolbar's button, and the arrow, in both palettes.
+pub const OPEN_BOX: Color = color(0, 0, 0, 0.35);
+pub const OPEN_INK: Color = rgb(0xff, 0xff, 0xff);
 
 /// `.sbtn`'s `box-shadow`, which the themes don't change.
 const SMALL_INSET: [Shadow; 1] = [shadow(1, 1, 0, color(255, 255, 255, 0.2))];
@@ -137,6 +160,7 @@ const DARK: Palette = Palette {
     ink: rgb(0xc3, 0xc7, 0xcf),
     ink_on: rgb(0x06, 0x14, 0x1a),
     small_ink: rgb(0xae, 0xb3, 0xbd),
+    small_ink_hover: rgb(0xff, 0xff, 0xff),
 };
 
 const LIGHT: Palette = Palette {
@@ -201,6 +225,7 @@ const LIGHT: Palette = Palette {
     ink: rgb(0x4b, 0x48, 0x43),
     ink_on: rgb(0xff, 0xff, 0xff),
     small_ink: rgb(0x5b, 0x58, 0x52),
+    small_ink_hover: rgb(0x11, 0x11, 0x11),
 };
 
 /// The palette of `mode`.

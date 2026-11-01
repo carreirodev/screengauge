@@ -35,16 +35,17 @@ fn monitor(rect: Rect, dpi: u32, [left, top, right, bottom]: [i32; 4]) -> Photo 
     }
 }
 
-/// A monitor of 400 × 100 at `dpi`, at the virtual screen's corner, with a button `width` physical pixels wide and
-/// 41 high: columns 100 to 100 + width − 1, rows 30 to 70.
+/// A monitor of 400 × 600 at `dpi`, at the virtual screen's corner, with a button `width` physical pixels wide and
+/// 41 high: columns 100 to 100 + width − 1, rows 430 to 470, below the toolbar at every scale (at 400% it reaches row
+/// 319), where the tool pauses (WPC-311).
 fn button(width: i32, dpi: u32) -> Photo {
     let rect = Rect {
         left: 0,
         top: 0,
         width: 400,
-        height: 100,
+        height: 600,
     };
-    monitor(rect, dpi, [100, 30, 100 + width - 1, 70])
+    monitor(rect, dpi, [100, 430, 100 + width - 1, 470])
 }
 
 fn at(x: i32, y: i32) -> Point {
@@ -99,7 +100,7 @@ fn a_button_of_150_physical_pixels_at_150_percent_shows_100_beside_it() {
     let session = open(
         vec![button(150, 144)],
         DimensionsMode::Horizontal,
-        at(170, 50),
+        at(170, 450),
     );
     assert_eq!(label(&session), reads("150", "100"));
 }
@@ -117,7 +118,7 @@ fn at_100_percent_the_label_has_only_the_physical_pixels() {
     let session = open(
         vec![button(150, 96)],
         DimensionsMode::Horizontal,
-        at(170, 50),
+        at(170, 450),
     );
     assert_eq!(label(&session), alone("150"));
 }
@@ -129,7 +130,7 @@ fn the_logical_pixels_have_one_decimal_place_after_a_point_and_none_when_whole()
         let session = open(
             vec![button(width, 168)],
             DimensionsMode::Horizontal,
-            at(100, 50),
+            at(100, 450),
         );
         assert_eq!(
             label(&session),
@@ -147,7 +148,7 @@ fn a_logical_pixel_halfway_between_two_tenths_rounds_up() {
         let session = open(
             vec![button(width, 384)],
             DimensionsMode::Horizontal,
-            at(100, 50),
+            at(100, 450),
         );
         assert_eq!(
             label(&session),
@@ -179,7 +180,7 @@ fn every_windows_scale_divides_the_same_button() {
         let session = open(
             vec![button(150, dpi)],
             DimensionsMode::Horizontal,
-            at(170, 50),
+            at(170, 450),
         );
         assert_eq!(
             label(&session),
@@ -298,7 +299,7 @@ fn with_also_show_logical_pixels_off_the_label_has_only_the_physical_pixels_at_a
         let session = open_with(
             vec![button(150, dpi)],
             DimensionsMode::Horizontal,
-            at(170, 50),
+            at(170, 450),
             off.clone(),
         );
         assert_eq!(label(&session), alone("150"), "at {dpi} DPI");

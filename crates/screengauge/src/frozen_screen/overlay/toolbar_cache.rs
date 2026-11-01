@@ -1,12 +1,14 @@
 //! The toolbar, kept as a bitmap between frames (WPC-310). The frozen screen's window repaints on every mouse move that
-//! changes a measurement, and the toolbar underneath it only changes when another tool or mode is lit, so it is drawn
-//! once, with all its shadows, on a bitmap of its own, and each frame lays that bitmap over the photo one pixel for one
-//! pixel. Drawing it afresh each time would tessellate a hundred or so shadow layers for nothing.
+//! changes a measurement, and the toolbar underneath it only changes when another tool or mode is lit, the cursor goes
+//! onto another of its buttons or off them, a button is held down or let go, or it is minimized or brought back, so it
+//! is drawn once, with all its shadows, on a bitmap of its own, and each frame lays that bitmap over the photo one pixel
+//! for one pixel. Drawing it afresh each time would tessellate a hundred or so shadow layers for nothing.
 //!
-//! The bitmap holds the toolbar at the origin with room all round for the reach of its shadows, whichever buttons are lit,
-//! so it is the same size for every state, never moves with the toolbar's place (dragging it, WPC-312, only moves where it
-//! is laid), and a state that changes is drawn over the same bitmap. The part of it past the monitor's edge, which the
-//! toolbar's margin leaves at the top, is cut off by the window as the bitmap is laid.
+//! The bitmap holds the toolbar at the origin with room all round for the reach of its shadows, whichever buttons are
+//! lit, hovered or held down, and for the minimized toolbar's button, so it is the same size for every state, never
+//! moves with the toolbar's place (dragging it, WPC-312, only moves where it is laid), and a state that changes is drawn
+//! over the same bitmap. The part of it past the monitor's edge, which the toolbar's margin leaves at the top, is cut
+//! off by the window as the bitmap is laid.
 //!
 //! Compositing the layers on a transparent bitmap and then that bitmap over the photo is not the same as compositing every
 //! layer straight over the photo: a faint layer drawn over the photo's 8-bit pixels rounds away, as it changes a channel
@@ -15,6 +17,7 @@
 //! The two differ by up to 27 levels at a pixel, and by 2 to 4 on average over the toolbar (`toolbar_tests` measures
 //! it). A toolbar is always drawn through the bitmap, so what is drawn does not depend on the cache's state.
 
+use screengauge_core::session::toolbar::Hit;
 use screengauge_core::session::{Point, Toolbar};
 use windows::Win32::Foundation::E_FAIL;
 use windows::Win32::Graphics::Direct2D::Common::{
@@ -39,10 +42,11 @@ struct Kept {
     /// What the toolbar was drawn on, kept to draw the next state on it.
     target: ID2D1BitmapRenderTarget,
     bitmap: ID2D1Bitmap,
-    /// What the bitmap shows: the lit tool, and the lit mode while there is one. The groups and the buttons are always
-    /// the same, and so are the monitor, the scale and the palette, which an `Overlay` is made for; the toolbar's own
-    /// monitor never changes for a window, so the whole scene's toolbar is the key.
-    shows: Toolbar,
+    /// What the bitmap shows: the lit tool, the lit mode while there is one, the button under the cursor, whether it is
+    /// minimized, and what the left button is held down on. The groups and the buttons are always the same, and so are
+    /// the monitor, the scale and the palette, which an `Overlay` is made for; the toolbar's own monitor never changes for
+    /// a window, so the whole scene's toolbar is the key, with what is held.
+    shows: (Toolbar, Option<Hit>),
     /// How much of the bitmap is left, above and to the left of the toolbar, for the shadows.
     margins: Margins,
     width: i32,
@@ -60,12 +64,13 @@ pub(super) struct ToolbarCache {
 
 impl Overlay {
     /// Lays the toolbar's bitmap over what `target` holds, between BeginDraw and EndDraw, drawing it first when the
-    /// toolbar shows something else than the bitmap does.
+    /// toolbar, or what is `held` down on it, is something else than the bitmap shows.
     pub(super) fn show_toolbar(
         &self,
         target: &ID2D1RenderTarget,
         layout: &Layout,
         toolbar: &Toolbar,
+        held: Option<Hit>,
     ) -> windows::core::Result<()> {
         let mut cache = self.toolbar_cache.try_borrow_mut().map_err(|_| {
             Error::new(
@@ -74,13 +79,13 @@ impl Overlay {
             )
         })?;
         let kept = match cache.kept.take() {
-            Some(kept) if kept.shows == *toolbar => kept,
+            Some(kept) if kept.shows == (*toolbar, held) => kept,
             old => {
                 #[cfg(test)]
                 {
                     cache.fills += 1;
                 }
-                self.draw_toolbar_bitmap(target, layout, toolbar, old)?
+                self.draw_toolbar_bitmap(target, layout, toolbar, held, old)?
             }
         };
         // The bitmap's corner, in the window's own pixels, and the bitmap's size: laid one pixel for one pixel.
@@ -115,6 +120,7 @@ impl Overlay {
         target: &ID2D1RenderTarget,
         layout: &Layout,
         toolbar: &Toolbar,
+        held: Option<Hit>,
         old: Option<Kept>,
     ) -> windows::core::Result<Kept> {
         let (bitmap_target, margins, width, height) = match old {
@@ -146,7 +152,7 @@ impl Overlay {
             bitmap_target.BeginDraw();
             bitmap_target.Clear(Some(&clear));
         }
-        let painted = self.paint_toolbar(&bitmap_target, layout, toolbar, origin);
+        let painted = self.paint_toolbar(&bitmap_target, layout, toolbar, held, origin);
         // SAFETY: ends the BeginDraw above.
         let ended = unsafe { bitmap_target.EndDraw(None, None) };
         match (painted, ended) {
@@ -163,7 +169,7 @@ impl Overlay {
         Ok(Kept {
             target: bitmap_target,
             bitmap,
-            shows: *toolbar,
+            shows: (*toolbar, held),
             margins,
             width,
             height,
