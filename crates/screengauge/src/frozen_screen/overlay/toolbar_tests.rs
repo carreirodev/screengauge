@@ -1,0 +1,580 @@
+//! Render tests of the toolbar on a WIC bitmap, like the notice's in `panel_tests`. The sizes and colors here are the
+//! prototype's (variant A of WPC-279: `.grp`, `.tbtn`, `.mbtn`, `.sbtn` and the palettes' tokens), written out a second
+//! time and scaled in the tests, not read back from the code that is being tested. The shadows are judged by the owner's
+//! eye; these check where things are, what is lit, and what is not drawn.
+
+use screengauge_core::settings::{DimensionsMode, Tool};
+
+use super::geometry::{self, scaled};
+use super::panel_tests::{MODES, over};
+use super::tests::{BACKGROUND, Canvas, Picture, SCALES, near};
+use super::toolbar::{Layout, layout};
+use super::*;
+use screengauge_core::session::{Toolbar, ToolbarButton};
+
+/// A window wide enough for the toolbar at 175% and tall enough for its shadow, over a monitor left of and below the main
+/// one, so coordinates in the virtual screen and in the window are different numbers.
+const TOOLBAR_MONITOR: Rect = Rect {
+    left: -1280,
+    top: 120,
+    width: 1280,
+    height: 440,
+};
+
+fn canvas() -> Canvas {
+    Canvas::new(1280, 440)
+}
+
+/// A stop of a CSS gradient that runs from the top of its box to the bottom: where along the height, and the color.
+type Stops = &'static [(f64, [u8; 3])];
+
+/// One palette's colors as the prototype states them (`--btn-bg`, `--on-bg`, `--sbtn-bg`, `--grp-bg`, `--grp-border`),
+/// written out here a second time so that a slip in the palette is caught.
+struct Tokens {
+    button: Stops,
+    lit: Stops,
+    small: Stops,
+    /// The panel's base color and opacity, and the white gradient over it: its opacity at the top and at the bottom.
+    group_base: ([u8; 3], f64),
+    group_top: f64,
+    group_bottom: f64,
+    group_border: ([u8; 3], f64),
+}
+
+fn tokens(mode: Mode) -> Tokens {
+    match mode {
+        Mode::Dark => Tokens {
+            button: &[
+                (0.0, [0x55, 0x5a, 0x64]),
+                (0.55, [0x2a, 0x2d, 0x33]),
+                (1.0, [0x1a, 0x1b, 0x1f]),
+            ],
+            // oklch(0.92 0.1 195), oklch(0.74 0.15 205), oklch(0.5 0.14 220)
+            lit: &[
+                (0.0, [0x8e, 0xfa, 0xf9]),
+                (0.5, [0x00, 0xc4, 0xd7]),
+                (1.0, [0x00, 0x73, 0x9a]),
+            ],
+            small: &[(0.0, [0x4a, 0x4e, 0x57]), (0.85, [0x1e, 0x20, 0x24])],
+            group_base: ([24, 25, 29], 0.86),
+            group_top: 0.09,
+            group_bottom: 0.02,
+            group_border: ([255, 255, 255], 0.08),
+        },
+        Mode::Light => Tokens {
+            button: &[
+                (0.0, [0xff, 0xff, 0xff]),
+                (0.5, [0xf1, 0xef, 0xeb]),
+                (1.0, [0xd6, 0xd2, 0xcb]),
+            ],
+            // oklch(0.85 0.1 220), oklch(0.62 0.16 235), oklch(0.45 0.15 245)
+            lit: &[
+                (0.0, [0x7d, 0xdd, 0xfb]),
+                (0.55, [0x00, 0x92, 0xd7]),
+                (1.0, [0x00, 0x58, 0xa1]),
+            ],
+            small: &[(0.0, [0xff, 0xff, 0xff]), (0.9, [0xdc, 0xd8, 0xd1])],
+            group_base: ([226, 224, 219], 0.8),
+            group_top: 0.85,
+            group_bottom: 0.45,
+            group_border: ([255, 255, 255], 0.9),
+        },
+    }
+}
+
+/// The color of `stops` at `t` of the way down, blended in sRGB as CSS does, and held at the ends.
+fn gradient_at(stops: Stops, t: f64) -> [u8; 3] {
+    let (first, last) = (stops[0], stops[stops.len() - 1]);
+    if t <= first.0 {
+        return first.1;
+    }
+    if t >= last.0 {
+        return last.1;
+    }
+    for pair in stops.windows(2) {
+        let ((from, a), (to, b)) = (pair[0], pair[1]);
+        if t <= to {
+            let k = (t - from) / (to - from);
+            // A mix of two channels with weights adding up to 1 stays within 0 to 255, so the cast only drops the
+            // fraction `round` already took away.
+            // TODO: mix in whole numbers, so no float comes back to `u8`.
+            return std::array::from_fn(|i| {
+                (f64::from(a[i]) * (1.0 - k) + f64::from(b[i]) * k).round() as u8
+            });
+        }
+    }
+    last.1
+}
+
+/// `over`, for the tests' floats.
+fn blend(color: [u8; 3], alpha: f64, under: [u8; 3]) -> [u8; 3] {
+    // `over` takes the single-precision opacity the palette has; this is the CSS number, which fits.
+    over(color, narrow(alpha), under)
+}
+
+/// A CSS opacity, 0 to 1, as the `f32` the drawing takes.
+// TODO: keep the opacities in `f32` in the tests, so nothing narrows here.
+fn narrow(alpha: f64) -> f32 {
+    alpha as f32
+}
+
+/// A pixel by its place in the virtual screen, which must be in the window.
+fn at(picture: &Picture, x: i32, y: i32) -> [u8; 3] {
+    let column =
+        usize::try_from(x - TOOLBAR_MONITOR.left).expect("a pixel right of the window's left side");
+    let row = usize::try_from(y - TOOLBAR_MONITOR.top).expect("a pixel below the window's top");
+    picture.at(column, row)
+}
+
+/// The toolbar drawn alone, and where its parts are.
+struct Drawn {
+    picture: Picture,
+    layout: Layout,
+    dpi: u32,
+}
+
+fn bounds() -> RECT {
+    geometry::bounds(TOOLBAR_MONITOR).expect("the monitor")
+}
+
+fn scene(active: Tool, mode: Option<DimensionsMode>) -> Toolbar {
+    Toolbar {
+        monitor: 0,
+        active,
+        mode,
+    }
+}
+
+/// `toolbar` drawn over `BACKGROUND` in the palette of `mode` for a window of `dpi`.
+fn draw(canvas: &Canvas, mode: Mode, dpi: u32, toolbar: &Toolbar) -> Drawn {
+    draw_over(canvas, mode, dpi, toolbar, BACKGROUND)
+}
+
+/// As `draw`, over a photo that is all `photo`.
+fn draw_over(canvas: &Canvas, mode: Mode, dpi: u32, toolbar: &Toolbar, photo: [u8; 3]) -> Drawn {
+    let [r, g, b] = photo;
+    let photo = D2D1_COLOR_F {
+        r: f32::from(r) / 255.0,
+        g: f32::from(g) / 255.0,
+        b: f32::from(b) / 255.0,
+        a: 1.0,
+    };
+    let picture = canvas.render_in(mode, TOOLBAR_MONITOR, dpi, |overlay, target| {
+        // SAFETY: a drawing call between BeginDraw and EndDraw on a live target.
+        unsafe { target.Clear(Some(&photo)) };
+        overlay.draw_toolbar(target, toolbar).expect("the toolbar");
+    });
+    Drawn {
+        picture,
+        layout: layout(bounds(), dpi),
+        dpi,
+    }
+}
+
+impl Drawn {
+    fn at(&self, x: i32, y: i32) -> [u8; 3] {
+        at(&self.picture, x, y)
+    }
+
+    fn place(&self, button: ToolbarButton) -> RECT {
+        self.layout
+            .buttons
+            .iter()
+            .find(|(each, _)| *each == button)
+            .map(|&(_, place)| place)
+            .expect("every button has a place")
+    }
+}
+
+/// Where a button's background is sampled: its middle row, a few pixels in from its left side, clear of the icon and of
+/// the inset shadows along its edges.
+fn sample_point(place: &RECT, dpi: u32) -> (i32, i32) {
+    (
+        place.left + scaled(6, dpi),
+        place.top + (place.bottom - place.top) / 2,
+    )
+}
+
+/// How far down `place` the pixel row `y` is, at its middle.
+fn down(place: &RECT, y: i32) -> f64 {
+    (f64::from(y) + 0.5 - f64::from(place.top)) / f64::from(place.bottom - place.top)
+}
+
+fn is_control(button: ToolbarButton) -> bool {
+    matches!(
+        button,
+        ToolbarButton::Settings | ToolbarButton::Minimize | ToolbarButton::Close
+    )
+}
+
+/// The buttons the scene lights: the active tool's, and the mode's while there is one.
+fn lit_in(toolbar: &Toolbar) -> Vec<ToolbarButton> {
+    let mut lit = vec![ToolbarButton::Tool(toolbar.active)];
+    lit.extend(toolbar.mode.map(ToolbarButton::Mode));
+    lit
+}
+
+/// The buttons drawn lit: those whose sample is nearer the lit gradient than the plain one.
+fn drawn_lit(drawn: &Drawn, t: &Tokens) -> Vec<ToolbarButton> {
+    let distance = |a: [u8; 3], b: [u8; 3]| -> i32 {
+        a.iter()
+            .zip(b)
+            .map(|(&a, b)| i32::from(a.abs_diff(b)))
+            .sum()
+    };
+    drawn
+        .layout
+        .buttons
+        .iter()
+        .filter(|&&(button, place)| {
+            let (x, y) = sample_point(&place, drawn.dpi);
+            let got = drawn.at(x, y);
+            let plain = if is_control(button) {
+                t.small
+            } else {
+                t.button
+            };
+            let t_down = down(&place, y);
+            distance(got, gradient_at(t.lit, t_down)) < distance(got, gradient_at(plain, t_down))
+        })
+        .map(|&(button, _)| button)
+        .collect()
+}
+
+#[test]
+fn each_buttons_middle_is_its_gradient_and_the_lit_ones_are_the_lit_gradient() {
+    let canvas = canvas();
+    let toolbar = scene(Tool::Inspect, Some(DimensionsMode::Vertical));
+    let lit = lit_in(&toolbar);
+    for mode in MODES {
+        let t = tokens(mode);
+        for dpi in SCALES {
+            let drawn = draw(&canvas, mode, dpi, &toolbar);
+            for (button, place) in drawn.layout.buttons {
+                let stops = if lit.contains(&button) {
+                    t.lit
+                } else if is_control(button) {
+                    t.small
+                } else {
+                    t.button
+                };
+                let (x, y) = sample_point(&place, dpi);
+                let wanted = gradient_at(stops, down(&place, y));
+                assert!(
+                    near(drawn.at(x, y), wanted, 4),
+                    "{button:?} at ({x}, {y}) is {:?}, wanted {wanted:?}: {mode:?} at {dpi} DPI",
+                    drawn.at(x, y)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_lit_buttons_follow_the_active_tool_and_the_mode() {
+    let canvas = canvas();
+    let cases = [
+        scene(Tool::Dimensions, Some(DimensionsMode::Horizontal)),
+        scene(Tool::Dimensions, Some(DimensionsMode::Vertical)),
+        scene(Tool::Dimensions, Some(DimensionsMode::Cross)),
+        scene(Tool::Bounds, None),
+        scene(Tool::Inspect, None),
+        scene(Tool::Snip, None),
+    ];
+    for mode in MODES {
+        let t = tokens(mode);
+        for dpi in [96, 144] {
+            for toolbar in &cases {
+                let drawn = draw(&canvas, mode, dpi, toolbar);
+                let mut lit = drawn_lit(&drawn, &t);
+                // The modes are drawn only while there is one.
+                let mut wanted = lit_in(toolbar);
+                lit.sort_by_key(|button| format!("{button:?}"));
+                wanted.sort_by_key(|button| format!("{button:?}"));
+                assert_eq!(lit, wanted, "{toolbar:?}: {mode:?} at {dpi} DPI");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_lit_button_glows_onto_the_panel_beside_it() {
+    let canvas = canvas();
+    for mode in MODES {
+        for dpi in SCALES {
+            let lit = draw(&canvas, mode, dpi, &scene(Tool::Dimensions, None));
+            let plain = draw(&canvas, mode, dpi, &scene(Tool::Snip, None));
+            // Halfway across the gap between Dimensions and Bounds, at the buttons' middle height.
+            let first = lit.place(ToolbarButton::Tool(Tool::Dimensions));
+            let second = lit.place(ToolbarButton::Tool(Tool::Bounds));
+            let x = (first.right + second.left) / 2;
+            let y = (first.top + first.bottom) / 2;
+            // Cyan on the panel: bluer than it is red by more than the plain panel is.
+            let tint = |p: [u8; 3]| i32::from(p[2]) - i32::from(p[0]);
+            assert!(
+                tint(lit.at(x, y)) >= tint(plain.at(x, y)) + 10,
+                "{:?} beside a lit button, {:?} beside a plain one: {mode:?} at {dpi} DPI",
+                lit.at(x, y),
+                plain.at(x, y)
+            );
+        }
+    }
+}
+
+#[test]
+fn a_hidden_modes_room_shows_the_photo_and_no_button() {
+    let canvas = canvas();
+    for mode in MODES {
+        for dpi in SCALES {
+            let drawn = draw(&canvas, mode, dpi, &scene(Tool::Inspect, None));
+            let room = drawn.layout.modes;
+            // The neighbors' shadows fade out before the room's middle third: there the photo is untouched.
+            let third = (room.right - room.left) / 3;
+            for y in room.top..room.bottom {
+                for x in room.left + third..room.right - third {
+                    assert!(
+                        near(drawn.at(x, y), BACKGROUND, 1),
+                        "({x}, {y}) is {:?} in the empty room: {mode:?} at {dpi} DPI",
+                        drawn.at(x, y)
+                    );
+                }
+            }
+            // And where H, V and C would be, nothing of a button or a panel: the photo, a shade darker at most.
+            for mode_button in [
+                DimensionsMode::Horizontal,
+                DimensionsMode::Vertical,
+                DimensionsMode::Cross,
+            ] {
+                let place = drawn.place(ToolbarButton::Mode(mode_button));
+                let (x, y) = (
+                    (place.left + place.right) / 2,
+                    (place.top + place.bottom) / 2,
+                );
+                assert!(
+                    near(drawn.at(x, y), BACKGROUND, 12),
+                    "{mode_button:?} at ({x}, {y}) is {:?} with no mode: {mode:?} at {dpi} DPI",
+                    drawn.at(x, y)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_modes_panel_is_drawn_while_there_is_a_mode() {
+    let canvas = canvas();
+    for mode in MODES {
+        for dpi in SCALES {
+            let drawn = draw(
+                &canvas,
+                mode,
+                dpi,
+                &scene(Tool::Dimensions, Some(DimensionsMode::Cross)),
+            );
+            let room = drawn.layout.modes;
+            // The room's middle, which the panel covers.
+            let (x, y) = ((room.left + room.right) / 2, room.top + scaled(3, dpi));
+            assert!(
+                !near(drawn.at(x, y), BACKGROUND, 40),
+                "({x}, {y}) is {:?}, the photo, with a mode: {mode:?} at {dpi} DPI",
+                drawn.at(x, y)
+            );
+        }
+    }
+}
+
+/// How far the shadows reach past the toolbar in the prototype's numbers, in logical pixels, to the left and right, above
+/// and below: three deviations of the blur less the spread, and the drop below.
+fn shadow_reach(mode: Mode) -> (u32, u32, u32) {
+    match mode {
+        // 0 18px 40px -12px: 3 * 20 - 12 to the sides, 18 less above and more below.
+        Mode::Dark => (48, 30, 66),
+        // 0 18px 36px -14px: 3 * 18 - 14.
+        Mode::Light => (40, 22, 58),
+    }
+}
+
+#[test]
+fn nothing_is_drawn_beyond_the_toolbar_and_the_reach_of_its_shadows() {
+    let canvas = canvas();
+    for mode in MODES {
+        let (sides, above, below) = shadow_reach(mode);
+        for dpi in SCALES {
+            let toolbar = scene(Tool::Dimensions, Some(DimensionsMode::Horizontal));
+            let drawn = draw(&canvas, mode, dpi, &toolbar);
+            // Each reach is scaled as the whole, with a few pixels for the parts being scaled one at a time.
+            let slack = 3;
+            let area = RECT {
+                left: drawn.layout.toolbar.left - scaled(sides, dpi) - slack,
+                top: drawn.layout.toolbar.top - scaled(above, dpi) - slack,
+                right: drawn.layout.toolbar.right + scaled(sides, dpi) + slack,
+                bottom: drawn.layout.toolbar.bottom + scaled(below, dpi) + slack,
+            };
+            let window = bounds();
+            let mut inside_changed = 0;
+            for y in window.top..window.bottom {
+                for x in window.left..window.right {
+                    let outside =
+                        x < area.left || x >= area.right || y < area.top || y >= area.bottom;
+                    let pixel = drawn.at(x, y);
+                    if outside {
+                        assert_eq!(
+                            pixel, BACKGROUND,
+                            "({x}, {y}) is drawn outside {area:?}: {mode:?} at {dpi} DPI"
+                        );
+                    } else if pixel != BACKGROUND {
+                        inside_changed += 1;
+                    }
+                }
+            }
+            assert!(inside_changed > 5000, "{inside_changed} pixels drawn");
+        }
+    }
+}
+
+#[test]
+fn each_group_panel_is_where_the_layout_puts_it() {
+    let canvas = canvas();
+    let toolbar = scene(Tool::Dimensions, Some(DimensionsMode::Horizontal));
+    for mode in MODES {
+        for dpi in SCALES {
+            // Over black the dark palette's black shadow is invisible, so the panel's edge is all that shows.
+            let drawn = draw_over(&canvas, mode, dpi, &toolbar, [0, 0, 0]);
+            for group in [
+                drawn.layout.tools,
+                drawn.layout.modes,
+                drawn.layout.controls,
+            ] {
+                let (x, y) = (
+                    (group.left + group.right) / 2,
+                    (group.top + group.bottom) / 2,
+                );
+                let green = |x, y| i32::from(drawn.at(x, y)[1]);
+                // The panel's edge pixel against the pixel outside it, on each side, at least 12 levels apart.
+                for (inside, outside, side) in [
+                    (green(group.left, y), green(group.left - 1, y), "left"),
+                    (green(group.right - 1, y), green(group.right, y), "right"),
+                    (green(x, group.top), green(x, group.top - 1), "top"),
+                    (green(x, group.bottom - 1), green(x, group.bottom), "bottom"),
+                ] {
+                    assert!(
+                        (inside - outside).abs() >= 12,
+                        "the {side} edge of {group:?}: {inside} against {outside}: {mode:?} at {dpi} DPI"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_panel_is_the_palettes_see_through_base_under_its_gradient_with_its_ring_around() {
+    let canvas = canvas();
+    // The last tool is lit, so the first group's left side and top have no glow over them.
+    let toolbar = scene(Tool::Snip, None);
+    for mode in MODES {
+        let t = tokens(mode);
+        for dpi in SCALES {
+            let over_photo = draw(&canvas, mode, dpi, &toolbar);
+            // A second photo, black, to show the panel lets it through.
+            let over_black = draw_over(&canvas, mode, dpi, &toolbar, [0, 0, 0]);
+            let group = over_photo.layout.tools;
+            let ring = scaled(1, dpi);
+            // The padding box runs from just inside the ring to just inside the ring at the bottom.
+            let (top, bottom) = (group.top + ring, group.bottom - ring);
+            let height = f64::from(bottom - top);
+            // A row in the padding above the buttons, away from the shadows of the buttons and the group's edge, in
+            // the middle of the group's width.
+            let (x, y) = ((group.left + group.right) / 2, top + scaled(4, dpi));
+            let along = (f64::from(y) + 0.5 - f64::from(top)) / height;
+            let alpha = t.group_top + (t.group_bottom - t.group_top) * along;
+            let expected = |under: [u8; 3]| {
+                let base = blend(t.group_base.0, t.group_base.1, under);
+                blend([255, 255, 255], alpha, base)
+            };
+            for (drawn, under, name) in [
+                (&over_photo, BACKGROUND, "the photo"),
+                (&over_black, [0, 0, 0], "black"),
+            ] {
+                assert!(
+                    near(drawn.at(x, y), expected(under), 3),
+                    "the panel over {name} at ({x}, {y}) is {:?}, wanted {:?}: {mode:?} at {dpi} DPI",
+                    drawn.at(x, y),
+                    expected(under)
+                );
+            }
+            // It lets the photo through: the two differ by about the share of it the panel does not cover.
+            let (a, b) = (over_photo.at(x, y), over_black.at(x, y));
+            let shows = i32::from(a[0].abs_diff(b[0])) + i32::from(a[1].abs_diff(b[1]));
+            assert!(
+                shows >= 8,
+                "the panel is opaque: {a:?} over the photo, {b:?} over black"
+            );
+
+            // The ring, on the left side at the group's middle height: the border over the panel, ring pixels wide.
+            let middle = (group.top + group.bottom) / 2;
+            let panel_there = {
+                let along = (f64::from(middle) + 0.5 - f64::from(top)) / height;
+                let alpha = t.group_top + (t.group_bottom - t.group_top) * along;
+                blend(
+                    [255, 255, 255],
+                    alpha,
+                    blend(t.group_base.0, t.group_base.1, BACKGROUND),
+                )
+            };
+            let ring_color = blend(t.group_border.0, t.group_border.1, panel_there);
+            for k in 0..ring {
+                assert!(
+                    near(over_photo.at(group.left + k, middle), ring_color, 3),
+                    "ring column {k} is {:?}, wanted {ring_color:?}: {mode:?} at {dpi} DPI",
+                    over_photo.at(group.left + k, middle)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_button_has_rounded_corners_and_a_shadow_that_falls_below_it() {
+    let canvas = canvas();
+    let toolbar = scene(Tool::Snip, None);
+    for mode in MODES {
+        for dpi in SCALES {
+            let drawn = draw(&canvas, mode, dpi, &toolbar);
+            let place = drawn.place(ToolbarButton::Tool(Tool::Bounds));
+            let t = tokens(mode);
+            let green = |x, y| i32::from(drawn.at(x, y)[1]);
+            // The corner pixel is the panel, not the button's top color: the corner is round.
+            let corner = drawn.at(place.left, place.top);
+            let top_color = gradient_at(t.button, 0.0);
+            assert!(
+                !near(corner, top_color, 5),
+                "{corner:?} at the corner, the button's own color is {top_color:?}: {mode:?} at {dpi} DPI"
+            );
+            // The drop: the panel just below the button is darker than just above it, which the shadow hardly reaches.
+            let x = (place.left + place.right) / 2;
+            let above = green(x, place.top - scaled(2, dpi));
+            let below = green(x, place.bottom + scaled(2, dpi));
+            assert!(
+                above - below >= 8,
+                "{above} above, {below} below: {mode:?} at {dpi} DPI"
+            );
+        }
+    }
+}
+
+#[test]
+fn drawing_the_same_scene_twice_gives_the_same_pixels() {
+    let canvas = canvas();
+    let toolbar = scene(Tool::Bounds, None);
+    for mode in MODES {
+        for dpi in [96, 168] {
+            let first = draw(&canvas, mode, dpi, &toolbar);
+            let second = draw(&canvas, mode, dpi, &toolbar);
+            assert!(
+                first.picture.pixels == second.picture.pixels,
+                "{mode:?} at {dpi} DPI"
+            );
+        }
+    }
+}

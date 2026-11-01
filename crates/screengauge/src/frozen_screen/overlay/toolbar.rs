@@ -190,15 +190,17 @@ fn contains(rect: &RECT, at: Point) -> bool {
 
 impl Overlay {
     /// Draws `toolbar` over the measurements and under the tolerance indicator and the notice, between BeginDraw and
-    /// EndDraw, when it is on this window's monitor.
-    // TODO(WPC-310 drawing): the panels, the buttons and their icons in the palette, with the active tool's and the mode's
-    // buttons lit.
+    /// EndDraw, when it is on this window's monitor: each group's panel and its buttons, in the palette of the window,
+    /// with the active tool's button and the mode's lit.
     pub fn draw_toolbar(
         &self,
-        _target: &ID2D1RenderTarget,
-        _toolbar: &Toolbar,
+        target: &ID2D1RenderTarget,
+        toolbar: &Toolbar,
     ) -> windows::core::Result<()> {
-        Ok(())
+        let layout = layout(self.monitor, self.dpi);
+        // The window's own pixel (0, 0) is the monitor's corner.
+        let origin = (self.monitor.left, self.monitor.top);
+        self.paint_toolbar(target, &layout, toolbar, origin)
     }
 }
 

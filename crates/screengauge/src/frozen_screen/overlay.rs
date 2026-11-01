@@ -9,10 +9,15 @@ mod notice;
 mod palette;
 #[cfg(test)]
 mod panel_tests;
+mod shadow;
 mod tolerance;
 #[cfg(test)]
 mod tolerance_tests;
 pub mod toolbar;
+mod toolbar_paint;
+mod toolbar_palette;
+#[cfg(test)]
+mod toolbar_tests;
 
 use std::cell::RefCell;
 
@@ -189,6 +194,8 @@ pub struct Overlay {
     /// Asks for tabular figures; applied to each label's text.
     figures: IDWriteTypography,
     fonts: Fonts,
+    /// The palette the toolbar is drawn in; the pinned labels' and the notice's are in `surfaces`.
+    mode: Mode,
     /// The window's monitor in the virtual screen, which is where the window's pixel (0, 0) is.
     monitor: RECT,
     dpi: u32,
@@ -318,6 +325,7 @@ impl Overlay {
             number_format: fonts.text_format(tolerance::NUMBER_WEIGHT, tolerance::TEXT, dpi)?,
             figures,
             fonts: fonts.clone(),
+            mode,
             monitor: geometry::bounds(monitor)?,
             dpi,
         })
