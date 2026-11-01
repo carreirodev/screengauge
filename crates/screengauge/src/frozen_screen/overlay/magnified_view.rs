@@ -3,9 +3,9 @@
 //! magnification's tag and the strip with the cursor's position and the color of the pixel under it. Every rectangle
 //! comes from the session core's [`MagnifiedView`]; this only draws them onto the overlay's render target.
 //!
-//! The prototype's `drawMag` and its CSS (`.panel`, `.magframe`, `.magtag`, `.info`, `.sw`) are the model. Where the core hands
-//! over a rectangle, it is used as it is; the rest of the sizes below are the prototype's, in logical pixels, which
-//! `scaled` turns into physical pixels for the monitor's scale, each one on its own.
+//! The prototype's `drawMag` and its CSS (`.panel`, `.magframe`, `.magtag`, `.info`, `.sw`) are the model. Where the
+//! core hands over a rectangle, it is used as it is; the rest of the sizes below are the prototype's, in logical
+//! pixels, which `scaled` turns into physical pixels for the monitor's scale, each one on its own.
 
 use std::mem::ManuallyDrop;
 
@@ -38,15 +38,15 @@ const FRAME_RADIUS: u32 = 9;
 /// How much of the notice's shadow this panel casts. The notice's layers are fitted to a shadow box 15px tall (the
 /// notice's 31px less the spread of 8 on each side). This panel is up to 190 by 269 logical pixels (a frame of 176 or
 /// less, a strip of 79 at most, the position and the color on two lines each), so its box is up to 174 by 253: as good
-/// as an edge, as far as a blur of sigma 14 (dark) or 13 (light) can tell. A box that tall casts a shadow stronger than the layers give at full strength, so they are
-/// made stronger, as the tolerance indicator's, a lower panel than the notice, makes them fainter (see
-/// `SHADOW_STRENGTH` in `tolerance`).
+/// as an edge, as far as a blur of sigma 14 (dark) or 13 (light) can tell. A box that tall casts a shadow stronger
+/// than the layers give at full strength, so they are made stronger, as the tolerance indicator's, a lower panel than
+/// the notice, makes them fainter (see `SHADOW_STRENGTH` in `tolerance`).
 ///
 /// Fitted by least squares, the layers laid over each other as Direct2D lays them, against CSS's true blur of the box
 /// (`0 10px 28px -8px` at .75 in the dark palette, `0 10px 26px -8px` at .45 in the light one, sigma half the blur),
 /// read outward from the panel at 1 pixel steps: 0 to 30 pixels beyond its sides and its top, and 0 to 40 below it. The
-/// answer is the same for every panel from 174 by 199 to 214 by 255, which are all much taller than the blur, and so for
-/// the taller ones the color's row makes (WPC-316): a taller box is only more of an edge. Dark and light want:
+/// answer is the same for every panel from 174 by 199 to 214 by 255, which are all much taller than the blur, and so
+/// for the taller ones the color's row makes (WPC-316): a taller box is only more of an edge. Dark and light want:
 ///
 /// - down the middle, below the panel, which is how the tolerance indicator's 0.68 was found (the same reading gives its
 ///   0.67 and 0.70): 1.32 and 1.25;
@@ -509,9 +509,9 @@ impl Overlay {
         }
     }
 
-    /// The color's swatch, its corners rounded, and its texts, each laid out in its line in `format` with the same
-    /// tabular figures as the position, its baseline on a whole pixel, as a coordinate's number is. The first text is
-    /// semibold, the prototype's `.v`, and the one under it medium, its `.dm`.
+    /// The color's swatch, its corners rounded, and its texts, each laid out in its line with the same tabular figures
+    /// as the position, its baseline on a whole pixel, as a coordinate's number is. The first text is semibold, the
+    /// prototype's `.v`, and the one under it medium, its `.dm`.
     fn color(&self, color: &PixelColor) -> windows::core::Result<PlacedColor> {
         let place = |text: &ColorText, format: &IDWriteTextFormat| {
             let typeset = self.typeset(&text.text, format)?;
@@ -547,8 +547,8 @@ impl Overlay {
     fn draw_color(&self, target: &ID2D1RenderTarget, color: &PlacedColor) {
         let origin = |text: &PlacedText| dot(text.left, text.top).point;
         // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
-        // Direct2D only fails the frame at EndDraw. Each brush's color or opacity is set before it is used, because the
-        // brushes keep the last one.
+        // Direct2D only fails the frame at EndDraw. The swatch's color and the ink's opacity are set before they are
+        // used, because those brushes keep the last one; the border's brush never changes.
         unsafe {
             // The straight sides are on whole pixels, so they are crisp; only the corners are antialiased.
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);

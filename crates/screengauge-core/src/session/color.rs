@@ -2,14 +2,28 @@
 
 use crate::settings::ColorFormat;
 
-/// `color`'s two texts in `format`'s order. The first is the one the strip shows first and the click copies: HEX, or
-/// RGB when Color format is RGB. The second is the other, which the strip shows under the first only with Both, and
-/// which Shift + click copies whether it shows or not. The strip and the clipboard both take their text from here, so
-/// what is copied is always what is on screen.
-pub(super) fn texts(color: [u8; 3], format: ColorFormat) -> [String; 2] {
-    match format {
-        ColorFormat::Hex | ColorFormat::Both => [hex(color), rgb(color)],
-        ColorFormat::Rgb => [rgb(color), hex(color)],
+/// A color's two texts in Color format's order. The strip and the clipboard both take their text from here, so what is
+/// copied is always what is on screen.
+pub(super) struct Texts {
+    /// The one the strip shows first and the click copies: HEX, or RGB when Color format is RGB.
+    pub(super) first: String,
+    /// The other one, which Shift + click copies whether it shows or not.
+    pub(super) other: String,
+    /// Whether the strip shows `other` under `first`: with Color format at Both, HEX above RGB (the owner's choice in
+    /// WPC-316).
+    pub(super) other_shows: bool,
+}
+
+/// `color`'s texts in `format`.
+pub(super) fn texts(color: [u8; 3], format: ColorFormat) -> Texts {
+    let (first, other) = match format {
+        ColorFormat::Hex | ColorFormat::Both => (hex(color), rgb(color)),
+        ColorFormat::Rgb => (rgb(color), hex(color)),
+    };
+    Texts {
+        first,
+        other,
+        other_shows: format == ColorFormat::Both,
     }
 }
 

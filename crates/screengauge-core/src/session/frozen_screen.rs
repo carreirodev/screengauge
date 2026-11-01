@@ -115,9 +115,15 @@ pub struct Photo {
 /// The monitor `point` is on, as an index in `frozen_screen`'s order: the current monitor when `point` is the cursor.
 /// `None` off every monitor.
 pub(crate) fn monitor_at(frozen_screen: &[Photo], point: Point) -> Option<usize> {
+    photo_at(frozen_screen, point).map(|(monitor, _)| monitor)
+}
+
+/// The monitor `point` is on, as [`monitor_at`] gives it, with its photo.
+pub(crate) fn photo_at(frozen_screen: &[Photo], point: Point) -> Option<(usize, &Photo)> {
     frozen_screen
         .iter()
-        .position(|photo| photo.rect.contains(point))
+        .enumerate()
+        .find(|(_, photo)| photo.rect.contains(point))
 }
 
 /// An opaque 8-bit sRGB image: `height` rows of `width` pixels from the top, with no gap between rows. Each pixel is

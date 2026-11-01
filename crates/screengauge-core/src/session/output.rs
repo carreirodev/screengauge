@@ -147,6 +147,7 @@ pub struct PixelColor {
 /// One of the color's texts on the magnified view's strip.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColorText {
+    /// `#1E90FF` or `30, 144, 255`, exactly what the click or Shift + click copies.
     pub text: String,
     /// Where it goes: the line's height, starting at the text's left, after the swatch.
     pub line: Rect,

@@ -5,9 +5,10 @@
 
 use std::time::Duration;
 
+use screengauge_core::session::toolbar;
 use screengauge_core::session::{
-    Colors, Effect, Event, Held, Image, Input, LocalTime, MagnifiedView, Message, Opening, Photo,
-    Point, Rect, Scale, Session,
+    Colors, Effect, Event, Held, Image, Input, Key, LocalTime, MagnifiedView, Message, Opening,
+    Photo, Point, Rect, Scale, Session,
 };
 use screengauge_core::settings::{ColorFormat, Options, Remembered, Tool};
 
@@ -25,8 +26,8 @@ const ITEM: Point = Point { x: 700, y: 500 };
 /// Dodger blue, the spec's example: `#1E90FF`, or `30, 144, 255`.
 const DODGER_BLUE: [u8; 3] = [30, 144, 255];
 
-/// A white Full HD monitor at 100% with a single pixel of `color` at `ITEM`, and each of its eight neighbors a color of its
-/// own, none of them white, so a color averaged with any neighbor is a different color.
+/// A white Full HD monitor at 100% with a single pixel of `color` at `ITEM`, and each of its eight neighbors a color
+/// of its own, none of them white, so a color averaged with any neighbor is a different color.
 fn item(color: [u8; 3]) -> Photo {
     let mut bgra = [255; 4].repeat(1920 * 1080);
     let mut paint = |x: i32, y: i32, [red, green, blue]: [u8; 3]| {
@@ -195,7 +196,7 @@ fn a_click_pins_nothing_closes_nothing_and_copies_only_the_color_without_the_pos
 }
 
 #[test]
-fn hex_has_two_digits_a_channel_with_its_leading_zeros_and_rgb_none() {
+fn hex_gives_each_channel_two_digits_with_a_leading_zero_and_rgb_gives_none() {
     for (color, hex, rgb) in [
         ([0, 5, 10], "#00050A", "0, 5, 10"),
         ([255, 255, 255], "#FFFFFF", "255, 255, 255"),
@@ -209,13 +210,12 @@ fn hex_has_two_digits_a_channel_with_its_leading_zeros_and_rgb_none() {
 }
 
 /// An arrow key going down, `milliseconds` after Windows started.
-fn arrow(key: screengauge_core::session::Key, milliseconds: u64) -> Event {
+fn arrow(key: Key, milliseconds: u64) -> Event {
     event(milliseconds, false, Input::KeyDown(key))
 }
 
 #[test]
 fn an_arrow_key_moves_to_the_neighbor_and_the_click_copies_its_color_alone() {
-    use screengauge_core::session::Key;
     let mut session = open(item(DODGER_BLUE), ColorFormat::Hex);
     // The neighbor on the right is the fifth: 20 × 4 of red, no green, 200 − 20 × 4 of blue.
     session.handle(arrow(Key::Right, 1000));
@@ -235,8 +235,7 @@ fn a_press_on_the_toolbar_copies_no_color() {
     let mut session = open(item(DODGER_BLUE), ColorFormat::Both);
     // The toolbar's background, just inside its left side.
     let corner = session.scene().toolbar.corner;
-    let toolbar =
-        screengauge_core::session::toolbar::layout(corner, Scale::HUNDRED_PERCENT).toolbar;
+    let toolbar = toolbar::layout(corner, Scale::HUNDRED_PERCENT).toolbar;
     let background = Point {
         x: toolbar.left + 2,
         y: toolbar.top + toolbar.height.cast_signed() / 2,
@@ -314,8 +313,8 @@ fn rect(left: i32, top: i32, width: u32, height: u32) -> Rect {
 fn with_both_formats_hex_and_rgb_take_a_line_each_beside_the_swatch_centered_between_them() {
     // At 100% and 8× with the cursor at (700, 500): the frame of 168 starts at (729, 529), and X and Y share the line
     // 7 below it, 16 tall, from 704. The color's row follows 5 below, at 725: two lines of 16 beside the swatch of 22,
-    // which sits 5 down to be centered in their 32. The strip's text starts 4 in from the frame, at 733, and the color's
-    // 22 + 8 after it, at 763, as wide as the 160 of text less those 30.
+    // which sits 5 down to be centered in their 32. The strip's text starts 4 in from the frame, at 733, and the
+    // color's 22 + 8 after it, at 763, as wide as the 160 of text less those 30.
     let view = view(&open(item(DODGER_BLUE), ColorFormat::Both));
     assert_eq!(view.x.line, rect(733, 704, 76, 16));
     assert_eq!(view.color.swatch, rect(733, 725 + 5, 22, 22));

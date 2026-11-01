@@ -323,18 +323,16 @@ impl Session {
         if self.is_second_click(uptime) {
             return Vec::new();
         }
+        // Before the cursor has been off the toolbar there is nothing to copy.
         let Some(at) = self.measured_at else {
             return Vec::new();
         };
-        let Some(monitor) = frozen_screen::monitor_at(&self.frozen_screen, at) else {
+        let Some((monitor, photo)) = frozen_screen::photo_at(&self.frozen_screen, at) else {
+            // Can't happen: the tool measures where the cursor is, and the cursor is always on a monitor.
             return Vec::new();
         };
-        let Some(photo) = self.frozen_screen.get(monitor) else {
-            // Can't happen: `monitor_at` gives the index of one of the frozen screen's photos.
-            return Vec::new();
-        };
-        let [first, other] = color::texts(pixels::color(photo, at), self.color_format);
-        let text = if held.shift { other } else { first };
+        let texts = color::texts(pixels::color(photo, at), self.color_format);
+        let text = if held.shift { texts.other } else { texts.first };
         let mut effects = vec![Effect::CopyText(text)];
         effects.extend(self.show(Message::Copied, self.notice_monitor(monitor), uptime));
         effects
@@ -789,11 +787,7 @@ impl Session {
             return None;
         }
         let center = self.measured_at?;
-        let monitor = frozen_screen::monitor_at(&self.frozen_screen, center)?;
-        let Some(photo) = self.frozen_screen.get(monitor) else {
-            // Can't happen: `monitor_at` gives the index of one of the frozen screen's photos.
-            return None;
-        };
+        let (monitor, photo) = frozen_screen::photo_at(&self.frozen_screen, center)?;
         Some(magnified_view::magnified_view(
             photo,
             monitor,

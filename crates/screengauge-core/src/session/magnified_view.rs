@@ -77,9 +77,12 @@ pub(super) fn magnified_view(
     // X and Y with their logical pixels don't fit the strip side by side (the owner's choice in WPC-315).
     let stacked = x.logical.is_some();
     let rgb = pixels::color(photo, center);
-    let [first, other] = color::texts(rgb, color_format);
-    // HEX above RGB with both formats (the owner's choice in WPC-316).
-    let second = (color_format == ColorFormat::Both).then_some(other);
+    let color::Texts {
+        first,
+        other,
+        other_shows,
+    } = color::texts(rgb, color_format);
+    let second = other_shows.then_some(other);
 
     let side = across.saturating_mul(factor);
     let inset = scaled(RING, dpi) + scaled(PAD, dpi);
@@ -147,14 +150,14 @@ pub(super) fn magnified_view(
         .saturating_add_unsigned(scaled(COLOR_GAP, dpi));
     let swatch = Rect {
         left: text_left,
-        top: row_top.saturating_add_unsigned(centered(row, swatch_side)),
+        top: row_top.saturating_add_unsigned(offset_to_center(row, swatch_side)),
         width: swatch_side,
         height: swatch_side,
     };
     let beside = swatch_side + scaled(SWATCH_GAP, dpi);
     let first_color_line = Rect {
         left: text_left.saturating_add_unsigned(beside),
-        top: row_top.saturating_add_unsigned(centered(row, color_lines * line)),
+        top: row_top.saturating_add_unsigned(offset_to_center(row, color_lines * line)),
         width: text_width.saturating_sub(beside),
         height: line,
     };
@@ -198,7 +201,7 @@ pub(super) fn magnified_view(
 
 /// How far below the top of a row `outer` pixels tall something `inner` pixels tall starts when centered in it: half
 /// the spare room, rounded up as Chromium puts a box on the pixel grid.
-fn centered(outer: u32, inner: u32) -> u32 {
+fn offset_to_center(outer: u32, inner: u32) -> u32 {
     outer.saturating_sub(inner).div_ceil(2)
 }
 

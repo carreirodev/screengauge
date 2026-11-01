@@ -174,8 +174,8 @@ fn the_grid_parts_the_pixels_from_8x_up() {
 #[test]
 fn the_panel_is_22_logical_pixels_below_and_right_of_the_cursor_around_the_frame_and_the_strip() {
     // At 100%: a border of 1 and a padding of 6 around the frame of 168, which the strip follows: 7 above its line of
-    // 16 (12px text at a line height of 1.35, 16.2), 5 above the color's row, as tall as HEX above RGB in Color format's
-    // default, Both, two lines of 16, and 2 below it.
+    // 16 (12px text at a line height of 1.35, 16.2), 5 above the color's row, as tall as HEX above RGB in Color
+    // format's default, Both, two lines of 16, and 2 below it.
     let view = view(&open_at(MIDDLE));
     assert_eq!(
         view.panel,

@@ -1583,8 +1583,8 @@ fn the_swatch_is_exactly_the_pixels_color_inside_a_ring_of_the_border_with_round
             let view = fixture.view();
             let picture = render(&canvas, &photo, mode, dpi, &view);
             let context = format!("{mode:?} at {dpi} DPI");
-            // `.sw`: 22 a side, its ring of 1 inside it, in `--panel-border` over the swatch's own color, as CSS paints a
-            // border over the box's background, and corners of 6.
+            // `.sw`: 22 a side, its ring of 1 inside it, in `--panel-border` over the swatch's own color, as CSS paints
+            // a border over the box's background, and corners of 6.
             let swatch = ints(view.color.swatch);
             assert_eq!(swatch.right - swatch.left, scaled(22, dpi), "{context}");
             let (ring, radius) = (scaled(1, dpi), scaled(6, dpi));
