@@ -428,3 +428,17 @@ fn a_step_of_the_tolerance_is_one_and_stops_at_the_limits() {
     assert_eq!(Tolerance::MAX.up(), Tolerance::MAX);
     assert_eq!(Tolerance::MIN.down(), Tolerance::MIN);
 }
+
+#[test]
+fn each_magnification_enlarges_a_pixel_to_its_number_of_pixels_a_side() {
+    // 2×, 4×, 8×, 16× and 32× (v1 spec WPC-296, Inspect).
+    let factors = [
+        Magnification::X2,
+        Magnification::X4,
+        Magnification::X8,
+        Magnification::X16,
+        Magnification::X32,
+    ]
+    .map(Magnification::factor);
+    assert_eq!(factors, [2, 4, 8, 16, 32]);
+}

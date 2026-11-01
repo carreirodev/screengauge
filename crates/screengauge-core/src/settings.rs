@@ -237,3 +237,16 @@ pub enum Magnification {
     X16,
     X32,
 }
+
+impl Magnification {
+    /// How many physical pixels a side each enlarged pixel takes: 2, 4, 8, 16 or 32.
+    pub const fn factor(self) -> u32 {
+        match self {
+            Magnification::X2 => 2,
+            Magnification::X4 => 4,
+            Magnification::X8 => 8,
+            Magnification::X16 => 16,
+            Magnification::X32 => 32,
+        }
+    }
+}
