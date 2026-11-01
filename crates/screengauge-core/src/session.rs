@@ -612,7 +612,8 @@ impl Session {
 
     /// Puts the cursor at `to`, the dragged toolbar following it, notes how far the drag Bounds is drawing has gone from
     /// its start, and measures there. The arrow keys come here too, so they nudge a held toolbar a pixel at a time, or ten
-    /// with Shift (the owner's choice in WPC-312), and count towards the click limit as the mouse going that far would.
+    /// with Shift (the owner's choice in WPC-312), and count towards the click limit as the mouse going that far would
+    /// (the owner's choice in WPC-314).
     fn move_cursor(&mut self, to: Point) {
         self.cursor = to;
         self.drag_toolbar();
@@ -675,7 +676,8 @@ impl Session {
                     self.also_show_logical_pixels,
                 )
             }),
-            // Until the drag counts, the preview shows nothing, as the button coming up then does nothing.
+            // Until the drag counts, the preview shows nothing, not even the drawn rectangle, as the button coming up then
+            // does nothing (the owner's choice in WPC-314).
             Tool::Bounds => self.drag.filter(|drag| !drag.is_click()).and_then(|drag| {
                 bounds::measure(
                     &self.frozen_screen,

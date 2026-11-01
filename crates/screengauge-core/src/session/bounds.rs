@@ -9,7 +9,9 @@ use crate::settings::Tolerance;
 /// or a tremble of the mouse, which does nothing (v1 spec WPC-296, Bounds, "o limite se calibra na construção"). It is
 /// Windows' own drag distance, SM_CXDRAG and SM_CYDRAG, the pixels on either side of a press the mouse may move before a
 /// drag begins, which let a click come up without starting one: 4 at every scale from 100% to 200% on the owner's
-/// computer, measured with GetSystemMetricsForDpi in WPC-314, so the same here whatever the monitor's scale.
+/// computer, measured with GetSystemMetricsForDpi in WPC-314, so the same here whatever the monitor's scale. It is
+/// fixed rather than read from Windows, so a drag distance changed in Windows isn't followed (the owner's choice in
+/// WPC-314).
 const CLICK_LIMIT: u32 = 4;
 
 /// A drag of Bounds, from the press until the button comes up.
@@ -39,7 +41,7 @@ impl Drag {
 
     /// Notes that the cursor went to `cursor`, wherever it is, on this monitor or another. Once the cursor has gone
     /// further than the click limit, the drag counts until the button comes up, even should the cursor come back near
-    /// the start: the mouse went that far.
+    /// the start: the mouse went that far (the owner's choice in WPC-314).
     pub(super) fn went_to(&mut self, cursor: Point) {
         let far = |from: i32, to: i32| from.abs_diff(to) > CLICK_LIMIT;
         self.past_click_limit |= far(self.start.x, cursor.x) || far(self.start.y, cursor.y);
