@@ -744,10 +744,11 @@ extern "system" fn window_proc(
                     Some(Pressed::Tool) | None => deliver(Input::Release),
                 }
             }
-            // Another window took the mouse while the button was held, so its release will never come here: a toolbar
+            // Another window took the mouse while the button was held, so its release may never come here: a toolbar
             // button held down goes back to rest, and a dragged toolbar is let go where it is, or it would follow the
-            // cursor with the button up. A rectangle in Bounds ends where it is, as the release would end it there, which
-            // keeps the contract as it is (the finding from WPC-300, noted on WPC-313).
+            // cursor with the button up. A rectangle in Bounds is pinned and copied only when the button really comes
+            // up, over one of these windows: losing the mouse alone, as to the Windows key, which then closes the tools,
+            // copies nothing, and the clipboard stays as it was (the owner's choice in WPC-313).
             WM_CAPTURECHANGED => match window.pressed.take() {
                 Some(Pressed::Toolbar(Hit::Background)) => {
                     redraw_window(hwnd);
@@ -757,8 +758,7 @@ extern "system" fn window_proc(
                     redraw_window(hwnd);
                     Some(LRESULT(0))
                 }
-                Some(Pressed::Tool) => deliver(Input::Release),
-                None => Some(LRESULT(0)),
+                Some(Pressed::Tool) | None => Some(LRESULT(0)),
             },
             WM_MOUSEWHEEL => deliver(Input::Wheel(event::wheel(wparam))),
             WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP => {
