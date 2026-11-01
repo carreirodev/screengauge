@@ -102,6 +102,8 @@ pub struct Notice {
 pub enum Message {
     /// A copy to the clipboard was made.
     Copied,
+    /// A drawn rectangle held nothing but the reference color, so nothing was pinned or copied (v1 spec WPC-296, Bounds).
+    NoContentFound,
 }
 
 impl Message {
@@ -109,12 +111,14 @@ impl Message {
     pub fn text(self) -> &'static str {
         match self {
             Message::Copied => "Copied",
+            Message::NoContentFound => "No content found",
         }
     }
 
     pub fn sign(self) -> Sign {
         match self {
             Message::Copied => Sign::Ok,
+            Message::NoContentFound => Sign::Alert,
         }
     }
 }
@@ -124,7 +128,7 @@ impl Message {
 pub enum Sign {
     /// A check mark: what the user asked for was done.
     Ok,
-    /// An exclamation mark in a circle: it wasn't, as with "No content found" (WPC-314).
+    /// An exclamation mark in a circle: it wasn't, as with "No content found".
     Alert,
 }
 

@@ -215,13 +215,21 @@ impl Session {
         {
             self.indicator_until = None;
         }
+        self.hold_alt(match event.input {
+            Input::KeyDown(Key::Alt) => true,
+            Input::KeyUp(Key::Alt) => false,
+            _ => event.held.alt,
+        });
         match event.input {
             // The second click of the double-click that called ScreenGauge does nothing, on the toolbar as on the tool
             // (WPC-308): it would act on a button the user never aimed at.
             Input::Toolbar(_) if self.is_second_click(event.uptime) => Vec::new(),
-            // Esc closes the tools whatever tool is active (v1 spec WPC-296, derived rule 3), and so do the toolbar's
-            // close button and the global shortcut pressed again. Alt+F4 closes them as a whole, never one monitor's
-            // window alone.
+            // Esc with the button held while Bounds draws a rectangle cancels only that drag (v1 spec WPC-296, Fechar as
+            // ferramentas).
+            Input::KeyDown(Key::Esc) if self.drag.is_some() => self.cancel_drag(),
+            // Esc without a drag closes the tools whatever tool is active (v1 spec WPC-296, derived rule 3), and so do
+            // the toolbar's close button and the global shortcut pressed again. Alt+F4 closes them as a whole, never one
+            // monitor's window alone.
             Input::KeyDown(Key::Esc)
             | Input::Toolbar(ToolbarButton::Close)
             | Input::GlobalShortcut
@@ -277,7 +285,7 @@ impl Session {
         match self.remembered.last_tool {
             Tool::Dimensions => self.pin(held, uptime),
             Tool::Bounds => {
-                self.start_drag(uptime);
+                self.start_drag(held, uptime);
                 Vec::new()
             }
             Tool::Inspect | Tool::Snip => Vec::new(),
@@ -285,39 +293,64 @@ impl Session {
     }
 
     /// Starts drawing a rectangle from where the session last put the cursor, on the monitor there, as Dimensions' click
-    /// pins what it measures there. The second click of the double-click that called ScreenGauge starts none (WPC-308).
-    fn start_drag(&mut self, uptime: Duration) {
+    /// pins what it measures there, exactly as drawn with Alt `held`. The second click of the double-click that called
+    /// ScreenGauge starts none (WPC-308).
+    fn start_drag(&mut self, held: Held, uptime: Duration) {
         if self.is_second_click(uptime) {
             return;
         }
-        self.drag = frozen_screen::monitor_at(&self.frozen_screen, self.cursor).map(|monitor| {
-            bounds::Drag {
-                start: self.cursor,
-                monitor,
-            }
-        });
+        self.drag = frozen_screen::monitor_at(&self.frozen_screen, self.cursor)
+            .map(|monitor| bounds::Drag::new(self.cursor, monitor, held.alt));
         self.measure();
+    }
+
+    /// Has the drag Bounds is drawing measure exactly the drawn rectangle while `alt` is held, and shrink it to the
+    /// content otherwise. Alt counts as each event has it, so pressing or letting go of it in the middle of the drag
+    /// changes the preview at once, and the release goes by the key as the button comes up (v1 spec WPC-296, Bounds).
+    /// Only a change measures again: Alt held down repeats, and a shrink may read a whole monitor.
+    fn hold_alt(&mut self, alt: bool) {
+        if let Some(drag) = self.drag.as_mut().filter(|drag| drag.exact != alt) {
+            drag.exact = alt;
+            self.measure();
+        }
     }
 
     /// What the button coming up does: it lets go of the dragged toolbar, or ends the drag Bounds was drawing.
     fn release(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
-        if self.drag.take().is_some() {
-            self.finish_drag(held, uptime)
-        } else {
-            self.let_go()
+        match self.drag.take() {
+            Some(drag) => self.finish_drag(drag, held, uptime),
+            None => self.let_go(),
         }
     }
 
-    /// Pins what Bounds measured as the drag ended, exactly as the preview showed it, and copies it, its logical pixels
+    /// Drops the drag Bounds was drawing, with its preview, and nothing else: the tools stay open with every pinned
+    /// measurement, and the button coming up afterwards pins and copies nothing.
+    fn cancel_drag(&mut self) -> Vec<Effect> {
+        self.drag = None;
+        self.measure();
+        Vec::new()
+    }
+
+    /// Pins what Bounds measured as `drag` ended, exactly as the preview showed it, and copies it, its logical pixels
     /// with Shift held as the button comes up, whatever it was held for before (v1 spec WPC-296, Bounds). The drawn
     /// rectangle goes, there are no handles to adjust it, and the tool is ready for the next drag. With nothing but the
-    /// reference color in the drawn rectangle, nothing is pinned or copied.
-    fn finish_drag(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
+    /// reference color in the drawn rectangle, nothing is pinned or copied, the clipboard stays as it was, and the
+    /// notice "No content found" says so. A drag that never went past the click limit was a click or a tremble, and does
+    /// nothing at all, with or without Alt, and without a notice.
+    fn finish_drag(&mut self, drag: bounds::Drag, held: Held, uptime: Duration) -> Vec<Effect> {
         let measured = self.live.take();
         self.measure();
+        if !drag.counts {
+            return Vec::new();
+        }
         match measured {
             Some(measurement) => self.pin_and_copy(measurement, held.shift, uptime),
-            None => Vec::new(),
+            None => {
+                let monitor = self.notice_monitor(drag.monitor);
+                self.show(Message::NoContentFound, monitor, uptime)
+                    .into_iter()
+                    .collect()
+            }
         }
     }
 
@@ -348,10 +381,7 @@ impl Session {
             return Vec::new();
         };
         let text = units::clipboard_text(&measurement.lengths(), photo.scale, logical);
-        // The cursor is always on a monitor, which the drag of Bounds may have left for another; should it be on none,
-        // the notice goes on the measurement's monitor.
-        let monitor = frozen_screen::monitor_at(&self.frozen_screen, self.cursor)
-            .unwrap_or(measurement.monitor);
+        let monitor = self.notice_monitor(measurement.monitor);
         self.pinned.push(measurement);
         let mut effects = vec![Effect::CopyText(text)];
         effects.extend(self.show(Message::Copied, monitor, uptime));
@@ -429,6 +459,13 @@ impl Session {
             self.pinned.pop();
         }
         Vec::new()
+    }
+
+    /// The monitor a notice where the cursor is goes on: the cursor's. The cursor is always on a monitor, which the drag
+    /// of Bounds may have left for another; should it be on none, the notice goes on `measured_on`, the monitor of what
+    /// the notice is about.
+    fn notice_monitor(&self, measured_on: usize) -> usize {
+        frozen_screen::monitor_at(&self.frozen_screen, self.cursor).unwrap_or(measured_on)
     }
 
     /// Shows `message` where the cursor is, on `monitor`, in place of any notice still on screen, until it is due to go,
@@ -560,6 +597,9 @@ impl Session {
     fn move_cursor(&mut self, to: Point) {
         self.cursor = to;
         self.drag();
+        if let Some(drag) = self.drag.as_mut() {
+            drag.went_to(to);
+        }
         self.measure();
     }
 
@@ -616,7 +656,8 @@ impl Session {
                     self.also_show_logical_pixels,
                 )
             }),
-            Tool::Bounds => self.drag.and_then(|drag| {
+            // Until the drag counts, the preview shows nothing, as the button coming up then does nothing.
+            Tool::Bounds => self.drag.filter(|drag| drag.counts).and_then(|drag| {
                 bounds::measure(
                     &self.frozen_screen,
                     drag,
@@ -658,9 +699,11 @@ impl Session {
         })
     }
 
-    /// The rectangle Bounds is drawing, while the button is held.
+    /// The rectangle Bounds is drawing, while the button is held, once the drag counts. With Alt held, none: the drawn
+    /// rectangle is then what Bounds measures, and shows only as the live measurement, already in the result's style
+    /// (v1 spec WPC-296, Como as medidas aparecem).
     fn drawn_rectangle(&self) -> Option<DrawnRectangle> {
-        let drag = self.drag?;
+        let drag = self.drag.filter(|drag| drag.counts && !drag.exact)?;
         let Some(photo) = self.frozen_screen.get(drag.monitor) else {
             // Can't happen: a drag begins on a monitor of the frozen screen.
             return None;

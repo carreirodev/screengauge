@@ -5,6 +5,13 @@ use super::pixels::{self, Reference, color, rgb};
 use super::{Label, Measurement, Photo, Point, Rect, units};
 use crate::settings::Tolerance;
 
+/// How many physical pixels the cursor may go from where the drag began, along each axis, with the drag still a click
+/// or a tremble of the mouse, which does nothing (v1 spec WPC-296, Bounds, "o limite se calibra na construção"). It is
+/// Windows' own drag distance, SM_CXDRAG and SM_CYDRAG, the pixels on either side of a press the mouse may move before a
+/// drag begins, which let a click come up without starting one: 4 at every scale from 100% to 200% on the owner's
+/// computer, measured with GetSystemMetricsForDpi in WPC-314, so the same here whatever the monitor's scale.
+const CLICK_LIMIT: u32 = 4;
+
 /// A drag of Bounds, from the press until the button comes up.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Drag {
@@ -12,6 +19,32 @@ pub(super) struct Drag {
     pub(super) start: Point,
     /// The monitor the drag began on, as an index in the frozen screen's order. The drawn rectangle never leaves it.
     pub(super) monitor: usize,
+    /// Whether Alt is held, as the last event had it: Bounds then measures exactly the drawn rectangle, for photos,
+    /// gradients and empty areas, and doesn't shrink it (v1 spec WPC-296, Bounds).
+    pub(super) exact: bool,
+    /// Whether the cursor has gone further than [`CLICK_LIMIT`] from the start along either axis since the press. Until
+    /// it has, the drag is a click or a tremble: nothing shows, and the button coming up does nothing.
+    pub(super) counts: bool,
+}
+
+impl Drag {
+    /// A drag begun at `start`, on `monitor`, exactly as drawn while `exact`.
+    pub(super) fn new(start: Point, monitor: usize, exact: bool) -> Drag {
+        Drag {
+            start,
+            monitor,
+            exact,
+            counts: false,
+        }
+    }
+
+    /// Notes that the cursor went to `cursor`, wherever it is, on this monitor or another. Once the cursor has gone
+    /// further than the click limit, the drag counts until the button comes up, even should the cursor come back near
+    /// the start: the mouse went that far.
+    pub(super) fn went_to(&mut self, cursor: Point) {
+        let far = |from: i32, to: i32| from.abs_diff(to) > CLICK_LIMIT;
+        self.counts |= far(self.start.x, cursor.x) || far(self.start.y, cursor.y);
+    }
 }
 
 /// The drawn rectangle of `drag` with the cursor at `cursor`: from the drag's start to the cursor, both corners
@@ -28,9 +61,9 @@ pub(super) fn drawn_rectangle(photo: &Photo, drag: Drag, cursor: Point) -> Rect 
 }
 
 /// What Bounds measures for `drag` with the cursor at `cursor`: the content of the drawn rectangle, every pixel that
-/// differs from the reference color, the color where the drag began, by more than `tolerance`. `None` when there is
-/// none. The label shows the logical pixels too when `also_show_logical_pixels` is on and the monitor's scale isn't
-/// 100%.
+/// differs from the reference color, the color where the drag began, by more than `tolerance`, or, with Alt held, the
+/// drawn rectangle itself. `None` when there is no content. The label shows the logical pixels too when
+/// `also_show_logical_pixels` is on and the monitor's scale isn't 100%.
 pub(super) fn measure(
     frozen_screen: &[Photo],
     drag: Drag,
@@ -43,7 +76,11 @@ pub(super) fn measure(
         return None;
     };
     let drawn = drawn_rectangle(photo, drag, cursor);
-    let content = shrink(photo, drawn, color(photo, drag.start), tolerance)?;
+    let content = if drag.exact {
+        drawn
+    } else {
+        shrink(photo, drawn, color(photo, drag.start), tolerance)?
+    };
     let mut measurement = Measurement {
         monitor: drag.monitor,
         horizontal: None,
