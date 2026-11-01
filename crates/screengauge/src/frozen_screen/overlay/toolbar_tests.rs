@@ -1088,3 +1088,201 @@ fn the_toolbar_draws_on_a_windows_own_render_target_which_ignores_alpha() {
     // SAFETY: our own window, destroyed once, after what drew on it.
     unsafe { DestroyWindow(hwnd) }.expect("the window is destroyed");
 }
+
+/// How much of the way from the gradient `stops`' color at row `y` to `ink` the pixel (`x`, `y`) of `drawn` is, in
+/// `place`: 0 for the button's own color, 1 for full ink.
+fn ink_share(drawn: &Drawn, place: &RECT, stops: Stops, ink: [u8; 3], x: i32, y: i32) -> f64 {
+    let background = gradient_at(stops, down(place, y));
+    let pixel = drawn.at(x, y);
+    let along = |i: usize| f64::from(ink[i]) - f64::from(background[i]);
+    let from = |i: usize| f64::from(pixel[i]) - f64::from(background[i]);
+    let length: f64 = (0..3).map(|i| along(i) * along(i)).sum();
+    (0..3).map(|i| from(i) * along(i)).sum::<f64>() / length
+}
+
+/// A point of an icon in its view box, and whether a stroke passes through it.
+type Probe = (f64, f64, bool);
+
+/// Points of each icon, in its view box, that a stroke passes through (`true`) and points well clear of every stroke
+/// (`false`), taken from the prototype's SVGs by hand: the middle of a side, the tip of a tooth, the middle of a slanted
+/// line. Where a path is closed, one of its points is on the side only the closepath draws; where an arc bulges, one is
+/// at the top of the bulge.
+const PROBES: [(ToolbarButton, &[Probe]); 10] = [
+    (
+        ToolbarButton::Tool(Tool::Dimensions),
+        // The frame's top, left and bottom sides, and the first and second tick.
+        &[
+            (12.0, 8.0, true),
+            (2.5, 12.0, true),
+            (12.0, 16.0, true),
+            (6.5, 9.5, true),
+            (10.5, 11.0, true),
+        ],
+    ),
+    (
+        ToolbarButton::Tool(Tool::Bounds),
+        // The four corner brackets' sides, the small square's top, and the room inside it and between them.
+        &[
+            (4.0, 6.5, true),
+            (6.5, 4.0, true),
+            (20.0, 6.5, true),
+            (17.5, 4.0, true),
+            (4.0, 17.5, true),
+            (6.5, 20.0, true),
+            (20.0, 17.5, true),
+            (17.5, 20.0, true),
+            (12.0, 9.0, true),
+            (12.0, 12.0, false),
+        ],
+    ),
+    (
+        ToolbarButton::Tool(Tool::Inspect),
+        // The glass at its top, right, left and bottom, the handle's middle, and the room inside the glass.
+        &[
+            (11.0, 5.0, true),
+            (17.0, 11.0, true),
+            (5.0, 11.0, true),
+            (11.0, 17.0, true),
+            (17.75, 17.75, true),
+            (11.0, 11.0, false),
+        ],
+    ),
+    (
+        ToolbarButton::Tool(Tool::Snip),
+        // The camera's left side (only the closepath draws it), bottom, right side, top and a slope, the lens' top, and
+        // the room inside the lens.
+        &[
+            (4.0, 13.5, true),
+            (12.0, 19.0, true),
+            (20.0, 13.5, true),
+            (12.0, 5.0, true),
+            (8.0, 6.5, true),
+            (12.0, 9.5, true),
+            (12.0, 13.0, false),
+        ],
+    ),
+    (
+        ToolbarButton::Mode(DimensionsMode::Horizontal),
+        // The shaft, the arrowheads' tips and a side of each, and the room above and below the shaft.
+        &[
+            (12.0, 12.0, true),
+            (4.0, 12.0, true),
+            (6.0, 10.0, true),
+            (18.0, 14.0, true),
+            (12.0, 8.0, false),
+            (12.0, 16.0, false),
+        ],
+    ),
+    (
+        ToolbarButton::Mode(DimensionsMode::Vertical),
+        &[
+            (12.0, 12.0, true),
+            (12.0, 4.0, true),
+            (10.0, 6.0, true),
+            (14.0, 18.0, true),
+            (8.0, 12.0, false),
+            (16.0, 12.0, false),
+        ],
+    ),
+    (
+        ToolbarButton::Mode(DimensionsMode::Cross),
+        &[
+            (12.0, 12.0, true),
+            (10.5, 4.5, true),
+            (10.5, 19.5, true),
+            (4.5, 10.5, true),
+            (19.5, 10.5, true),
+            (6.5, 6.5, false),
+            (17.5, 17.5, false),
+        ],
+    ),
+    (
+        ToolbarButton::Settings,
+        // The tips of the gear's four teeth, which are arcs, the top of its hub, and the room in the middle of the hub
+        // and between the hub and the teeth's ring.
+        &[
+            (12.0, 1.0, true),
+            (12.0, 23.0, true),
+            (1.0, 12.0, true),
+            (23.0, 12.0, true),
+            (12.0, 9.0, true),
+            (12.0, 12.0, false),
+            (12.0, 6.5, false),
+        ],
+    ),
+    (
+        ToolbarButton::Minimize,
+        &[
+            (12.0, 9.0, true),
+            (12.0, 15.0, true),
+            (9.0, 12.0, true),
+            (14.0, 12.0, false),
+        ],
+    ),
+    (
+        ToolbarButton::Close,
+        &[
+            (12.0, 12.0, true),
+            (8.0, 8.0, true),
+            (16.0, 16.0, true),
+            (16.0, 8.0, true),
+            (8.0, 16.0, true),
+            (12.0, 7.0, false),
+            (7.0, 12.0, false),
+        ],
+    ),
+];
+
+#[test]
+fn each_icons_strokes_are_where_its_svg_draws_them() {
+    let canvas = canvas();
+    let scenes = [
+        scene(Tool::Dimensions, Some(DimensionsMode::Horizontal)),
+        scene(Tool::Snip, Some(DimensionsMode::Cross)),
+    ];
+    for mode in MODES {
+        let t = tokens(mode);
+        for dpi in SCALES {
+            for toolbar in &scenes {
+                let drawn = draw(&canvas, mode, dpi, toolbar);
+                let lit = lit_in(toolbar);
+                for ((button, css_size, _), (probed, probes)) in ICONS.iter().zip(PROBES) {
+                    assert_eq!(*button, probed, "the probes are in the icons' order");
+                    let place = drawn.place(*button);
+                    let (stops, ink) = match (lit.contains(button), is_control(*button)) {
+                        (true, _) => (t.lit, t.ink_on),
+                        (false, true) => (t.small, t.small_ink),
+                        (false, false) => (t.button, t.ink),
+                    };
+                    let side = f64::from(scaled(*css_size, dpi));
+                    let unit = side / 24.0;
+                    let left =
+                        f64::from(place.left) + (f64::from(place.right - place.left) - side) / 2.0;
+                    let top =
+                        f64::from(place.top) + (f64::from(place.bottom - place.top) - side) / 2.0;
+                    for &(vx, vy, stroked) in probes {
+                        let (x, y) = (floor(left + vx * unit), floor(top + vy * unit));
+                        let context = format!(
+                            "{button:?} at view box ({vx}, {vy}), pixel ({x}, {y}): {mode:?} at {dpi} DPI"
+                        );
+                        if stroked {
+                            // The pixel, or one beside it: the icon's corner is laid on a whole pixel, half a pixel from
+                            // where this puts it.
+                            let share = (-1..=1)
+                                .flat_map(|dy| (-1..=1).map(move |dx| (x + dx, y + dy)))
+                                .map(|(x, y)| ink_share(&drawn, &place, stops, ink, x, y))
+                                .fold(f64::MIN, f64::max);
+                            assert!(share >= 0.45, "no stroke there, {share:.2} ink: {context}");
+                        } else {
+                            let share = ink_share(&drawn, &place, stops, ink, x, y);
+                            assert!(
+                                share <= 0.3,
+                                "ink where there is none, {share:.2}: {context}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
