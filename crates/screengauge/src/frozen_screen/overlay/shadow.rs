@@ -37,6 +37,18 @@ pub struct Layers {
     pub step: i32,
 }
 
+impl Layers {
+    /// How far past the shape the outermost layer reaches, in pixels: nothing of the shadow is drawn beyond.
+    pub fn reach(&self) -> i32 {
+        self.layers
+            .iter()
+            .map(|layer| layer.grow)
+            .max()
+            .unwrap_or(0)
+            .max(0)
+    }
+}
+
 /// The error function, to 1.5e-7 (Abramowitz and Stegun 7.1.26). Rust's standard library has none.
 fn erf(x: f64) -> f64 {
     let t = 1.0 / (1.0 + 0.327_591_1 * x.abs());
@@ -215,12 +227,7 @@ mod tests {
     fn the_layers_reach_three_deviations_out_and_every_layer_is_a_real_opacity() {
         let layers = layers(20.0, 0.8, Profile::Edge);
         // The outermost layers, under half a level, are left out; none is beyond three deviations.
-        let reach = layers
-            .layers
-            .iter()
-            .map(|layer| layer.grow)
-            .max()
-            .expect("layers");
+        let reach = layers.reach();
         assert!((50..=60).contains(&reach), "{reach}");
         // About twenty bands to a deviation, and never finer than a pixel: twice the blur, twice the step.
         assert_eq!(layers.step, 1);
@@ -255,6 +262,7 @@ mod tests {
                 opacity: 0.12
             }]
         );
+        assert_eq!(layers.reach(), 0);
     }
 
     #[test]

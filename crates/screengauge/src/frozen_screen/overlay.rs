@@ -15,6 +15,7 @@ mod tolerance;
 #[cfg(test)]
 mod tolerance_tests;
 pub mod toolbar;
+mod toolbar_cache;
 mod toolbar_icons;
 mod toolbar_paint;
 mod toolbar_palette;
@@ -46,6 +47,7 @@ use crate::log;
 use crate::theme::Mode;
 use geometry::{Parts, scaled};
 use palette::Surfaces;
+use toolbar_cache::ToolbarCache;
 
 /// The label's font. Its digits differ in width unless asked for tabular figures (a 1 is two pixels narrower than a 0
 /// at this size), which the label does, so the pill keeps its width while the number keeps its length.
@@ -198,6 +200,9 @@ pub struct Overlay {
     fonts: Fonts,
     /// The palette the toolbar is drawn in; the pinned labels' and the notice's are in `surfaces`.
     mode: Mode,
+    /// The toolbar, drawn on a bitmap that every frame lays over the photo. Lost with the rest of the overlay should the
+    /// render target be.
+    toolbar_cache: RefCell<ToolbarCache>,
     /// The window's monitor in the virtual screen, which is where the window's pixel (0, 0) is.
     monitor: RECT,
     dpi: u32,
@@ -328,6 +333,7 @@ impl Overlay {
             figures,
             fonts: fonts.clone(),
             mode,
+            toolbar_cache: RefCell::default(),
             monitor: geometry::bounds(monitor)?,
             dpi,
         })

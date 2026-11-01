@@ -10,6 +10,7 @@ use super::panel_tests::{MODES, over};
 use super::tests::{BACKGROUND, Canvas, Picture, SCALES, near};
 use super::toolbar::{Layout, layout};
 use super::*;
+use super::{toolbar_paint, toolbar_palette};
 use screengauge_core::session::{Toolbar, ToolbarButton};
 
 /// A window wide enough for the toolbar at 175% and tall enough for its shadow, over a monitor left of and below the main
@@ -763,4 +764,327 @@ fn each_icon_is_in_its_ink_centered_in_its_button_at_its_size() {
             }
         }
     }
+}
+
+/// Clears the target to the test's photo, as the start of another frame does.
+fn clear_to_photo(target: &ID2D1RenderTarget) {
+    let [r, g, b] = BACKGROUND;
+    let photo = D2D1_COLOR_F {
+        r: f32::from(r) / 255.0,
+        g: f32::from(g) / 255.0,
+        b: f32::from(b) / 255.0,
+        a: 1.0,
+    };
+    // SAFETY: a drawing call between BeginDraw and EndDraw on a live target.
+    unsafe { target.Clear(Some(&photo)) };
+}
+
+/// The scenes drawn in order, each over a cleared target as in a window's frames, with the pixels of the last and how many
+/// times the toolbar was drawn on its bitmap after each.
+fn frames(canvas: &Canvas, mode: Mode, dpi: u32, scenes: &[Toolbar]) -> (Picture, Vec<u32>) {
+    let mut fills = Vec::new();
+    let picture = canvas.render_in(mode, TOOLBAR_MONITOR, dpi, |overlay, target| {
+        for (frame, toolbar) in scenes.iter().enumerate() {
+            if frame > 0 {
+                clear_to_photo(target);
+            }
+            overlay.draw_toolbar(target, toolbar).expect("the toolbar");
+            fills.push(overlay.toolbar_cache.borrow().fills);
+        }
+    });
+    (picture, fills)
+}
+
+#[test]
+fn a_second_frame_of_the_same_toolbar_lays_the_bitmap_again_and_draws_the_same_pixels() {
+    let canvas = canvas();
+    let toolbar = scene(Tool::Inspect, Some(DimensionsMode::Cross));
+    for mode in MODES {
+        for dpi in SCALES {
+            let fresh = draw(&canvas, mode, dpi, &toolbar);
+            let (picture, fills) = frames(&canvas, mode, dpi, &[toolbar, toolbar, toolbar]);
+            // Drawn on the bitmap once, laid three times.
+            assert_eq!(fills, [1, 1, 1], "{mode:?} at {dpi} DPI");
+            assert!(
+                picture.pixels == fresh.picture.pixels,
+                "a cached frame differs from a fresh one: {mode:?} at {dpi} DPI"
+            );
+        }
+    }
+}
+
+#[test]
+fn lighting_another_tool_or_mode_draws_the_bitmap_again_and_going_back_draws_the_first_pixels() {
+    let canvas = canvas();
+    let first = scene(Tool::Dimensions, Some(DimensionsMode::Horizontal));
+    let others = [
+        scene(Tool::Dimensions, Some(DimensionsMode::Cross)),
+        scene(Tool::Snip, None),
+        scene(Tool::Bounds, None),
+    ];
+    for mode in MODES {
+        for dpi in [96, 144] {
+            let fresh_first = draw(&canvas, mode, dpi, &first);
+            for other in &others {
+                let fresh_other = draw(&canvas, mode, dpi, other);
+                // Another scene over the same bitmap is what a fresh one is: nothing is left of the first.
+                let (picture, fills) = frames(&canvas, mode, dpi, &[first, *other]);
+                assert_eq!(fills, [1, 2], "{other:?}: {mode:?} at {dpi} DPI");
+                assert!(
+                    picture.pixels == fresh_other.picture.pixels,
+                    "{other:?} after {first:?} is not drawn as it is alone: {mode:?} at {dpi} DPI"
+                );
+                // And back to the first, the bitmap drawn a third time.
+                let (picture, fills) = frames(&canvas, mode, dpi, &[first, *other, first]);
+                assert_eq!(fills, [1, 2, 3]);
+                assert!(
+                    picture.pixels == fresh_first.picture.pixels,
+                    "{first:?} after {other:?} is not drawn as it is alone: {mode:?} at {dpi} DPI"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_cached_toolbar_is_where_and_what_it_is_when_every_layer_is_drawn_straight_over_the_photo() {
+    let canvas = canvas();
+    let toolbar = scene(Tool::Inspect, Some(DimensionsMode::Vertical));
+    for mode in MODES {
+        for dpi in SCALES {
+            let cached = draw(&canvas, mode, dpi, &toolbar);
+            let direct = canvas.render_in(mode, TOOLBAR_MONITOR, dpi, |overlay, target| {
+                let layout = layout(bounds(), dpi);
+                let corner = (TOOLBAR_MONITOR.left, TOOLBAR_MONITOR.top);
+                overlay
+                    .paint_toolbar(target, &layout, &toolbar, corner)
+                    .expect("the toolbar");
+            });
+            // How far apart the two are at their worst, and on average over the toolbar's own rectangle.
+            let (mut most, mut total, mut count) = (0, 0u64, 0u64);
+            let toolbar_area = layout(bounds(), dpi).toolbar;
+            for y in toolbar_area.top..toolbar_area.bottom {
+                for x in toolbar_area.left..toolbar_area.right {
+                    let (a, b) = (at(&cached.picture, x, y), at(&direct, x, y));
+                    let worst = a
+                        .iter()
+                        .zip(&b)
+                        .map(|(&a, &b)| a.abs_diff(b))
+                        .max()
+                        .unwrap_or(0);
+                    most = most.max(worst);
+                    total += u64::from(worst);
+                    count += 1;
+                }
+            }
+            // Not the same pixels, and not meant to be: drawn straight over the photo, a faint layer rounds against the
+            // photo's 8 bits, and one that would change a channel by less than half a level leaves it as it was, so a
+            // shadow comes out too light in the channels that are small, and tinted (the photo's green and blue stay
+            // put while its red darkens). On the transparent bitmap the layers add up in the alpha channel first, so the
+            // shadows keep their proportions. Hence the tolerance, which a bitmap a pixel out of place would still break
+            // at every edge: a panel or an icon is tens of levels from what is beside it.
+            let mean = f64::from(u32::try_from(total).expect("a sum of levels"))
+                / f64::from(u32::try_from(count).expect("a count of pixels"));
+            assert!(
+                most <= 40,
+                "{most} levels apart at most: {mode:?} at {dpi} DPI"
+            );
+            assert!(
+                mean <= 5.0,
+                "{mean:.2} levels apart on average: {mode:?} at {dpi} DPI"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_bitmap_has_room_for_the_shadows_and_not_much_more() {
+    for mode in MODES {
+        let (sides, above, below) = shadow_reach(mode);
+        for dpi in SCALES {
+            let place = layout(bounds(), dpi);
+            let margins = toolbar_paint::reach(toolbar_palette::palette(mode), &place, dpi);
+            // The prototype's reach is three deviations out; the layers stop where they add under half a level, a few
+            // pixels short of that, so each side is within ten (scaled) pixels under it and, with the groups' own
+            // sizes scaled one at a time, a few over.
+            for (name, got, bound) in [
+                ("left", margins.left, sides),
+                ("right", margins.right, sides),
+                ("top", margins.top, above),
+                ("bottom", margins.bottom, below),
+            ] {
+                let bound = scaled(bound, dpi);
+                assert!(
+                    (bound - scaled(10, dpi)..=bound + 3).contains(&got),
+                    "the {name} margin is {got}, the prototype's shadows reach {bound}: {mode:?} at {dpi} DPI"
+                );
+            }
+        }
+    }
+}
+
+/// Times whole frames (BeginDraw to EndDraw, which is where Direct2D rasterizes) on the WIC bitmap: an empty one, one
+/// that draws the toolbar straight over the photo as every frame would without the cache, the first with the cache, which
+/// makes the bitmap, one after another tool is lit, which draws it again, and one that only lays it. Run alone and in
+/// release, where the numbers mean something:
+/// `cargo test --release -p screengauge toolbar_draw_times -- --ignored --nocapture --test-threads=1`.
+#[test]
+#[ignore = "a timing, for reading"]
+fn toolbar_draw_times() {
+    use std::time::{Duration, Instant};
+
+    let canvas = canvas();
+    let median = |mut times: Vec<Duration>| {
+        times.sort();
+        times[times.len() / 2]
+    };
+    for mode in MODES {
+        for dpi in [96, 168] {
+            let scale = Scale::from_dpi(dpi).expect("a scale");
+            let place = layout(bounds(), dpi);
+            let corner = (TOOLBAR_MONITOR.left, TOOLBAR_MONITOR.top);
+            let (one, other) = (
+                scene(Tool::Dimensions, Some(DimensionsMode::Horizontal)),
+                scene(Tool::Snip, None),
+            );
+            let mut times = [(); 5].map(|()| Vec::new());
+            for _ in 0..15 {
+                let overlay =
+                    Overlay::new(&canvas.target, &canvas.fonts, TOOLBAR_MONITOR, scale, mode)
+                        .expect("the overlay");
+                let mut frame = |slot: usize, draw: &dyn Fn(&Overlay, &ID2D1RenderTarget)| {
+                    let start = Instant::now();
+                    // SAFETY: drawing calls between BeginDraw and EndDraw on a live target.
+                    unsafe { canvas.target.BeginDraw() };
+                    clear_to_photo(&canvas.target);
+                    draw(&overlay, &canvas.target);
+                    // SAFETY: ends the BeginDraw above.
+                    unsafe { canvas.target.EndDraw(None, None) }.expect("the frame ends");
+                    times[slot].push(start.elapsed());
+                };
+                let show = |toolbar: &Toolbar| {
+                    let toolbar = *toolbar;
+                    move |overlay: &Overlay, target: &ID2D1RenderTarget| {
+                        overlay.draw_toolbar(target, &toolbar).expect("the toolbar");
+                    }
+                };
+                frame(0, &|_, _| {});
+                frame(1, &|overlay, target| {
+                    overlay
+                        .paint_toolbar(target, &place, &one, corner)
+                        .expect("the toolbar");
+                });
+                frame(2, &show(&one));
+                frame(3, &show(&other));
+                frame(4, &show(&other));
+            }
+            let [empty, straight, first, changed, laid] = times.map(median);
+            println!(
+                "{mode:?} at {dpi} DPI, a frame: empty {empty:?}, toolbar straight over the photo {straight:?}, first with the cache {first:?}, another tool lit {changed:?}, cached {laid:?}"
+            );
+            assert!(
+                laid < straight,
+                "laying the bitmap is not cheaper than drawing it"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_toolbar_draws_on_a_windows_own_render_target_which_ignores_alpha() {
+    use windows::Win32::Graphics::Direct2D::Common::{
+        D2D_SIZE_U, D2D1_ALPHA_MODE_IGNORE, D2D1_PIXEL_FORMAT,
+    };
+    use windows::Win32::Graphics::Direct2D::{
+        D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
+        D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_PRESENT_OPTIONS_NONE,
+        D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT,
+        D2D1_RENDER_TARGET_USAGE_NONE, D2D1CreateFactory, ID2D1Factory,
+    };
+    use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, WINDOW_EX_STYLE, WS_POPUP,
+    };
+    use windows::core::w;
+
+    // The frozen screen's windows draw on a target made like this one: hardware when there is, the pixel format's alpha
+    // ignored. The bitmap the toolbar is kept on asks for premultiplied alpha itself, and must still be laid over that.
+    // SAFETY: "STATIC" is a window class of Windows' own; the window is never shown, and destroyed below.
+    let hwnd = unsafe {
+        CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            w!("STATIC"),
+            w!("ScreenGauge toolbar test"),
+            WS_POPUP,
+            0,
+            0,
+            1280,
+            440,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+    .expect("a window");
+    // SAFETY: a single-threaded factory used only on this thread.
+    let factory: ID2D1Factory =
+        unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None) }
+            .expect("the Direct2D factory");
+    let properties = D2D1_RENDER_TARGET_PROPERTIES {
+        r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
+        pixelFormat: D2D1_PIXEL_FORMAT {
+            format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            alphaMode: D2D1_ALPHA_MODE_IGNORE,
+        },
+        dpiX: 96.0,
+        dpiY: 96.0,
+        usage: D2D1_RENDER_TARGET_USAGE_NONE,
+        minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
+    };
+    let window_properties = D2D1_HWND_RENDER_TARGET_PROPERTIES {
+        hwnd,
+        pixelSize: D2D_SIZE_U {
+            width: 1280,
+            height: 440,
+        },
+        presentOptions: D2D1_PRESENT_OPTIONS_NONE,
+    };
+    // SAFETY: both property structs outlive the call.
+    let target = unsafe { factory.CreateHwndRenderTarget(&properties, &window_properties) }
+        .expect("a window's render target");
+    let fonts = Fonts::new().expect("the fonts");
+    for mode in MODES {
+        for dpi in [96, 168] {
+            let scale = Scale::from_dpi(dpi).expect("a scale");
+            let overlay =
+                Overlay::new(&target, &fonts, TOOLBAR_MONITOR, scale, mode).expect("the overlay");
+            // SAFETY: drawing calls between BeginDraw and EndDraw on a live target.
+            unsafe {
+                target.BeginDraw();
+                clear_to_photo(&target);
+            }
+            // Drawn on the bitmap, laid again from it, drawn on it again for another tool, and laid.
+            for toolbar in [
+                scene(Tool::Dimensions, Some(DimensionsMode::Cross)),
+                scene(Tool::Dimensions, Some(DimensionsMode::Cross)),
+                scene(Tool::Snip, None),
+                scene(Tool::Snip, None),
+            ] {
+                overlay
+                    .draw_toolbar(&target, &toolbar)
+                    .expect("the toolbar");
+            }
+            // SAFETY: ends the BeginDraw above.
+            unsafe { target.EndDraw(None, None) }.expect("the frame ends");
+            assert_eq!(
+                overlay.toolbar_cache.borrow().fills,
+                2,
+                "{mode:?} at {dpi} DPI"
+            );
+        }
+    }
+    drop(target);
+    // SAFETY: our own window, destroyed once, after what drew on it.
+    unsafe { DestroyWindow(hwnd) }.expect("the window is destroyed");
 }

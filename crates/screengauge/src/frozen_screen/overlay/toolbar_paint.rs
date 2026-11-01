@@ -82,6 +82,90 @@ fn d2d(rgb: [u8; 3], alpha: f32) -> D2D1_COLOR_F {
     }
 }
 
+/// `logical` pixels of the monitor's scale, whole, for a length that may be negative, as a shadow's spread and drop may.
+fn signed(logical: i32, dpi: u32) -> i32 {
+    logical.signum() * scaled(logical.unsigned_abs(), dpi)
+}
+
+/// The standard deviation, in physical pixels, of a CSS blur radius of `blur` logical pixels: half of it.
+fn sigma(blur: u32, dpi: u32) -> f64 {
+    f64::from(blur) * f64::from(dpi) / 192.0
+}
+
+/// An outer shadow of a box in physical pixels: how much it is grown, how far it drops, and its layers, which are
+/// fitted across the box's short side after the spread.
+struct OuterShadow {
+    spread: i32,
+    drop: i32,
+    layers: shadow::Layers,
+}
+
+impl OuterShadow {
+    /// `None` when the spread leaves nothing of the box.
+    fn of(shadow: &Shadow, rect: &RECT, dpi: u32) -> Option<OuterShadow> {
+        let spread = signed(shadow.spread, dpi);
+        let short = (rect.right - rect.left).min(rect.bottom - rect.top) + 2 * spread;
+        if short <= 0 {
+            return None;
+        }
+        let layers = shadow::layers(
+            sigma(shadow.blur, dpi),
+            shadow.color.alpha,
+            Profile::Strip(f64::from(short)),
+        );
+        Some(OuterShadow {
+            spread,
+            drop: signed(shadow.y, dpi),
+            layers,
+        })
+    }
+}
+
+/// How far the toolbar's shadows reach past its rectangle on each side, in physical pixels: nothing is drawn beyond.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) struct Margins {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
+/// The reach of every outer shadow of every box of the toolbar at `layout`, whichever buttons are lit and whether or
+/// not H, V and C show, so one bitmap holds them all.
+pub(super) fn reach(palette: &Palette, layout: &Layout, dpi: u32) -> Margins {
+    let mut margins = Margins::default();
+    let toolbar = layout.toolbar;
+    let mut take = |surfaces: &[&Surface], rect: &RECT| {
+        for outer in surfaces
+            .iter()
+            .flat_map(|surface| surface.outer)
+            .filter_map(|shadow| OuterShadow::of(shadow, rect, dpi))
+        {
+            // The shadow's outline is the box moved down by the drop and grown by the spread and the last layer.
+            let grown = outer.spread + outer.layers.reach();
+            margins.left = margins.left.max(toolbar.left - (rect.left - grown));
+            margins.right = margins.right.max(rect.right + grown - toolbar.right);
+            margins.top = margins
+                .top
+                .max(toolbar.top - (rect.top + outer.drop - grown));
+            margins.bottom = margins
+                .bottom
+                .max(rect.bottom + outer.drop + grown - toolbar.bottom);
+        }
+    };
+    for group in [&layout.tools, &layout.modes, &layout.controls] {
+        take(&[&palette.group], group);
+    }
+    for (button, place) in &layout.buttons {
+        let surface = match button {
+            ToolbarButton::Tool(_) | ToolbarButton::Mode(_) => &palette.button,
+            _ => &palette.small,
+        };
+        take(&[surface, &palette.lit], place);
+    }
+    margins
+}
+
 /// What paints on one render target. `origin` is the point of the virtual screen at the target's pixel (0, 0): the window's
 /// monitor when the target is the window, or where a bitmap kept for the toolbar starts.
 struct Painter<'a> {
@@ -151,14 +235,12 @@ impl Painter<'_> {
         scaled(logical, self.dpi())
     }
 
-    /// As `s`, for a length that may be negative, as a shadow's spread and drop may.
     fn signed(&self, logical: i32) -> i32 {
-        logical.signum() * scaled(logical.unsigned_abs(), self.dpi())
+        signed(logical, self.dpi())
     }
 
-    /// The standard deviation, in physical pixels, of a CSS blur radius of `blur` logical pixels: half of it.
     fn sigma(&self, blur: u32) -> f64 {
-        f64::from(blur) * f64::from(self.dpi()) / 192.0
+        sigma(blur, self.dpi())
     }
 
     /// `rect`, from the virtual screen to the target's own pixels.
@@ -428,18 +510,11 @@ impl Painter<'_> {
         radius: i32,
         hole: Option<&ID2D1RoundedRectangleGeometry>,
     ) -> windows::core::Result<()> {
-        let spread = self.signed(shadow.spread);
-        let drop = self.signed(shadow.y);
-        let short = (rect.right - rect.left).min(rect.bottom - rect.top) + 2 * spread;
-        if short <= 0 {
+        let Some(outer) = OuterShadow::of(shadow, rect, self.dpi()) else {
             return Ok(());
-        }
-        let layers = shadow::layers(
-            self.sigma(shadow.blur),
-            shadow.color.alpha,
-            Profile::Strip(f64::from(short)),
-        );
-        for layer in &layers.layers {
+        };
+        let (spread, drop) = (outer.spread, outer.drop);
+        for layer in &outer.layers.layers {
             let grow = spread + layer.grow;
             // A layer that stays inside the box is under it, or cut out of it: never seen.
             if grow <= -drop.abs() {
