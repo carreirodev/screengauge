@@ -87,6 +87,7 @@ pub enum Hit {
 
 /// The groups' sizes at a scale, in physical pixels.
 struct Sizes {
+    /// The tools' group's width, the modes' group's and the gear's.
     tools_width: u32,
     modes_width: u32,
     controls_width: u32,
@@ -99,6 +100,7 @@ struct Sizes {
 }
 
 impl Sizes {
+    /// The prototype's sizes, scaled for `scale`.
     fn at(scale: Scale) -> Sizes {
         let s = |logical| scaled(logical, scale.dpi());
         let ring = s(RING);
@@ -133,17 +135,16 @@ impl Sizes {
 /// it starts `MARGIN` inside the near side unless that takes it past the far side, and on a monitor smaller than the
 /// toolbar itself it starts at the near side.
 pub fn corner(monitor: Rect, scale: Scale, place: ToolbarPlace) -> Point {
-    let sizes = Sizes::at(scale);
-    let margin = scaled(MARGIN, scale.dpi());
-    let along = |start: i32, length: u32, size: u32, share: f64| {
-        let room = room(length, size, margin);
-        let placed = start.saturating_add_unsigned(margin.saturating_add(offset(room, share)));
-        placed.min(start.saturating_add_unsigned(length.saturating_sub(size)))
-    };
+    let (across, down) = Axis::of(monitor, scale);
     Point {
-        x: along(monitor.left, monitor.width, sizes.width(), place.x()),
-        y: along(monitor.top, monitor.height, sizes.height, place.y()),
+        x: across.place(place.x()),
+        y: down.place(place.y()),
     }
+}
+
+/// Where the toolbar's parts are on `monitor`, at `scale`, for `place`: [`layout`] at the toolbar's [`corner`].
+pub fn layout_on(monitor: Rect, scale: Scale, place: ToolbarPlace) -> Layout {
+    layout(corner(monitor, scale, place), scale)
 }
 
 /// The place that puts the toolbar's top left corner on `monitor` as near `wanted` as it can go, at `scale`: inside
@@ -156,50 +157,89 @@ pub fn place_nearest(
     wanted: Point,
     current: ToolbarPlace,
 ) -> ToolbarPlace {
-    let sizes = Sizes::at(scale);
-    let margin = scaled(MARGIN, scale.dpi());
-    let along = |start: i32, length: u32, size: u32, wanted: i32, share: f64| {
-        let room = room(length, size, margin);
+    let (across, down) = Axis::of(monitor, scale);
+    let x = across.share_nearest(wanted.x, current.x());
+    let y = down.share_nearest(wanted.y, current.y());
+    // Can't happen: each share is a whole number of pixels from 0 to the room divided by the room, or `current`'s own.
+    ToolbarPlace::new(x, y).unwrap_or(current)
+}
+
+/// One of a monitor's two axes, as the toolbar moves along it.
+struct Axis {
+    /// Where the monitor starts along it: its left side across, its top side down.
+    start: i32,
+    /// How long the monitor is along it.
+    length: u32,
+    /// How long the toolbar is along it.
+    size: u32,
+    /// What the toolbar keeps from either end.
+    margin: u32,
+}
+
+impl Axis {
+    /// The axes of `monitor`, across and down, for the toolbar at `scale`.
+    fn of(monitor: Rect, scale: Scale) -> (Axis, Axis) {
+        let sizes = Sizes::at(scale);
+        let margin = scaled(MARGIN, scale.dpi());
+        let across = Axis {
+            start: monitor.left,
+            length: monitor.width,
+            size: sizes.width(),
+            margin,
+        };
+        let down = Axis {
+            start: monitor.top,
+            length: monitor.height,
+            size: sizes.height,
+            margin,
+        };
+        (across, down)
+    }
+
+    /// The room the toolbar has to move along the axis, inside both margins.
+    fn room(&self) -> u32 {
+        self.length
+            .saturating_sub(self.size.saturating_add(self.margin.saturating_mul(2)))
+    }
+
+    /// The first pixel the toolbar can start at: `MARGIN` past the monitor's near side.
+    fn first(&self) -> i32 {
+        self.start.saturating_add_unsigned(self.margin)
+    }
+
+    /// Where the toolbar starts along the axis for `share` of the room, pushed inside a monitor too small for it.
+    fn place(&self, share: f64) -> i32 {
+        let placed = self
+            .first()
+            .saturating_add_unsigned(pixels(share, self.room()));
+        placed.min(
+            self.start
+                .saturating_add_unsigned(self.length.saturating_sub(self.size)),
+        )
+    }
+
+    /// The share of the room that starts the toolbar along the axis as near `wanted` as it can go: a start wanted before
+    /// the margin goes to the margin, and one past the room to its end. `share` itself when the toolbar has no room to
+    /// move, or would start on the pixel `share` already puts it at.
+    fn share_nearest(&self, wanted: i32, share: f64) -> f64 {
+        let room = self.room();
         if room == 0 {
             return share;
         }
-        let first = start.saturating_add_unsigned(margin);
-        // A corner wanted before the margin goes to the margin, and one past the room to its end.
-        let moved = u32::try_from(wanted.saturating_sub(first))
+        let moved = u32::try_from(wanted.saturating_sub(self.first()))
             .unwrap_or(0)
             .min(room);
-        if moved == offset(room, share) {
+        if moved == pixels(share, room) {
             share
         } else {
             f64::from(moved) / f64::from(room)
         }
-    };
-    let x = along(
-        monitor.left,
-        monitor.width,
-        sizes.width(),
-        wanted.x,
-        current.x(),
-    );
-    let y = along(
-        monitor.top,
-        monitor.height,
-        sizes.height,
-        wanted.y,
-        current.y(),
-    );
-    // Can't fail: each share is a whole number of pixels from 0 to the room, divided by the room, or `current`'s own.
-    ToolbarPlace::new(x, y).unwrap_or(current)
-}
-
-/// The room a toolbar `size` long has to move along a monitor's side `length` long, inside two margins.
-fn room(length: u32, size: u32, margin: u32) -> u32 {
-    length.saturating_sub(size.saturating_add(margin.saturating_mul(2)))
+    }
 }
 
 /// `share` of `room`, in whole pixels, a half rounded down: the centered toolbar leaves an odd pixel on its right, and
 /// a share [`place_nearest`] made from a whole pixel comes back to that pixel, a hair over or under as it may be.
-fn offset(room: u32, share: f64) -> u32 {
+fn pixels(share: f64, room: u32) -> u32 {
     let whole = (share * f64::from(room) - 0.5)
         .ceil()
         .clamp(0.0, f64::from(room));

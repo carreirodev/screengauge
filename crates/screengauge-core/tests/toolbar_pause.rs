@@ -84,7 +84,7 @@ const IN_SMALL_CARD: Point = Point { x: 4050, y: 350 };
 /// Where the core puts the toolbar on the 4K monitor, where the cursors of these tests open it.
 fn toolbar_layout() -> Layout {
     let scale = Scale::from_dpi(168).expect("a real scale");
-    toolbar::layout(toolbar::corner(AOC, scale, ToolbarPlace::default()), scale)
+    toolbar::layout_on(AOC, scale, ToolbarPlace::default())
 }
 
 fn middle(rect: Rect) -> Point {

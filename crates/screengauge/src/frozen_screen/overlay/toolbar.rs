@@ -116,9 +116,9 @@ impl Overlay {
     /// Draws `toolbar` over the measurements and under the tolerance indicator and the notice, between BeginDraw and
     /// EndDraw, when it is on this window's monitor, at the scene's corner: each group's panel and its buttons, in the
     /// palette of the window, with the active tool's button and the mode's lit and the buttons reacting to the cursor,
-    /// or the minimized toolbar's button alone. `held` is what on the toolbar the left button went down on, while it is held. They are
-    /// drawn once on a bitmap that the next frames lay over the photo, until something on the toolbar changes
-    /// (`toolbar_cache`); a drag only moves where the bitmap is laid.
+    /// or the minimized toolbar's button alone. `held` is what on the toolbar the left button went down on, while it
+    /// is held. They are drawn once on a bitmap that the next frames lay over the photo, until something on the toolbar
+    /// changes (`toolbar_cache`); a drag only moves where the bitmap is laid.
     pub fn draw_toolbar(
         &self,
         target: &ID2D1RenderTarget,

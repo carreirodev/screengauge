@@ -7,8 +7,8 @@
 //! The bitmap holds the toolbar at the origin with room all round for the reach of its shadows, whichever buttons are
 //! lit, hovered or held down, and for the minimized toolbar's button, so it is the same size for every state, never
 //! moves with the toolbar's place (dragging it, WPC-312, only moves where it is laid), and a state that changes is drawn
-//! over the same bitmap. The part of it past the monitor's edge, which the toolbar's margin leaves at the top, is cut
-//! off by the window as the bitmap is laid.
+//! over the same bitmap. The part of it past the monitor's edges, on any side the toolbar sits against where its margin
+//! is narrower than its shadows reach, is cut off by the window as the bitmap is laid.
 //!
 //! Compositing the layers on a transparent bitmap and then that bitmap over the photo is not the same as compositing every
 //! layer straight over the photo: a faint layer drawn over the photo's 8-bit pixels rounds away, as it changes a channel
@@ -39,12 +39,12 @@ use crate::log;
 
 /// What the bitmap shows of `toolbar` with `held` down: everything but where the toolbar is, which only moves where the
 /// bitmap is laid, so a drag never draws it again.
-fn look(toolbar: &Toolbar, held: Option<Hit>) -> (Toolbar, Option<Hit>) {
-    let anywhere = Toolbar {
+fn cache_key(toolbar: &Toolbar, held: Option<Hit>) -> (Toolbar, Option<Hit>) {
+    let unplaced = Toolbar {
         corner: Point::default(),
         ..*toolbar
     };
-    (anywhere, held)
+    (unplaced, held)
 }
 
 /// The bitmap and what it is of.
@@ -55,7 +55,7 @@ struct Kept {
     /// What the bitmap shows: the lit tool, the lit mode while there is one, the button under the cursor, whether it is
     /// minimized, and what the left button is held down on. The groups and the buttons are always the same, and so are
     /// the monitor, the scale and the palette, which an `Overlay` is made for; the toolbar's own monitor never changes for
-    /// a window, so the scene's toolbar is the key, with what is held, all but its corner (`look`).
+    /// a window, so the scene's toolbar is the key, with what is held, all but its corner (`cache_key`).
     shows: (Toolbar, Option<Hit>),
     /// How much of the bitmap is left, above and to the left of the toolbar, for the shadows.
     margins: Margins,
@@ -89,7 +89,7 @@ impl Overlay {
             )
         })?;
         let kept = match cache.kept.take() {
-            Some(kept) if kept.shows == look(toolbar, held) => kept,
+            Some(kept) if kept.shows == cache_key(toolbar, held) => kept,
             old => {
                 #[cfg(test)]
                 {
@@ -179,7 +179,7 @@ impl Overlay {
         Ok(Kept {
             target: bitmap_target,
             bitmap,
-            shows: look(toolbar, held),
+            shows: cache_key(toolbar, held),
             margins,
             width,
             height,

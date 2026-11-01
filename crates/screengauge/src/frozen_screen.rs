@@ -560,7 +560,8 @@ struct Window {
     drawing: RefCell<Option<Drawing>>,
     /// What on the toolbar the left button went down on, while it is held: the window has the mouse until it comes up,
     /// and a button acts only when it comes up on the same button (WPC-310). The button looks pressed meanwhile while the
-    /// cursor is on it (WPC-311).
+    /// cursor is on it (WPC-311). Held on the background, the toolbar is being dragged, and its coming up lets it go
+    /// (WPC-312).
     pressed: Cell<Option<Hit>>,
 }
 

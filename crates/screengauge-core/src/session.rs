@@ -128,7 +128,7 @@ struct Grab {
     offset: Point,
     /// The toolbar's place at the press. Each move works the place out from it again, so an axis the toolbar comes back
     /// to its starting pixel on keeps the share it had, and the remembered state changes only when the toolbar moved.
-    from: ToolbarPlace,
+    place_at_press: ToolbarPlace,
 }
 
 /// A notice, with the moment it goes: when Windows has been running `until`.
@@ -164,10 +164,7 @@ impl Session {
         let toolbar_monitor = frozen_screen::monitor_at(&frozen_screen, cursor).unwrap_or(0);
         let toolbar_layout = frozen_screen
             .get(toolbar_monitor)
-            .map(|photo| {
-                let corner = toolbar::corner(photo.rect, photo.scale, remembered.toolbar_place);
-                toolbar::layout(corner, photo.scale)
-            })
+            .map(|photo| toolbar::layout_on(photo.rect, photo.scale, remembered.toolbar_place))
             .ok_or(Refused::NoMonitor)?;
         let mut session = Session {
             frozen_screen,
@@ -303,7 +300,7 @@ impl Session {
                     x: at.x.saturating_sub(corner.x),
                     y: at.y.saturating_sub(corner.y),
                 },
-                from: self.remembered.toolbar_place,
+                place_at_press: self.remembered.toolbar_place,
             });
         }
         Vec::new()
@@ -325,10 +322,9 @@ impl Session {
             x: self.cursor.x.saturating_sub(grab.offset.x),
             y: self.cursor.y.saturating_sub(grab.offset.y),
         };
-        let place = toolbar::place_nearest(photo.rect, photo.scale, wanted, grab.from);
+        let place = toolbar::place_nearest(photo.rect, photo.scale, wanted, grab.place_at_press);
         self.remembered.toolbar_place = place;
-        let corner = toolbar::corner(photo.rect, photo.scale, place);
-        self.toolbar_layout = toolbar::layout(corner, photo.scale);
+        self.toolbar_layout = toolbar::layout_on(photo.rect, photo.scale, place);
     }
 
     /// Lets the dragged toolbar go where it is, when the button comes up or the Windows layer loses the mouse. Should the

@@ -2,7 +2,7 @@
 //! scale, each button's place, the minimized toolbar's button, and what a point is on. The sizes are the prototype's
 //! (variant A of WPC-279: `#toolbar`, `.grp`, `.tbtn`, `.mbtn`, `.sbtn` and `#tbMini`), written out here a second time.
 
-use screengauge_core::session::toolbar::{BUTTONS, Hit, Layout, corner, layout, scaled};
+use screengauge_core::session::toolbar::{BUTTONS, Hit, Layout, layout_on, scaled};
 use screengauge_core::session::{Point, Rect, Scale, ToolbarButton};
 use screengauge_core::settings::{DimensionsMode, Tool, ToolbarPlace};
 
@@ -19,7 +19,7 @@ const DPIS: [u32; 10] = [96, 120, 144, 168, 192, 216, 240, 288, 336, 384];
 
 /// The toolbar at the top center of `monitor`, where the first call puts it.
 fn top_center(monitor: Rect, scale: Scale) -> Layout {
-    layout(corner(monitor, scale, ToolbarPlace::default()), scale)
+    layout_on(monitor, scale, ToolbarPlace::default())
 }
 
 fn at(dpi: u32) -> Layout {

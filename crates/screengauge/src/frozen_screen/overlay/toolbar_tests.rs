@@ -882,6 +882,10 @@ fn lighting_another_tool_or_mode_draws_the_bitmap_again_and_going_back_draws_the
     }
 }
 
+/// How far a drag in these tests takes the toolbar from the top center: left and down.
+const DRAGGED_LEFT: i32 = 61;
+const DRAGGED_DOWN: i32 = 37;
+
 #[test]
 fn a_dragged_toolbar_lays_the_same_bitmap_at_its_new_place() {
     let canvas = canvas();
@@ -890,8 +894,8 @@ fn a_dragged_toolbar_lays_the_same_bitmap_at_its_new_place() {
             let start = placed(&scene(Tool::Bounds, None), dpi);
             let moved = Toolbar {
                 corner: Point {
-                    x: start.corner.x - 61,
-                    y: start.corner.y + 37,
+                    x: start.corner.x - DRAGGED_LEFT,
+                    y: start.corner.y + DRAGGED_DOWN,
                 },
                 ..start
             };
@@ -918,12 +922,12 @@ fn a_dragged_toolbar_lays_the_same_bitmap_at_its_new_place() {
                 dragged.pixels == fresh.pixels,
                 "the moved toolbar differs from one drawn there at once: {mode:?} at {dpi} DPI"
             );
-            // It is somewhere else: its tools' panel starts 61 further left and 37 lower than at the top center.
+            // It is somewhere else: its tools' panel starts that much further left and lower than at the top center.
             let layout = toolbar_layout(dpi);
             let edge = at(
                 &dragged,
-                layout.tools.left - 61 + 20,
-                layout.tools.top + 37 + 1,
+                layout.tools.left - DRAGGED_LEFT + 20,
+                layout.tools.top + DRAGGED_DOWN + 1,
             );
             let before = at(&dragged, layout.tools.left + 20, layout.tools.top + 1);
             assert_ne!(edge, before, "{mode:?} at {dpi} DPI");
