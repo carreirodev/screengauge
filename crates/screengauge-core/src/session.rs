@@ -184,9 +184,13 @@ impl Session {
             self.indicator_until = None;
         }
         match event.input {
-            // Esc closes the tools whatever tool is active (v1 spec WPC-296, derived rule 3), and so does the global
-            // shortcut pressed again. Alt+F4 closes them as a whole, never one monitor's window alone.
-            Input::KeyDown(Key::Esc) | Input::GlobalShortcut | Input::CloseAsked => self.close(),
+            // Esc closes the tools whatever tool is active (v1 spec WPC-296, derived rule 3), and so do the toolbar's
+            // close button and the global shortcut pressed again. Alt+F4 closes them as a whole, never one monitor's
+            // window alone.
+            Input::KeyDown(Key::Esc)
+            | Input::Toolbar(ToolbarButton::Close)
+            | Input::GlobalShortcut
+            | Input::CloseAsked => self.close(),
             // Another program in front closes them as Esc does, so the user is never left on a frozen screen behind it,
             // and so does any change of monitors Windows reports, so nothing is measured with the wrong arrangement
             // (v1 spec WPC-296, Closing the tools).
@@ -195,6 +199,13 @@ impl Session {
             // nothing (v1 spec WPC-296, "abrir pelo menu Iniciar com a toolbar na tela não muda nada"), and the photo
             // isn't taken again.
             Input::Called => Vec::new(),
+            // 1 to 4 are the tools in the toolbar's order, from any monitor (v1 spec WPC-296, Trocar de ferramenta).
+            Input::KeyDown(Key::Digit1) => self.switch_tool(Tool::Dimensions),
+            Input::KeyDown(Key::Digit2) => self.switch_tool(Tool::Bounds),
+            Input::KeyDown(Key::Digit3) => self.switch_tool(Tool::Inspect),
+            Input::KeyDown(Key::Digit4) => self.switch_tool(Tool::Snip),
+            Input::Toolbar(ToolbarButton::Tool(tool)) => self.switch_tool(tool),
+            Input::Toolbar(ToolbarButton::Mode(mode)) => self.switch_mode(mode),
             Input::KeyDown(Key::H) => self.switch_mode(DimensionsMode::Horizontal),
             Input::KeyDown(Key::V) => self.switch_mode(DimensionsMode::Vertical),
             Input::KeyDown(Key::C) => self.switch_mode(DimensionsMode::Cross),
@@ -320,8 +331,19 @@ impl Session {
             .map(Effect::WakeAt)
     }
 
-    /// Dimensions measures in `mode` from now on, and the next call starts in it. The keys do nothing with another
-    /// tool active, as the mode buttons show only with Dimensions on (v1 spec WPC-296, Toolbar).
+    /// Makes `tool` the active tool, by its key or its button on the toolbar, and the next call starts with it (v1 spec
+    /// WPC-296, Trocar de ferramenta). Switching isn't closing: the frozen screen, the pinned measurements and the
+    /// tolerance the wheel set all stay, and the new tool works on them from where the cursor is. Only Dimensions
+    /// measures yet; the others are active and do nothing until their own tickets (the owner's choice in WPC-310).
+    fn switch_tool(&mut self, tool: Tool) -> Vec<Effect> {
+        self.remembered.last_tool = tool;
+        self.measure();
+        Vec::new()
+    }
+
+    /// Dimensions measures in `mode` from now on, and the next call starts in it, by its key or its button on the
+    /// toolbar. The keys do nothing with another tool active, as the mode buttons show only with Dimensions on (v1 spec
+    /// WPC-296, Toolbar).
     fn switch_mode(&mut self, mode: DimensionsMode) -> Vec<Effect> {
         if !self.dimensions_is_active() {
             return Vec::new();
@@ -361,7 +383,8 @@ impl Session {
         vec![Effect::MoveCursor(to)]
     }
 
-    /// Whether Dimensions is the active tool: the last one used, until the toolbar switches tools (WPC-310).
+    /// Whether Dimensions is the active tool. The active tool is the remembered last tool: the one the tools opened
+    /// with, until a key or the toolbar switches it.
     fn dimensions_is_active(&self) -> bool {
         self.remembered.last_tool == Tool::Dimensions
     }

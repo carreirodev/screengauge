@@ -259,14 +259,16 @@ fn nothing_happens_once_the_tools_closed() {
 #[test]
 fn moving_clicking_turning_the_wheel_and_other_keys_leave_the_tools_open() {
     let mut session = open(owners_monitors());
+    // 1 to 4 switch tools (tests/toolbar.rs); 1 comes last, so the keys after it, and the closing at the end, find
+    // Dimensions active as the tools opened, and nothing remembered has changed.
     let keys = [
         Key::H,
         Key::V,
         Key::C,
-        Key::Digit1,
         Key::Digit2,
         Key::Digit3,
         Key::Digit4,
+        Key::Digit1,
         Key::Left,
         Key::Right,
         Key::Up,
