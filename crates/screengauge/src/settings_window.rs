@@ -41,7 +41,7 @@ use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowA
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, EndPaint, GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO,
-    MonitorFromPoint, PAINTSTRUCT, ScreenToClient,
+    MonitorFromPoint, MonitorFromWindow, PAINTSTRUCT, ScreenToClient,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{
@@ -53,13 +53,14 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GW_ENABLEDPOPUP, GW_OWNER, GetClientRect,
-    GetCursorPos, GetWindow, HTCLIENT, IDC_ARROW, IDC_HAND, IsIconic, LoadCursorW, LoadIconW,
-    PostQuitMessage, RegisterClassExW, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, SWP_FRAMECHANGED,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetCursor, SetForegroundWindow,
-    SetWindowPos, ShowWindow, WA_INACTIVE, WINDOW_EX_STYLE, WINDOW_STYLE, WM_ACTIVATE,
-    WM_CAPTURECHANGED, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_GETDPISCALEDSIZE,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCLBUTTONDOWN, WM_PAINT, WM_SETCURSOR, WM_TIMER,
-    WNDCLASSEXW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
+    GetCursorPos, GetWindow, GetWindowRect, HTCLIENT, IDC_ARROW, IDC_HAND, IsIconic, LoadCursorW,
+    LoadIconW, PostQuitMessage, RegisterClassExW, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL,
+    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetCursor,
+    SetForegroundWindow, SetWindowPos, ShowWindow, WA_INACTIVE, WINDOW_EX_STYLE, WINDOW_STYLE,
+    WM_ACTIVATE, WM_CAPTURECHANGED, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_GETDPISCALEDSIZE,
+    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCLBUTTONDOWN, WM_PAINT,
+    WM_SETCURSOR, WM_SYSKEYDOWN, WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED,
+    WS_SYSMENU,
 };
 use windows::core::{BOOL, Error, HSTRING, PCWSTR, w};
 
@@ -332,13 +333,17 @@ fn monitor_at(cursor: screengauge_core::session::Point) -> windows::core::Result
 /// The window's whole size at `dpi`, title bar and frame included, for the page's 560 logical pixels wide and its height
 /// inside, taller while a message shows under a row's label.
 fn window_size(dpi: u32) -> windows::core::Result<SIZE> {
+    window_size_with(dpi, recorder::grown())
+}
+
+/// The window's whole size at `dpi` for the page grown as `grown` says.
+fn window_size_with(dpi: u32, grown: Option<layout::Grown>) -> windows::core::Result<SIZE> {
     let too_large = || Error::new(E_FAIL, "the page is too large for a window");
     let mut rect = RECT {
         left: 0,
         top: 0,
         right: i32::try_from(scaled(layout::WIDTH, dpi)).map_err(|_| too_large())?,
-        bottom: i32::try_from(scaled(layout::page(recorder::grown()).height, dpi))
-            .map_err(|_| too_large())?,
+        bottom: i32::try_from(scaled(layout::page(grown).height, dpi)).map_err(|_| too_large())?,
     };
     // SAFETY: adjusts a local.
     unsafe { AdjustWindowRectExForDpi(&mut rect, STYLE, false, EX_STYLE, dpi) }?;
@@ -360,23 +365,54 @@ fn centered(work: RECT, size: SIZE) -> POINT {
     }
 }
 
-/// Sizes the window for `dpi`, where it is, and draws it again.
+/// Sizes the window for `dpi`, where it is, and draws it again. A window grown past the bottom of its monitor's work
+/// area, by a message under a row's label, moves up just enough to stay above the taskbar.
 fn fit(hwnd: HWND, dpi: u32) -> windows::core::Result<()> {
     let size = window_size(dpi)?;
+    let mut place = RECT::default();
+    // SAFETY: fills a local.
+    unsafe { GetWindowRect(hwnd, &mut place) }?;
+    let work = work_area_of(hwnd)?;
+    let top = kept_inside(place.top, size.cy, work);
     // SAFETY: our own window.
     unsafe {
         SetWindowPos(
             hwnd,
             None,
-            0,
-            0,
+            place.left,
+            top,
             size.cx,
             size.cy,
-            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+            SWP_NOZORDER | SWP_NOACTIVATE,
         )
     }?;
     redraw(hwnd);
     Ok(())
+}
+
+/// The work area of the monitor `hwnd` is on, or the nearest one.
+fn work_area_of(hwnd: HWND) -> windows::core::Result<RECT> {
+    // SAFETY: our own window; the nearest monitor is always one.
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+    let mut info = MONITORINFO {
+        cbSize: const { struct_size::<MONITORINFO>() },
+        ..Default::default()
+    };
+    // SAFETY: fills a local whose size is set.
+    if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
+        return Err(Error::new(E_FAIL, "GetMonitorInfoW found no monitor"));
+    }
+    Ok(info.rcWork)
+}
+
+/// Where the top of a window `height` tall goes, from `top`: where it is, unless its bottom would pass the bottom of
+/// `work`, and then just high enough, but never above the work area's top, where its title bar stays reachable.
+fn kept_inside(top: i32, height: i32, work: RECT) -> i32 {
+    if top + height > work.bottom {
+        (work.bottom - height).max(work.top)
+    } else {
+        top
+    }
 }
 
 /// Sizes the window for the page as it is now, where it is: a message under a row's label came or went. The top stays
@@ -533,8 +569,21 @@ extern "system" fn window_proc(
             default(hwnd, message, wparam, lparam)
         }
         WM_TIMER if wparam.0 == recorder::BLINK_TIMER => {
-            invalidate(hwnd);
+            invalidate_field(hwnd);
             LRESULT(0)
+        }
+        // While the field records, the hook keeps every new key from Settings too: a first press reaching it means
+        // Windows removed the hook. The repeats of a key held since before the click, and the no key a Win comes up
+        // behind, pass on purpose.
+        WM_KEYDOWN | WM_SYSKEYDOWN
+            if recorder::is_recording()
+                && lparam.0 & (1 << 30) == 0
+                && u32::try_from(wparam.0).is_ok_and(|vk| {
+                    !keyboard_hook::is_modifier(vk) && vk != keyboard_hook::NO_KEY
+                }) =>
+        {
+            recorder::hook_lost(hwnd);
+            default(hwnd, message, wparam, lparam)
         }
         keyboard_hook::KEY => {
             recorder::on_key(hwnd, wparam, lparam);
@@ -717,6 +766,31 @@ fn choose_folder(hwnd: HWND, control: Control, options: &Options) {
     };
     let turn_on = control == Control::SaveToDefaultFolder;
     save(|options| options.choose_default_folder(folder, turn_on));
+}
+
+/// Asks for a paint of the global shortcut's field, as the blink does. Direct2D draws the whole frame still; Windows
+/// only has less to bring up to date.
+fn invalidate_field(hwnd: HWND) {
+    let field = DRAWN.with_borrow(|drawn| {
+        drawn.as_ref().and_then(|drawn| {
+            drawn
+                .controls
+                .iter()
+                .find(|(control, _)| *control == Control::ShortcutField)
+                .map(|&(_, place)| place)
+        })
+    });
+    let Some(field) = field else {
+        invalidate(hwnd);
+        return;
+    };
+    // SAFETY: our own window; the rectangle outlives the call.
+    if !unsafe { InvalidateRect(Some(hwnd), Some(&field), false) }.as_bool() {
+        log::failure(
+            "Settings: drawing the field again",
+            &"InvalidateRect returned FALSE",
+        );
+    }
 }
 
 /// Asks for a paint with the render target kept, as after a click or a move that changes what the page shows.
@@ -910,6 +984,52 @@ mod tests {
                 y: 130
             }
         );
+    }
+
+    #[test]
+    fn a_message_at_the_widest_field_grows_the_window_and_it_moves_up_to_stay_above_the_taskbar() {
+        use screengauge_core::settings::{Key, Modifiers, Shortcut};
+
+        // Full HD at 150%: 672 logical pixels of work area, the window centered there at its usual height.
+        let dpi = 144;
+        let work = full_hd_work_area(dpi);
+        let corner = centered(work, window_size_with(dpi, None).expect("a size"));
+        // The widest field there is, and the longest message: it wraps on the most lines.
+        let widest = Shortcut::new(
+            Modifiers {
+                win: true,
+                ctrl: true,
+                alt: true,
+                shift: true,
+            },
+            Key::Function(12),
+        )
+        .expect("allowed");
+        let fonts = graphics::Fonts::new().expect("the fonts");
+        let message = row_message::Message {
+            row: layout::Row::GlobalShortcut,
+            text: recorder_field::message(screengauge_core::settings::Refusal::CtrlAltWithoutWin),
+            band: false,
+            width: recorder_field::message_room(widest, &paint::measurer(&fonts, 1.0))
+                .expect("the room"),
+        };
+        let grown = message.growth(&fonts).expect("the growth");
+        let size = window_size_with(dpi, Some(grown)).expect("a size");
+        assert!(
+            corner.y + size.cy > work.bottom,
+            "the grown window would reach under the taskbar: {size:?} at {corner:?}, {grown:?}"
+        );
+        let top = kept_inside(corner.y, size.cy, work);
+        assert!(top >= work.top, "{top}");
+        assert_eq!(top + size.cy, work.bottom);
+    }
+
+    #[test]
+    fn a_window_that_fits_keeps_its_top_and_one_taller_than_the_work_area_stays_at_its_top() {
+        let work = full_hd_work_area(144);
+        assert_eq!(kept_inside(100, 600, work), 100);
+        assert_eq!(kept_inside(400, 700, work), work.bottom - 700);
+        assert_eq!(kept_inside(400, 5000, work), work.top);
     }
 
     #[test]

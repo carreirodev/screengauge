@@ -22,6 +22,7 @@ use windows::Win32::Graphics::DirectWrite::{
 use windows::core::Error;
 
 use super::layout::{self, Grown, Row, Span};
+use super::paint::to_i32;
 use crate::graphics::{Color, Fonts, color, solid_brush};
 use crate::relief::{self, px};
 use crate::theme::Mode;
@@ -115,9 +116,11 @@ impl Message {
             needed += layout::NOTE_GAP + layout::NOTE_LINE;
         }
         let span = layout::place_row(self.row, None).span;
+        // A row's height is a few hundred pixels, never below nothing.
+        let needed = u32::try_from(super::controls::whole_up(needed)).unwrap_or(0);
         Ok(Grown {
             row: self.row,
-            by: whole_up(needed).saturating_sub(span.bottom - span.top),
+            by: needed.saturating_sub(span.bottom - span.top),
         })
     }
 
@@ -155,13 +158,6 @@ struct Laid {
     lines: u32,
     /// The first line's baseline, from the layout's top.
     baseline: f32,
-}
-
-/// A height rounded up to whole pixels. A row is a few hundred pixels at most, far inside `u32`.
-// TODO: count the row's height in whole pixels without going through a float, so no float comes back to `u32` here.
-fn whole_up(height: f32) -> u32 {
-    debug_assert!((0.0..1e6).contains(&height), "{height}");
-    height.ceil() as u32
 }
 
 /// The amber band across the row `span` of a card `card` at `dpi`, on a page `width` pixels wide: `--warn` faint over
@@ -229,9 +225,4 @@ pub fn band(
     // SAFETY: pops the clip pushed above.
     unsafe { target.PopAxisAlignedClip() };
     barred
-}
-
-/// A size in pixels as a coordinate. Sizes in the window are a few thousand pixels at most.
-fn to_i32(pixels: u32) -> windows::core::Result<i32> {
-    i32::try_from(pixels).map_err(|_| Error::new(E_FAIL, "the page is too large to draw"))
 }

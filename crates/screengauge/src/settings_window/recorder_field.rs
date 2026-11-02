@@ -219,15 +219,40 @@ pub fn lay(
 
 /// The room a message under the row's label has, in logical pixels: from the label's left to the field, less the
 /// row's gap. `measure` gives a word's width at 100%.
+///
+/// The field is as wide as `shortcut` resting, and as the four modifiers held while it records: the room is what the
+/// wider of the two leaves, so the message keeps its lines, and the window its height, whatever the user holds, and
+/// never runs under the field.
 pub fn message_room(
-    view: &View,
+    shortcut: Shortcut,
     measure: &dyn Fn(&str, LabelKind) -> windows::core::Result<f32>,
 ) -> windows::core::Result<f32> {
+    let all = Modifiers {
+        win: true,
+        ctrl: true,
+        alt: true,
+        shift: true,
+    };
+    let resting = View {
+        shortcut,
+        recording: false,
+        held: Modifiers::default(),
+        opacity: 1.0,
+    };
+    let recording = View {
+        recording: true,
+        held: all,
+        ..resting
+    };
     let inner = layout::SIDE + layout::CARD_BORDER + layout::ROW_PADDING;
     let right = i32::try_from(layout::WIDTH - inner).unwrap_or(i32::MAX);
-    let (laid, _) = lay(view, 96, measure, right, 0, 42)?;
+    let mut left_most = right;
+    for view in [resting, recording] {
+        let (laid, _) = lay(&view, 96, measure, right, 0, 42)?;
+        left_most = left_most.min(laid.field.left);
+    }
     let left = i32::try_from(inner).unwrap_or(0);
-    let room = laid.field.left - i32::try_from(BUTTON_GAP).unwrap_or(0) - left;
+    let room = left_most - i32::try_from(BUTTON_GAP).unwrap_or(0) - left;
     // The room is a few hundred pixels, which a float holds exactly.
     Ok(f32::from(i16::try_from(room.max(0)).unwrap_or(i16::MAX)))
 }
@@ -307,35 +332,33 @@ pub fn labels(laid: &Laid, mode: Mode) -> Vec<Label> {
 /// How opaque the blinking text is `since` recording started: from 1 down to 0.35 and back every 1.1 s, each half on
 /// CSS's `ease` curve.
 pub fn opacity(since: Duration) -> f32 {
-    let period = BLINK.as_secs_f64();
-    let phase = (since.as_secs_f64() % period) / period;
+    let period = BLINK.as_secs_f32();
+    let phase = (since.as_secs_f32() % period) / period;
     let (from, to, along) = if phase < 0.5 {
         (1.0, DIMMEST, phase * 2.0)
     } else {
         (DIMMEST, 1.0, (phase - 0.5) * 2.0)
     };
-    // Between 0 and 1, which a float holds as well as it needs to.
-    let eased = ease(along) as f32;
-    from + (to - from) * eased
+    from + (to - from) * ease(along)
 }
 
 /// CSS's `ease`, `cubic-bezier(0.25, 0.1, 0.25, 1)`: how far along the change is at `x`, from 0 to 1, of its time.
-fn ease(x: f64) -> f64 {
-    let bezier = |t: f64, p1: f64, p2: f64| {
+fn ease(x: f32) -> f32 {
+    let bezier = |t: f32, p1: f32, p2: f32| {
         let u = 1.0 - t;
         3.0 * u * u * t * p1 + 3.0 * u * t * t * p2 + t * t * t
     };
-    // The curve's x grows with t, so halving finds the t of `x`.
+    // The curve's x grows with t, so halving finds the t of `x`; 24 halvings reach a float's precision.
     let (mut low, mut high) = (0.0, 1.0);
-    for _ in 0..40 {
-        let middle = f64::midpoint(low, high);
+    for _ in 0..24 {
+        let middle = f32::midpoint(low, high);
         if bezier(middle, 0.25, 0.25) < x {
             low = middle;
         } else {
             high = middle;
         }
     }
-    bezier(f64::midpoint(low, high), 0.1, 1.0)
+    bezier(f32::midpoint(low, high), 0.1, 1.0)
 }
 
 #[cfg(test)]
@@ -476,13 +499,27 @@ mod tests {
     }
 
     #[test]
-    fn the_message_s_room_runs_from_the_label_to_the_field() {
-        let room = message_room(&view(false, Modifiers::default()), &ten).expect("room");
-        // 531 less Reset's 32, the gap of 10, the field's 156 and the gap of 10, less the label's left at 29.
+    fn the_message_s_room_runs_from_the_label_to_the_widest_the_field_can_be() {
+        let room = message_room(Shortcut::default(), &ten).expect("room");
+        // Recording with the four modifiers held, the field is four keys of 24, four plus signs and "…" of 10,
+        // eight gaps of 4 and 18 of padding and border: 196, wider than Win + Shift + X resting. 531 less Reset's 32,
+        // the gap of 10, the field and the gap of 10, less the label's left at 29.
         assert!(
-            (room - (531.0 - 32.0 - 10.0 - 156.0 - 10.0 - 29.0)).abs() < 0.01,
+            (room - (531.0 - 32.0 - 10.0 - 196.0 - 10.0 - 29.0)).abs() < 0.01,
             "{room}"
         );
+        // A shortcut whose resting field is wider leaves less.
+        let widest = Shortcut::new(
+            Modifiers {
+                win: true,
+                ctrl: true,
+                alt: true,
+                shift: true,
+            },
+            Key::Function(12),
+        )
+        .expect("allowed");
+        assert!(message_room(widest, &ten).expect("room") < room);
     }
 
     #[test]

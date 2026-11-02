@@ -156,6 +156,18 @@ pub fn on_key(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) {
     }
 }
 
+/// A key reached Settings itself while the field records: Windows removed the hook, which it does silently to a hook it
+/// finds slow. Recording stops, so the keys never go on reaching the Start menu unseen; the next click installs a new
+/// hook.
+pub fn hook_lost(hwnd: HWND) {
+    log::failure(
+        "Settings: recording a shortcut",
+        &"a key reached Settings, so Windows removed the keyboard hook",
+    );
+    drop(HOOK.take());
+    cancel(hwnd, false);
+}
+
 /// The hook's thread said its hook is removed ([`keyboard_hook::ENDED`]). Should the field record again meanwhile, from
 /// a click before the keys were all up, a new hook holds the keyboard.
 pub fn on_hook_ended(hwnd: HWND, wparam: WPARAM) {
@@ -273,11 +285,17 @@ fn refresh(hwnd: HWND) {
     }
 }
 
-/// The message the recorder's refusal shows, should there be one, and how much it grows the row.
+/// The message the recorder's refusal shows, should there be one, and how much it grows the row. The message showing
+/// already stays as it was measured: its room doesn't change with the keys held (`message_room`).
 fn measured() -> windows::core::Result<(Option<Message>, Option<Grown>)> {
     let Some(refusal) = RECORDER.get().refusal() else {
         return Ok((None, None));
     };
+    if let Some(message) = MESSAGE.get()
+        && message.text == recorder_field::message(refusal)
+    {
+        return Ok((Some(message), GROWN.get()));
+    }
     let shortcut = settings_file::current()
         .map_err(|e| Error::new(E_FAIL, e.to_string()))?
         .options
@@ -288,7 +306,7 @@ fn measured() -> windows::core::Result<(Option<Message>, Option<Grown>)> {
         row: Row::GlobalShortcut,
         text: recorder_field::message(refusal),
         band: false,
-        width: recorder_field::message_room(&view(shortcut), &measure)?,
+        width: recorder_field::message_room(shortcut, &measure)?,
     };
     let grown = message.growth(&fonts)?;
     Ok((Some(message), Some(grown)))

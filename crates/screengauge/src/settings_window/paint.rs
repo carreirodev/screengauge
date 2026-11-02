@@ -499,7 +499,7 @@ fn px_i(pixels: i32) -> f32 {
 }
 
 /// A size in pixels as a coordinate. Sizes in the window are a few thousand pixels at most.
-fn to_i32(pixels: u32) -> windows::core::Result<i32> {
+pub fn to_i32(pixels: u32) -> windows::core::Result<i32> {
     i32::try_from(pixels).map_err(|_| Error::new(E_FAIL, "the page is too large to draw"))
 }
 
@@ -1346,7 +1346,7 @@ mod tests {
         let fonts = Fonts::new().expect("the fonts");
         let mut shown = resting(options);
         shown.recorder.recording = recording;
-        let width = recorder_field::message_room(&shown.recorder, &measurer(&fonts, 1.0))
+        let width = recorder_field::message_room(shown.recorder.shortcut, &measurer(&fonts, 1.0))
             .expect("the message's room");
         let message = Message {
             row: Row::GlobalShortcut,
