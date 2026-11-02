@@ -201,10 +201,7 @@ impl<'a> Rows<'a> {
     ) -> windows::core::Result<Vec<(Control, RECT)>> {
         let dpi = self.on.dpi;
         let width = to_i32(self.on.width)?;
-        let inner = to_i32(scaled(
-            layout::SIDE + layout::CARD_BORDER + layout::ROW_PADDING,
-            dpi,
-        ))?;
+        let inner = to_i32(scaled(layout::ROW_INSET, dpi))?;
         let right = width - inner;
         let measure = measurer(self.on.fonts, self.scale);
         let mut laid = Vec::new();
@@ -815,7 +812,7 @@ mod tests {
 
     use super::*;
     use crate::settings_window::row_message::Text;
-    use crate::settings_window::startup_row;
+    use crate::settings_window::start_with_windows_row;
 
     mod snip;
 
@@ -1654,7 +1651,9 @@ mod tests {
     /// `shown` with "Start with Windows" turned off in Windows and its message showing, as after a click on its switch.
     fn showing_turned_off(mut shown: Shown) -> Shown {
         let fonts = Fonts::new().expect("the fonts");
-        let message = startup_row::turned_off_message();
+        let message = start_with_windows_row::message_saying(
+            start_with_windows_row::Asked::TurnedOffInWindows,
+        );
         shown.start_with_windows = false;
         shown
             .grown

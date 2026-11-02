@@ -77,9 +77,14 @@ pub fn click() -> windows::core::Result<Clicked> {
     if let Err(e) = saved {
         log::failure("Start with Windows: saving the choice", &e);
     }
-    Ok(match state()? {
-        StartWithWindows::TurnedOffInWindows => Clicked::TurnedOffInWindows,
-        StartWithWindows::On | StartWithWindows::Off => Clicked::Turned,
+    Ok(match state() {
+        Ok(StartWithWindows::TurnedOffInWindows) => Clicked::TurnedOffInWindows,
+        Ok(StartWithWindows::On | StartWithWindows::Off) => Clicked::Turned,
+        // The change is made; what shows reads it again, and says so should that fail too.
+        Err(e) => {
+            log::failure("Start with Windows: reading it after the click", &e);
+            Clicked::Turned
+        }
     })
 }
 

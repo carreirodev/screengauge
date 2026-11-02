@@ -180,6 +180,9 @@ pub const ROWS: [Row; 6] = [
 pub const CARD_BORDER: u32 = 1;
 pub const ROW_PADDING: u32 = 12;
 
+/// How far in from the page's side a row's label starts, and its control ends.
+pub const ROW_INSET: u32 = SIDE + CARD_BORDER + ROW_PADDING;
+
 /// The room between a row's label, or the message under it, and its control (`.srow`'s `gap`).
 pub const ROW_GAP: u32 = 10;
 

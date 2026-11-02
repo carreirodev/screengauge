@@ -56,14 +56,11 @@ fn run() -> windows::core::Result<()> {
     let started_by = started_by(std::env::args());
     let _instance = match single_instance::claim(single_instance::NAME)? {
         Instance::First(guard) => guard,
-        // Windows started this process for a click on a notification, but a copy runs that isn't the class's, as the
-        // other of the Store and installer copies would be (WPC-339): this one exits without calling it, which would
-        // open its tools.
-        Instance::AlreadyRunning if started_by == StartedBy::Click => return Ok(()),
-        // Started at sign-in with a copy already running: the other of the Store and installer copies, both set to start
-        // with Windows, or this one opened from the Start menu before Windows got to it. This one exits in silence, as
-        // calling the running copy would open its tools (v1 spec WPC-296, one copy only).
-        Instance::AlreadyRunning if started_by == StartedBy::SignIn => return Ok(()),
+        // Windows started this process, and a copy runs already. For a click on a notification, that copy isn't the
+        // class's, as the other of the Store and installer copies would be (WPC-339). At sign-in, it is the other copy,
+        // both set to start with Windows, or this one opened from the Start menu before Windows got to it (v1 spec
+        // WPC-296, one copy only). Either way this one exits in silence: calling the running copy would open its tools.
+        Instance::AlreadyRunning if started_by != StartedBy::User => return Ok(()),
         // Opening ScreenGauge while a copy runs calls that copy, and this one exits.
         Instance::AlreadyRunning => return resident::call_running_copy(),
     };

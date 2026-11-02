@@ -29,7 +29,7 @@ use crate::StartedBy;
 use crate::frozen_screen::{self, FrozenScreen};
 use crate::notification::{self, Notification};
 use crate::settings_file::{self, SettingsFile};
-use crate::start_with_windows::{self, Clicked};
+use crate::start_with_windows;
 use crate::win32::{low_word, struct_size};
 use crate::{
     capture, clipboard, event, folder_picker, global_shortcut, graphics, log, png, save_as,
@@ -460,17 +460,11 @@ fn open_tray_menu(resident: HWND, anchor: POINT) {
     }
 }
 
-/// The tray menu's "Start with Windows": turned to the other side, and Settings' switch follows should it be open. With
-/// it turned off in Windows, the menu has no room for the amber message: Settings opens with it (the owner's choice in
-/// WPC-326).
+/// The tray menu's "Start with Windows". The menu has no room for the amber message: when there is one to show, as with
+/// it turned off in Windows, Settings opens with it (the owner's choice in WPC-326).
 fn click_start_with_windows() {
-    match start_with_windows::click() {
-        Ok(Clicked::Turned) => settings_window::follow_start_with_windows(),
-        Ok(Clicked::TurnedOffInWindows) => {
-            settings_window::say_start_with_windows_turned_off();
-            open_settings();
-        }
-        Err(e) => log::failure("tray menu: turning Start with Windows", &e),
+    if settings_window::click_start_with_windows() {
+        open_settings();
     }
 }
 

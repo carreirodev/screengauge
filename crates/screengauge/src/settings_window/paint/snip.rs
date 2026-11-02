@@ -46,10 +46,7 @@ impl Rows<'_> {
                 to_i32(scaled(span.bottom, dpi))?,
             ))
         };
-        let inner = to_i32(scaled(
-            layout::SIDE + layout::CARD_BORDER + layout::ROW_PADDING,
-            dpi,
-        ))?;
+        let inner = to_i32(scaled(layout::ROW_INSET, dpi))?;
         let right = to_i32(on.width)? - inner;
         let (destination, save, field) = (
             rows(parts.destination)?,

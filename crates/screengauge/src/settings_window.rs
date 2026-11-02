@@ -21,7 +21,7 @@ mod recorder;
 mod recorder_field;
 mod row_message;
 mod snip_card;
-mod startup_row;
+mod start_with_windows_row;
 
 use std::cell::{Cell, RefCell};
 
@@ -153,9 +153,19 @@ pub fn open(mode: Mode) -> windows::core::Result<()> {
         to_front(enabled_popup(hwnd).unwrap_or(hwnd));
         return Ok(());
     }
+    let opened = create(mode);
+    if opened.is_err() && WINDOW.get().is_none() {
+        // Settings never opened: what the tray menu asked it to say goes, so the next opening doesn't say it unasked.
+        start_with_windows_row::close();
+    }
+    opened
+}
+
+/// Makes Settings' window, in `mode`'s palette, and shows it in front.
+fn create(mode: Mode) -> windows::core::Result<()> {
     let (work, dpi) = monitor_at(event::cursor_now()?)?;
     recorder::opening();
-    startup_row::opening();
+    start_with_windows_row::opening();
     let size = window_size(dpi)?;
     let corner = centered(work, size);
     // SAFETY: no module name, so this is the handle of ScreenGauge.exe itself.
@@ -251,17 +261,12 @@ pub fn close() {
     }
 }
 
-/// The tray menu turned "Start with Windows" on or off: Settings' switch follows, should it be open.
-pub fn follow_start_with_windows() {
-    if let Some(hwnd) = WINDOW.get() {
-        startup_row::follow(hwnd);
-    }
-}
-
-/// The tray menu's "Start with Windows" was clicked while Windows has it turned off: Settings, which opens next or is
-/// open, shows the amber message under its row (the owner's choice in WPC-326).
-pub fn say_start_with_windows_turned_off() {
-    startup_row::say_turned_off_in_windows(WINDOW.get());
+/// The tray menu's "Start with Windows": turned to the other side, and Settings' switch follows should it be open.
+/// True when Settings must open to say something the menu has no room for, in amber under its row: Windows has it
+/// turned off (the owner's choice in WPC-326), or Windows refused the click.
+pub fn click_start_with_windows() -> bool {
+    start_with_windows_row::click(WINDOW.get());
+    start_with_windows_row::is_saying()
 }
 
 /// Whether the global shortcut's field records: the global shortcut then doesn't call ScreenGauge.
@@ -351,7 +356,7 @@ fn window_size(dpi: u32) -> windows::core::Result<SIZE> {
 fn messages() -> Vec<row_message::Message> {
     recorder::message()
         .into_iter()
-        .chain(startup_row::message())
+        .chain(start_with_windows_row::message())
         .collect()
 }
 
@@ -359,7 +364,7 @@ fn messages() -> Vec<row_message::Message> {
 fn grown() -> Vec<layout::Grown> {
     recorder::grown()
         .into_iter()
-        .chain(startup_row::grown())
+        .chain(start_with_windows_row::grown())
         .collect()
 }
 
@@ -594,7 +599,7 @@ extern "system" fn window_proc(
                 recorder::cancel(hwnd, false);
             } else {
                 // Back from Task Manager or Windows' Settings, "Start with Windows" may have changed there.
-                startup_row::reread(hwnd);
+                start_with_windows_row::reread(hwnd);
             }
             default(hwnd, message, wparam, lparam)
         }
@@ -626,7 +631,7 @@ extern "system" fn window_proc(
         WM_DESTROY => {
             // The keyboard goes back to Windows at once.
             recorder::close();
-            startup_row::close();
+            start_with_windows_row::close();
             WINDOW.set(None);
             drop(TARGET.take());
             DRAWN.set(None);
@@ -731,7 +736,7 @@ fn act(hwnd: HWND, hit: Hit) {
         Hit::Link => open_project_page(hwnd),
         Hit::Control(Control::ShortcutField) => recorder::click_field(hwnd),
         Hit::Control(Control::ShortcutReset) => recorder::click_reset(hwnd),
-        Hit::Control(Control::StartWithWindows) => startup_row::click(hwnd),
+        Hit::Control(Control::StartWithWindows) => start_with_windows_row::click(Some(hwnd)),
         Hit::Control(control) => {
             // Read first and nothing held: the folder window below runs a message loop, in which this window is drawn
             // from the options and the file is saved again.
@@ -903,7 +908,7 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
         .options;
     let shown = paint::Shown {
         recorder: recorder::view(options.global_shortcut),
-        start_with_windows: startup_row::is_on(),
+        start_with_windows: start_with_windows_row::is_on(),
         messages: messages(),
         grown: grown(),
     };

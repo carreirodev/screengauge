@@ -266,7 +266,7 @@ pub fn message_room(
         held: all,
         ..resting
     };
-    let inner = layout::SIDE + layout::CARD_BORDER + layout::ROW_PADDING;
+    let inner = layout::ROW_INSET;
     let right = i32::try_from(layout::WIDTH - inner).unwrap_or(i32::MAX);
     let mut left_most = right;
     for view in [resting, recording] {

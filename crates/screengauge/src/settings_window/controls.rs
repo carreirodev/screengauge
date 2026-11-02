@@ -110,7 +110,7 @@ pub enum Control {
 /// for a click that changes nothing by itself: one that needs Windows' folder window first, and changes nothing until it
 /// answers ("Change…", and the switch turned on with no folder kept: `Options::choose_default_folder` then keeps the
 /// folder), and the global shortcut's field and Reset, as the recorder registers a combination with Windows first
-/// (`recorder`), and "Start with Windows", which Windows holds (`startup_row`).
+/// (`recorder`), and "Start with Windows", which Windows holds (`start_with_windows_row`).
 pub fn change(control: Control, options: &Options) -> Option<Change> {
     Some(match control {
         Control::ShortcutField | Control::ShortcutReset | Control::StartWithWindows => return None,
