@@ -13,9 +13,8 @@ use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{GetDpiForSystem, GetDpiForWindow, GetSystemMetricsForDpi};
 use windows::Win32::UI::Shell::{
-    NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_REALTIME, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE,
-    NIM_MODIFY, NIM_SETVERSION, NIN_SELECT, NINF_KEY, NOTIFY_ICON_MESSAGE, NOTIFYICON_VERSION_4,
-    NOTIFYICONDATAW, Shell_NotifyIconW,
+    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION, NIN_SELECT,
+    NINF_KEY, NOTIFY_ICON_MESSAGE, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DestroyIcon, FindWindowW, HICON, IMAGE_ICON, KillTimer, LR_DEFAULTCOLOR, LoadImageW,
@@ -232,8 +231,7 @@ fn stop_following_after(
     }
 }
 
-/// Removes the icon and adds it at the taskbar's size, so Explorer draws it afresh (see the module's notes). A Windows
-/// notification showing at that moment goes with the old icon.
+/// Removes the icon and adds it at the taskbar's size, so Explorer draws it afresh (see the module's notes).
 fn add_again(hwnd: HWND) -> windows::core::Result<()> {
     // When the removal fails, the icon may already be gone: adding it is what matters, and its failure is returned.
     if let Err(e) = notify(NIM_DELETE, &icon_data(hwnd), "NIM_DELETE") {
@@ -283,30 +281,6 @@ fn taskbar_dpi() -> Option<u32> {
 fn small_icon_size(dpi: u32) -> i32 {
     // SAFETY: no pointers.
     unsafe { GetSystemMetricsForDpi(SM_CXSMICON, dpi) }
-}
-
-/// Shows `text` as a Windows notification from the icon: Windows 11 shows a tray icon's balloon as one of its own
-/// notifications (ADR 0003), and its events come back as `CALLBACK_MESSAGE`. With `right_away_only`, Windows drops it
-/// when it can't show it at once. Fails when the icon isn't in the notification area, or when `text` is too long.
-pub fn balloon(hwnd: HWND, text: &str, right_away_only: bool) -> windows::core::Result<()> {
-    let mut data = icon_data(hwnd);
-    data.uFlags = NIF_INFO;
-    if right_away_only {
-        data.uFlags |= NIF_REALTIME;
-    }
-    if !fill(&mut data.szInfo, text) {
-        return Err(Error::new(
-            E_FAIL,
-            format!("the notification \"{text}\" is too long"),
-        ));
-    }
-    notify(NIM_MODIFY, &data, "NIM_MODIFY")
-}
-
-/// Whether `text` fits in a balloon notification. The notifications' tests check their texts with it.
-#[cfg(test)]
-pub fn fits_in_a_balloon(text: &str) -> bool {
-    fill(&mut icon_data(HWND::default()).szInfo, text)
 }
 
 /// Copies `text` into a null-terminated buffer, or returns false, leaving the buffer as it was, when it doesn't fit.
@@ -383,12 +357,6 @@ mod tests {
         for button in [WM_LBUTTONDOWN, WM_LBUTTONUP, WM_LBUTTONDBLCLK] {
             assert!(!is_call(event(button)), "{button:#x}");
         }
-    }
-
-    #[test]
-    fn a_balloon_holds_255_characters_and_no_more() {
-        assert!(fits_in_a_balloon(&"x".repeat(255)));
-        assert!(!fits_in_a_balloon(&"x".repeat(256)));
     }
 
     #[test]

@@ -13,6 +13,9 @@ repository = "https://github.com/carreirodev/screengauge"
 # Pinned exactly: the windows crates are below 1.0 and change often, so they are upgraded on purpose (ADR 0001).
 # Approved by the owner in WPC-297.
 windows = "=0.62.2"
+# The COM activator of Windows notifications uses `#[implement]`, whose code names `::windows_core` directly, so the
+# crate the windows crate already brings in is named here too, at its same version. Approved by the owner in WPC-347.
+windows-core = "=0.62.2"
 
 [workspace.lints.clippy]
 # Every unsafe block says why it is sound, in a SAFETY comment.

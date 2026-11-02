@@ -12,6 +12,11 @@ fn line(text: &str) {
     unsafe { OutputDebugStringW(&text) };
 }
 
+/// What happened, worth knowing when following ScreenGauge in DebugView, though nothing failed.
+pub fn note(text: &str) {
+    line(text);
+}
+
 /// A failure nothing can be done about where it happens, after what was being done.
 pub fn failure(context: &str, error: &impl fmt::Display) {
     line(&format!("{context}: {error}"));

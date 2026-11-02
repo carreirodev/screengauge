@@ -1,5 +1,4 @@
-//! COM, which WIC needs to write the Snip's PNG. It starts the first time the Snip takes an image, not at startup, as
-//! nothing is prepared before the first call (v1 spec WPC-296, Metas de velocidade e de consumo).
+//! COM, which the Windows notifications' activator needs from startup, and WIC to write the Snip's PNG.
 
 use std::cell::Cell;
 

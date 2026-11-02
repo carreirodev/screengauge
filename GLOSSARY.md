@@ -97,8 +97,16 @@ A short message ScreenGauge draws on screen itself, next to the cursor or in the
 _Avoid_: toast, popup, alert, notification (a Windows notification is the system's message in the corner of the screen, a different thing)
 
 **Windows notification**:
-The system's message in the corner of the screen, which ScreenGauge uses for what goes wrong outside the tools, such as a screen it couldn't capture or a damaged settings file.
-_Avoid_: toast, balloon (the Windows mechanism behind it, ADR 0003), notice (ScreenGauge's own message, a different thing)
+The system's message in the corner of the screen, which ScreenGauge uses for what goes wrong outside the tools, such as a screen it couldn't capture or a damaged settings file; it stays in the notification center afterwards, and its click reaches ScreenGauge even when ScreenGauge is closed.
+_Avoid_: toast (Windows' standard notification, the mechanism behind it, ADR 0003), balloon (the tray icon's mechanism it replaced), notice (ScreenGauge's own message, a different thing)
+
+**Notification center**:
+The Windows panel that opens with Win + N or from the clock and keeps the Windows notifications not yet closed, including those that never appeared in the corner.
+_Avoid_: Action Center (its Windows 10 name), notification area (where the tray icon sits, a different thing)
+
+**Do not disturb**:
+The Windows setting, turned on by the user or on its own (at set times, during a game, with a full-screen app), that sends Windows notifications straight to the notification center without showing them in the corner; they don't show when it ends.
+_Avoid_: Focus assist (its Windows 10 name), quiet hours, Focus (the Windows 11 feature that turns it on)
 
 ## Tools
 

@@ -1,0 +1,35 @@
+# Windows notifications are Windows' standard notifications, with a COM activator
+
+ScreenGauge's Windows notifications are Windows' standard notifications (`Windows.UI.Notifications`, the `ToastGeneric` template, through the same `windows` crate): the message alone, with no title, sent with `CreateToastNotifierWithId` for the AppUserModelID `WPCSolutions.ScreenGauge`. Each one appears in the corner of the screen with ScreenGauge's name and app icon, and stays in the notification center (Win + N) until the user closes it or Windows takes it out. Its click, in the corner or in the notification center, reaches ScreenGauge through a COM activator (`INotificationActivationCallback`), and when ScreenGauge is closed Windows starts it for the click. Decided in WPC-347, replacing the tray icon's balloons of WPC-303, which stayed about 6 seconds, were never kept in the notification center, and were dropped while "Do not disturb" was on or a full-screen program was in front.
+
+The installer copy has no package, so ScreenGauge registers itself at every start, for the signed-in user only (HKCU), with no Start menu shortcut:
+
+- `Software\Classes\AppUserModelId\WPCSolutions.ScreenGauge`: `DisplayName` = `ScreenGauge`, `IconUri` = the app icon as a 48-pixel PNG that ScreenGauge writes in `%LOCALAPPDATA%\ScreenGauge` (`notification-icon-<hash>.png`: a new icon gets a new name, since Windows keeps what it read from a path), and `CustomActivator` = the activator's CLSID.
+- `Software\Classes\CLSID\{3BEB9695-DA23-4599-B10C-7CD6CD96E50C}\LocalServer32` = the running `.exe`'s path, quoted. The CLSID is fixed and never changes: the notifications already in the notification center carry it.
+- The class is registered with `CoRegisterClassObject(CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE | REGCLS_AGILE)` as soon as the resident window exists, and revoked at exit. `CustomActivator` and `LocalServer32` are written only when that registration succeeded: with them written and no process answering COM, a click in the notification center only closes the notification (scenario s6).
+
+The Store copy declares the activator in its manifest instead (`com:ExeServer` and `desktop:ToastNotificationActivation`, WPC-334); the uninstaller removes the keys and the PNG (WPC-337).
+
+## Considered Options
+
+- **The tray icon's balloons (`Shell_NotifyIconW` with `NIF_INFO`)**, WPC-303's choice: no registration and no new dependency, but nothing is kept, so a notification Windows drops while "Do not disturb" is on is lost for good.
+- **Standard notifications without the COM activator**, with only the toast's `Activated` event: they show and stay in the notification center, but a click there with ScreenGauge closed does nothing (scenario s8), and a notification with an action of its own (WPC-324) must lead somewhere.
+- **A Start menu shortcut carrying the AppUserModelID and the activator's CLSID**, the older documented path: the registry alone was enough on Windows 11, and a shortcut would be one more thing for the installer to make and for the user to see.
+- **The Windows App SDK's `AppNotificationManager`**: it does the registration itself, but it is the 120 MB Windows App Runtime ADR 0001 rejects.
+- **A message ScreenGauge draws itself**: the spec (WPC-296) and ADR 0001 make these messages Windows notifications, owned by the system.
+
+## Consequences
+
+Measured on the owner's computer with a throwaway test program (branch `prototype/wpc-347-toast-notifications`, Windows 11 build 26300, 2026-11-02), in three setups: the AppUserModelID alone (a), plus `CustomActivator` (b), plus the full activator with `LocalServer32` (c). The research behind it is `docs/research/windows-toast-notifications.md` on the branch `research/windows-toast-notifications`.
+
+- The notification shows without a Start menu shortcut, with the name and icon registered for the AppUserModelID.
+- With ScreenGauge running and the activator registered, a click in the corner or in the notification center calls `Activate`, and the toast's `Activated` event fires as well (s1, s2, s5). ScreenGauge listens to `Activate` only, so each click arrives once. `Activate` comes on a thread of COM's and is posted to the resident window.
+- With ScreenGauge closed, only setup c brings the click back: Windows starts the `.exe` with `-Embedding` (s7, s7p). That process becomes the copy that runs, makes no call (the frozen screen doesn't open), and handles the click. If a copy already runs, as the other of the Store and installer copies could, it exits without calling it, which would open its tools (WPC-339).
+- With "Do not disturb" on (s9) or a full-screen program in front (s10, `SHQueryUserNotificationState` says `QUNS_BUSY`), the notification never appears in the corner and goes straight to the notification center: Windows dismisses it with `TimedOut` about 9 ms after `Show`. **Nothing appears later**, when "Do not disturb" ends or the program closes, and ScreenGauge can't tell when it ends: `SHQueryUserNotificationState` said notifications were accepted while "Do not disturb" was on (s9).
+- A notification that appeared in the corner is dismissed 6 to 9 s after `Show`, or clicked. So ScreenGauge tells whether each notification appeared in the corner or went only to the notification center from the first thing Windows says of it: dismissed with `TimedOut` under 1 s means only the notification center; dismissed later, closed by the user, or clicked first means the corner. It goes to the debugger output, and WPC-339's "already told" counts only the corner.
+- The frozen screen counts as a full-screen window, so every notification still waits while the tools are open and shows once they close; otherwise it would go silently to the notification center.
+- "Couldn't capture the screen. Try again." carries a fixed tag and group, and leaves the notification center (`RemoveGroupedTagWithId`) at the next call that captures the screen. The other notifications stay.
+- A notification Windows refuses (`Show` fails, or the `Failed` event comes), as might happen before the taskbar exists at sign-in, waits and is shown at the next chance, `TaskbarCreated` included, unless it is the capture failure, which means something only right away. Whether that wait is still needed at sign-in is checked on the owner's computer before it goes.
+- COM now starts at startup, on the resident window's thread, single-threaded as Save As needs.
+- The `windows` crate gains the features `Data_Xml_Dom`, `Foundation`, `UI_Notifications` and `Win32_UI_Notifications`, and `windows-core` (=0.62.2, already in `Cargo.lock` through `windows`) becomes a direct dependency, because the code `#[implement]` generates names it directly (approved in WPC-347).
+- Not checked: whether notifications outlive a restart, and the 3-day limit in the notification center, which Microsoft documents only for the Windows App SDK.

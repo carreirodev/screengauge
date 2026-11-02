@@ -1,7 +1,7 @@
 //! The resident process: one window that is never shown, so ScreenGauge has no taskbar button while idle.
-//! It receives what Windows tells ScreenGauge: the global shortcut, the tray icon's clicks and the calls of a copy
-//! opened again. Nothing is prepared at startup and there is no timer at rest: the thread sleeps in GetMessageW until
-//! Windows sends something. While the tools are open, it carries out the effects the session core returns.
+//! It receives what Windows tells ScreenGauge: the global shortcut, the tray icon's clicks, the calls of a copy opened
+//! again and what becomes of its Windows notifications. At startup only COM and the notifications' activator are
+//! prepared, and there is no timer at rest: the thread sleeps in GetMessageW until Windows sends something. While the tools are open, it carries out the effects the session core returns.
 
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -57,9 +57,14 @@ thread_local! {
     static FROZEN_SCREEN: RefCell<Option<FrozenScreen>> = const { RefCell::new(None) };
 }
 
-/// Calls ScreenGauge right away, since opening it is a call, then runs until the user exits from the tray icon, with
-/// what the settings file holds and the file to save it to.
-pub fn run(file: Option<SettingsFile>, stored: Stored) -> windows::core::Result<()> {
+/// Calls ScreenGauge right away, since opening it is a call, unless Windows started it for a notification's click
+/// (`for_a_click`), then runs until the user exits from the tray icon, with what the settings file holds and the file
+/// to save it to.
+pub fn run(
+    file: Option<SettingsFile>,
+    stored: Stored,
+    for_a_click: bool,
+) -> windows::core::Result<()> {
     let shortcut = stored.options.global_shortcut;
     settings_file::keep(file, stored);
     TASKBAR_CREATED.store(register_message(w!("TaskbarCreated"))?, Ordering::Relaxed);
@@ -99,6 +104,9 @@ pub fn run(file: Option<SettingsFile>, stored: Stored) -> windows::core::Result<
         )
     }?;
     RESIDENT.set(Some(hwnd));
+    // Before anything else that may wait: when Windows started ScreenGauge for a notification's click, the click comes
+    // once the activator is registered, and it is posted to this window.
+    notification::start(hwnd);
     // At sign-in the taskbar may not exist yet; the icon then comes with TaskbarCreated, so a failure
     // here leaves ScreenGauge running.
     if let Err(e) = tray::add(hwnd) {
@@ -108,7 +116,9 @@ pub fn run(file: Option<SettingsFile>, stored: Stored) -> windows::core::Result<
     if let Err(e) = global_shortcut::register(hwnd, shortcut) {
         log::failure(&format!("global shortcut: registering {shortcut}"), &e);
     }
-    post_call(hwnd);
+    if !for_a_click {
+        post_call(hwnd);
+    }
     // After the call, so a notification from startup, such as the damaged settings file, never lands in its photo;
     // when the call opened the tools, it waits for them to close.
     notification::post_show_waiting(hwnd);
@@ -144,7 +154,6 @@ extern "system" fn window_proc(
             if tray::is_call(lparam) {
                 post_call(hwnd);
             }
-            notification::on_tray_event(low_word(lparam));
             // Provisional exit, until the tray icon's menu exists (WPC-325).
             if low_word(lparam) == WM_CONTEXTMENU {
                 // SAFETY: our own window, on the thread that created it.
@@ -171,7 +180,11 @@ extern "system" fn window_proc(
             LRESULT(0)
         }
         notification::SHOW_WAITING => {
-            notification::show_waiting(hwnd);
+            notification::show_waiting();
+            LRESULT(0)
+        }
+        notification::EVENTS_READY => {
+            notification::on_events_ready();
             LRESULT(0)
         }
         // The scale of the display the taskbar is on may have changed, and the tray icon then needs another size.
@@ -199,7 +212,7 @@ extern "system" fn window_proc(
             save_as::cancel();
             // Settings' folder window runs its own message loop too.
             folder_picker::cancel();
-            close(hwnd);
+            close();
             // Settings draws with the factories released next, so it closes before them.
             settings_window::close();
             graphics::release();
@@ -209,16 +222,17 @@ extern "system" fn window_proc(
             if let Err(e) = tray::remove(hwnd) {
                 log::failure("exit: removing the tray icon", &e);
             }
+            notification::stop();
             // SAFETY: ends this thread's message loop.
             unsafe { PostQuitMessage(0) };
             LRESULT(0)
         }
         _ if message == TASKBAR_CREATED.load(Ordering::Relaxed) => {
-            match tray::add(hwnd) {
-                // The notifications waiting for the icon can show now.
-                Ok(()) => notification::show_waiting(hwnd),
-                Err(e) => log::failure("tray icon: adding it when the taskbar was created", &e),
+            if let Err(e) = tray::add(hwnd) {
+                log::failure("tray icon: adding it when the taskbar was created", &e);
             }
+            // A notification Windows refused before the taskbar existed, as at sign-in, gets another chance.
+            notification::show_waiting();
             LRESULT(0)
         }
         _ if message == CALL.load(Ordering::Relaxed) => {
@@ -245,12 +259,14 @@ fn on_call(resident: HWND, input: Input) {
             Ok(frozen) => {
                 FROZEN_SCREEN.set(Some(frozen));
                 notification::tools_opened();
+                // After the frozen screen shows, so taking it out never delays the photo.
+                notification::capture_succeeded();
             }
             // Whatever kept the tools closed, the user hears of it, never a failure in silence (v1 spec WPC-296,
             // Frozen screen). Most often it is a monitor neither capture path could photograph.
             Err(e) => {
                 log::failure("frozen screen: opening it", &e);
-                notification::show(resident, Notification::CaptureFailed);
+                notification::show(Notification::CaptureFailed);
             }
         },
     }
@@ -297,7 +313,7 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
     for effect in effects {
         match effect {
             Effect::Close => {
-                close(resident);
+                close();
             }
             Effect::SaveRemembered(remembered) => {
                 save_remembered(remembered);
@@ -470,11 +486,11 @@ fn open_save_as(folder: Option<&Folder>, file_name: &str) -> Input {
 }
 
 /// Dropping the frozen screen closes its windows, drops the session and erases the photos. The notifications that
-/// waited for the tools to close then show on the resident window's tray icon. Every way of closing the tools comes
+/// waited for the tools to close then show. Every way of closing the tools comes
 /// here, so none leaves them waiting.
-fn close(resident: HWND) {
+fn close() {
     drop(FROZEN_SCREEN.with_borrow_mut(Option::take));
-    notification::tools_closed(resident);
+    notification::tools_closed();
 }
 
 /// Keeps `remembered` for the next call, and in the settings file when there is one. Only the remembered state is
