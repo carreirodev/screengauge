@@ -480,8 +480,9 @@ extern "system" fn window_proc(
         WM_LBUTTONDOWN => {
             let point = Some(client_point(lparam));
             // A press anywhere but on the field stops it recording; the press then acts as it would.
-            if hit_at(point) != Some(Hit::Control(Control::ShortcutField)) {
-                recorder::cancel(hwnd);
+            let hit = hit_at(point);
+            if hit != Some(Hit::Control(Control::ShortcutField)) {
+                recorder::cancel(hwnd, hit.is_some());
             }
             // A press with no move before it, as after Alt+Tab with the cursor already on +, still finds the cursor
             // on what it pressed, so a held − or + looks pressed at once.
@@ -509,6 +510,7 @@ extern "system" fn window_proc(
                     invalidate(hwnd);
                 }
             }
+            recorder::settle(hwnd);
             LRESULT(0)
         }
         WM_CAPTURECHANGED => {
@@ -516,16 +518,17 @@ extern "system" fn window_proc(
             if PRESSED.take().is_some() {
                 invalidate(hwnd);
             }
+            recorder::settle(hwnd);
             LRESULT(0)
         }
         // A press on the title bar or the frame, and another window coming to the front, stop the field recording.
         WM_NCLBUTTONDOWN => {
-            recorder::cancel(hwnd);
+            recorder::cancel(hwnd, false);
             default(hwnd, message, wparam, lparam)
         }
         WM_ACTIVATE => {
             if low_word(LPARAM(wparam.0.cast_signed())) == WA_INACTIVE {
-                recorder::cancel(hwnd);
+                recorder::cancel(hwnd, false);
             }
             default(hwnd, message, wparam, lparam)
         }

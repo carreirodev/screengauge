@@ -2,7 +2,8 @@
 //! WPC-323): a click on the field starts recording, the modifiers held show as they go down and up, and the first other
 //! key decides. A combination the rules accept is tried with Windows, which may say another program holds it; one they
 //! refuse shows why and the field goes on recording; Esc, a click outside the field or Settings losing the front stop
-//! recording and keep the shortcut there was.
+//! recording and keep the shortcut there was. Esc takes the message with it; a click outside leaves it, as the prototype
+//! does, so what the user clicks doesn't move from under the cursor.
 //!
 //! The Windows layer says which key went down, as [`Pressed`], with the modifiers held, and does what [`Step`] asks:
 //! try a combination, or let the keyboard go.
@@ -105,7 +106,10 @@ impl Recorder {
         self.held = held;
         match pressed {
             Pressed::Modifier => Step::Show,
-            Pressed::Escape => self.cancel(),
+            Pressed::Escape => {
+                self.refusal = None;
+                self.cancel()
+            }
             Pressed::Other => {
                 self.refusal = Some(Refusal::Incomplete);
                 Step::Show
@@ -127,15 +131,14 @@ impl Recorder {
         }
     }
 
-    /// Esc, a click outside the field, or Settings losing the front: recording stops, the shortcut there was stays,
-    /// and a refusal of this recording goes with it. `Step::Show` when the field wasn't recording.
+    /// A click outside the field, or Settings losing the front: recording stops, the shortcut there was stays, and a
+    /// refusal shown stays too. `Step::Show` when the field wasn't recording.
     pub fn cancel(&mut self) -> Step {
         if !self.recording {
             return Step::Show;
         }
         self.recording = false;
         self.held = Modifiers::default();
-        self.refusal = None;
         Step::Stop
     }
 

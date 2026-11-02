@@ -37,6 +37,9 @@ thread_local! {
     static GENERATION: Cell<usize> = const { Cell::new(0) };
     /// When the field started recording, for the blink.
     static SINCE: Cell<Option<Instant>> = const { Cell::new(None) };
+    /// A press on a control stopped recording: the page keeps its height until the button comes up, so the release
+    /// lands on what was pressed.
+    static HOLD_PAGE: Cell<bool> = const { Cell::new(false) };
     /// The message under the row's label, and how much it grows the row, while it shows.
     static MESSAGE: Cell<Option<Message>> = const { Cell::new(None) };
     static GROWN: Cell<Option<Grown>> = const { Cell::new(None) };
@@ -100,12 +103,26 @@ pub fn click_reset(hwnd: HWND) {
     refresh(hwnd);
 }
 
-/// A click outside the field, or Settings losing the front: recording stops, and the shortcut there was stays.
-pub fn cancel(hwnd: HWND) {
+/// A press outside the field, or Settings losing the front: recording stops, and the shortcut there was stays. With
+/// `pressing` a control, the page keeps its height until [`settle`], so the release still finds that control where it
+/// was pressed: the field shows the shortcut again, which may wrap the message on other lines.
+pub fn cancel(hwnd: HWND, pressing: bool) {
     let mut recorder = RECORDER.get();
     if recorder.cancel() == Step::Stop {
         RECORDER.set(recorder);
         let_keyboard_go(hwnd);
+        if pressing {
+            HOLD_PAGE.set(true);
+            super::invalidate(hwnd);
+        } else {
+            refresh(hwnd);
+        }
+    }
+}
+
+/// The press that stopped recording is over: the page takes the height it has now.
+pub fn settle(hwnd: HWND) {
+    if HOLD_PAGE.take() {
         refresh(hwnd);
     }
 }
@@ -157,7 +174,7 @@ pub fn on_hook_ended(hwnd: HWND, wparam: WPARAM) {
             "Settings: holding the keyboard again to record a shortcut",
             &e,
         );
-        cancel(hwnd);
+        cancel(hwnd, false);
     }
 }
 
@@ -166,6 +183,7 @@ pub fn close() {
     drop(HOOK.take());
     RECORDER.set(Recorder::default());
     SINCE.set(None);
+    HOLD_PAGE.set(false);
     MESSAGE.set(None);
     GROWN.set(None);
 }
@@ -239,6 +257,7 @@ fn register(shortcut: Shortcut) -> Tried {
 
 /// Draws the field again, with the message there is now, and resizes the window should the message's row change height.
 fn refresh(hwnd: HWND) {
+    HOLD_PAGE.set(false);
     let (message, grown) = match measured() {
         Ok(measured) => measured,
         Err(e) => {

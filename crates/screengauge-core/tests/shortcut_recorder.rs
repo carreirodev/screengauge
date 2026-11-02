@@ -1,6 +1,7 @@
 //! Layer 1 tests of the global shortcut recorder's rules in Settings (v1 spec WPC-296, Settings; WPC-323): the
 //! modifiers alone record nothing, an incomplete combination and Ctrl + Alt without Win are refused and the field goes on
-//! recording, and Esc, a click outside or Windows refusing the combination keep the shortcut there was.
+//! recording, and Esc, a click outside or Windows refusing the combination keep the shortcut there was. Esc takes the
+//! message with it, a click outside leaves it.
 
 use screengauge_core::settings::{
     Key, Modifiers, Pressed, Recorder, Refusal, Shortcut, Step, Tried,
@@ -177,12 +178,13 @@ fn esc_cancels_and_takes_the_refusal_of_this_recording_with_it() {
 }
 
 #[test]
-fn a_click_outside_or_losing_the_front_cancels_the_same_way() {
+fn a_click_outside_or_losing_the_front_cancels_and_leaves_the_message() {
     let mut recorder = recording();
     recorder.key_down(held(&["Ctrl", "Alt"]), Pressed::Main(Key::Letter('K')));
     assert_eq!(recorder.cancel(), Step::Stop);
     assert!(!recorder.is_recording());
-    assert_eq!(recorder.refusal(), None);
+    assert_eq!(recorder.held(), Modifiers::default());
+    assert_eq!(recorder.refusal(), Some(Refusal::CtrlAltWithoutWin));
     // Once stopped, cancelling again does nothing.
     assert_eq!(recorder.cancel(), Step::Show);
 }
@@ -203,9 +205,11 @@ fn a_click_on_the_field_while_it_records_keeps_recording_and_clears_the_message(
 #[test]
 fn reset_while_recording_stops_it_and_says_how_registering_went() {
     let mut recorder = recording();
-    recorder.key_down(held(&["Win"]), Pressed::Modifier);
+    recorder.key_down(held(&["Win"]), Pressed::Other);
+    assert_eq!(recorder.refusal(), Some(Refusal::Incomplete));
     // Reset: recording is cancelled first, then the default is tried.
     assert_eq!(recorder.cancel(), Step::Stop);
+    assert_eq!(recorder.refusal(), Some(Refusal::Incomplete));
     recorder.tried(Tried::AlreadyUsed);
     assert_eq!(recorder.refusal(), Some(Refusal::AlreadyUsed));
     recorder.tried(Tried::Taken);
