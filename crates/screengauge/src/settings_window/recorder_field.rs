@@ -34,6 +34,7 @@ pub fn message(refusal: Refusal) -> &'static str {
             "Ctrl + Alt without Win isn't allowed: on Brazilian keyboards it's AltGr and would take characters like / and ?."
         }
         Refusal::AlreadyUsed => "Already used by another program",
+        Refusal::Common => "Used by Windows and most programs.",
     }
 }
 
@@ -535,6 +536,10 @@ mod tests {
         assert_eq!(
             message(Refusal::AlreadyUsed),
             "Already used by another program"
+        );
+        assert_eq!(
+            message(Refusal::Common),
+            "Used by Windows and most programs."
         );
     }
 

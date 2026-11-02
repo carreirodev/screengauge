@@ -29,6 +29,8 @@ pub enum Refusal {
     Incomplete,
     /// Ctrl + Alt without Win, which is AltGr on Brazilian keyboards.
     CtrlAltWithoutWin,
+    /// One of the combinations Windows and most programs use, such as Ctrl + C or Alt + F4 ([`is_common`]).
+    Common,
     /// Windows refused the combination: another program holds it. The shortcut there was still works.
     AlreadyUsed,
 }
@@ -115,6 +117,10 @@ impl Recorder {
                 Step::Show
             }
             Pressed::Main(key) => match Shortcut::new(held, key) {
+                Ok(shortcut) if is_common(shortcut) => {
+                    self.refusal = Some(Refusal::Common);
+                    Step::Show
+                }
                 Ok(shortcut) => Step::Try(shortcut),
                 Err(error) => {
                     self.refusal = Some(error.into());
@@ -152,5 +158,30 @@ impl Recorder {
             Tried::Taken => None,
             Tried::AlreadyUsed => Some(Refusal::AlreadyUsed),
         };
+    }
+}
+
+/// The letters that, with Ctrl alone, Windows and most programs use: copy, paste, cut, undo, redo, select all, save, find,
+/// print, new, open, close and new tab (the owner's list, WPC-323).
+const WITH_CTRL: [char; 13] = [
+    'C', 'V', 'X', 'Z', 'Y', 'A', 'S', 'F', 'P', 'N', 'O', 'W', 'T',
+];
+
+/// Whether `shortcut` is one of the combinations Windows and most programs use, which the recorder refuses: Ctrl and
+/// one of [`WITH_CTRL`], or Alt + F4, exactly. With Shift or Win too it is another combination, and is allowed.
+pub fn is_common(shortcut: Shortcut) -> bool {
+    let only = |modifiers: Modifiers| shortcut.modifiers() == modifiers;
+    let ctrl = Modifiers {
+        ctrl: true,
+        ..Modifiers::default()
+    };
+    let alt = Modifiers {
+        alt: true,
+        ..Modifiers::default()
+    };
+    match shortcut.key() {
+        Key::Letter(letter) => only(ctrl) && WITH_CTRL.contains(&letter),
+        Key::Function(4) => only(alt),
+        Key::Digit(_) | Key::Function(_) => false,
     }
 }

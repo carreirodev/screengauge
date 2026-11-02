@@ -4,7 +4,7 @@
 //! message with it, a click outside leaves it.
 
 use screengauge_core::settings::{
-    Key, Modifiers, Pressed, Recorder, Refusal, Shortcut, Step, Tried,
+    Key, Modifiers, Pressed, Recorder, Refusal, Shortcut, Step, Tried, is_common,
 };
 
 fn held(names: &[&str]) -> Modifiers {
@@ -214,4 +214,49 @@ fn reset_while_recording_stops_it_and_says_how_registering_went() {
     assert_eq!(recorder.refusal(), Some(Refusal::AlreadyUsed));
     recorder.tried(Tried::Taken);
     assert_eq!(recorder.refusal(), None);
+}
+
+#[test]
+fn the_combinations_windows_and_most_programs_use_are_refused_and_the_field_goes_on_recording() {
+    let mut combinations: Vec<(&[&str], Key)> = "CVXZYASFPNOWT"
+        .chars()
+        .map(|letter| (&["Ctrl"][..], Key::Letter(letter)))
+        .collect();
+    combinations.push((&["Alt"], Key::Function(4)));
+    assert_eq!(combinations.len(), 14);
+    for (names, key) in combinations {
+        assert!(is_common(shortcut(names, key)), "{names:?} {key:?}");
+        let mut recorder = recording();
+        assert_eq!(
+            recorder.key_down(held(names), Pressed::Main(key)),
+            Step::Show,
+            "{names:?} {key:?}"
+        );
+        assert!(recorder.is_recording(), "{names:?} {key:?}");
+        assert_eq!(
+            recorder.refusal(),
+            Some(Refusal::Common),
+            "{names:?} {key:?}"
+        );
+    }
+}
+
+#[test]
+fn with_shift_or_win_too_they_are_other_combinations_and_are_tried() {
+    for (names, key) in [
+        (&["Ctrl", "Shift"][..], Key::Letter('C')),
+        (&["Win", "Ctrl"], Key::Letter('V')),
+        (&["Alt", "Shift"], Key::Function(4)),
+        (&["Ctrl"], Key::Function(4)),
+        (&["Alt"], Key::Letter('C')),
+        (&["Ctrl"], Key::Letter('B')),
+    ] {
+        assert!(!is_common(shortcut(names, key)), "{names:?} {key:?}");
+        let mut recorder = recording();
+        assert_eq!(
+            recorder.key_down(held(names), Pressed::Main(key)),
+            Step::Try(shortcut(names, key)),
+            "{names:?} {key:?}"
+        );
+    }
 }

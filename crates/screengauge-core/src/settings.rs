@@ -10,7 +10,7 @@ mod text;
 
 use std::path::Path;
 
-pub use recorder::{Pressed, Recorder, Refusal, Step, Tried};
+pub use recorder::{Pressed, Recorder, Refusal, Step, Tried, is_common};
 pub use shortcut::{Key, Modifiers, Shortcut, ShortcutError};
 pub use text::{Damaged, Loaded, Problem, Reset, read, write};
 
