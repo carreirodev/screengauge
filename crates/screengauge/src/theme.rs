@@ -1,7 +1,7 @@
-//! Light or dark: which of its two palettes ScreenGauge draws its own surfaces in, the pinned measurements' labels and
-//! the notices for now, and the toolbar and Settings later (v1 spec WPC-296, Theme). The measurement's line and the live
-//! label are cyan in both. The choice in Settings is read as the tools open; following Windows while ScreenGauge runs,
-//! and the choice itself in Settings, are WPC-321's.
+//! Light or dark: which of its two palettes ScreenGauge draws its own surfaces in: the toolbar, the notices, the pinned
+//! measurements' labels and Settings, its title bar included (v1 spec WPC-296, Theme). The measurement's line and the
+//! live label are cyan in both. The user chooses Automatic, Light or Dark in Settings; Automatic follows Windows' app
+//! mode, and changes with it while ScreenGauge runs (WPC-321).
 
 use screengauge_core::settings::Theme;
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};

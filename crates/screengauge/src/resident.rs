@@ -172,6 +172,11 @@ extern "system" fn window_proc(
             if let Err(e) = tray::follow_scale(hwnd) {
                 log::failure("tray icon: following the taskbar's scale", &e);
             }
+            // Windows says so when its app mode changes ("ImmersiveColorSet"), among other settings. The theme is read
+            // again on any of them, which are rare, and what ScreenGauge shows changes only when its palette does.
+            if message == WM_SETTINGCHANGE {
+                follow_theme();
+            }
             LRESULT(0)
         }
         WM_TIMER if wparam.0 == tray::SCALE_TIMER => {
@@ -345,6 +350,25 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
             }
         }
     }
+}
+
+/// Draws Settings and the tools, whichever are open, in the palette of the theme as it is now: in Automatic, Windows'
+/// app mode may have just changed (v1 spec WPC-296, Theme; WPC-321).
+fn follow_theme() {
+    let theme = match settings_file::current() {
+        Ok(stored) => stored.options.theme,
+        Err(e) => {
+            log::failure("theme: following Windows", &e);
+            return;
+        }
+    };
+    let mode = theme::mode(theme);
+    settings_window::follow(mode);
+    FROZEN_SCREEN.with_borrow(|open| {
+        if let Some(frozen) = open {
+            frozen.follow(mode);
+        }
+    });
 }
 
 /// Opens Settings, or brings it to the front, in the palette of the theme the settings file holds.

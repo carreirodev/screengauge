@@ -1,6 +1,7 @@
 //! Settings: the one window, apart from the tools, where the user changes ScreenGauge's options (v1 spec WPC-296,
 //! Settings). It opens at the center of the current monitor, shows on the taskbar and in Alt+Tab while it is open, and
-//! opening it again brings the same window to the front. Its title bar is Windows' own, dark in the dark theme; below
+//! opening it again brings the same window to the front. Its title bar is Windows' own, dark in the dark theme, and
+//! follows the theme at once when it changes, from Settings or, in Automatic, from Windows (WPC-321); below
 //! it, ScreenGauge draws one page that the user can't resize: the blocks' cards with their rows, and the footer with
 //! the version and the link to the project's page. Its X closes only the window, and ScreenGauge keeps running.
 //!
@@ -46,14 +47,15 @@ use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetCursorPos, HTCLIENT,
     IDC_ARROW, IDC_HAND, IsIconic, LoadCursorW, LoadIconW, RegisterClassExW, SW_RESTORE, SW_SHOW,
-    SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetCursor, SetForegroundWindow,
-    SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CAPTURECHANGED, WM_DESTROY,
-    WM_DPICHANGED, WM_ERASEBKGND, WM_GETDPISCALEDSIZE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-    WM_PAINT, WM_SETCURSOR, WNDCLASSEXW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
+    SW_SHOWNORMAL, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SetCursor, SetForegroundWindow, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE,
+    WM_CAPTURECHANGED, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_GETDPISCALEDSIZE,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_SETCURSOR, WNDCLASSEXW, WS_CAPTION,
+    WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
 };
 use windows::core::{BOOL, Error, HSTRING, PCWSTR, w};
 
-use crate::theme::Mode;
+use crate::theme::{self, Mode};
 use crate::win32::{low_word, signed_words, struct_size};
 use crate::{com, event, graphics, log, settings_file, tray};
 use controls::{Control, Pointer};
@@ -81,7 +83,7 @@ const PROJECT_PAGE: &str = env!("CARGO_PKG_REPOSITORY");
 thread_local! {
     /// The window while it is open.
     static WINDOW: Cell<Option<HWND>> = const { Cell::new(None) };
-    /// The palette it was opened in. Following the theme while it is open is WPC-321's.
+    /// The palette it is drawn in: the theme's when it opened, and again each time the theme changes (`follow`).
     static MODE: Cell<Mode> = const { Cell::new(Mode::Light) };
     /// Made at the first paint, and again after the scale changed or the graphics device was lost.
     static TARGET: RefCell<Option<ID2D1HwndRenderTarget>> = const { RefCell::new(None) };
@@ -167,23 +169,7 @@ pub fn open(mode: Mode) -> windows::core::Result<()> {
     }?;
     WINDOW.set(Some(hwnd));
     MODE.set(mode);
-    if mode == Mode::Dark {
-        let dark = BOOL::from(true);
-        // SAFETY: our own window; the value outlives the call, which reads exactly its size. Documented from Windows
-        // 11's first build, 22000, which ScreenGauge requires.
-        let set = unsafe {
-            DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_USE_IMMERSIVE_DARK_MODE,
-                (&raw const dark).cast(),
-                const { struct_size::<BOOL>() },
-            )
-        };
-        // The window still opens, with a light title bar over the dark page.
-        if let Err(e) = set {
-            log::failure("Settings: darkening the title bar", &e);
-        }
-    }
+    title_bar(hwnd, mode);
     // SAFETY: our own window.
     let given = unsafe { GetDpiForWindow(hwnd) };
     if given != dpi {
@@ -194,6 +180,53 @@ pub fn open(mode: Mode) -> windows::core::Result<()> {
     let _ = unsafe { ShowWindow(hwnd, SW_SHOW) };
     to_front(hwnd);
     Ok(())
+}
+
+/// Draws Settings in `mode`'s palette from now on, its title bar included, should it be open and in the other one.
+pub fn follow(mode: Mode) {
+    let Some(hwnd) = WINDOW.get() else {
+        return;
+    };
+    if MODE.replace(mode) == mode {
+        return;
+    }
+    title_bar(hwnd, mode);
+    invalidate(hwnd);
+}
+
+/// Makes the title bar dark in the dark theme and light in the light one. Windows draws it again at once only when
+/// told its frame changed. A failure leaves the window as it is, with a title bar of the other theme.
+fn title_bar(hwnd: HWND, mode: Mode) {
+    let dark = BOOL::from(mode == Mode::Dark);
+    // SAFETY: our own window; the value outlives the call, which reads exactly its size. Documented from Windows 11's
+    // first build, 22000, which ScreenGauge requires.
+    let set = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            (&raw const dark).cast(),
+            const { struct_size::<BOOL>() },
+        )
+    };
+    if let Err(e) = set {
+        log::failure("Settings: the title bar's theme", &e);
+        return;
+    }
+    // SAFETY: our own window; nothing moves, resizes, or changes order or activation.
+    let redrawn = unsafe {
+        SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    };
+    if let Err(e) = redrawn {
+        log::failure("Settings: drawing the title bar again", &e);
+    }
 }
 
 /// Closes Settings, should it be open, as ScreenGauge exits: before the graphics factories are released, since its
@@ -528,6 +561,11 @@ fn act(hwnd: HWND, hit: Hit) {
             // The change holds in this run even when the file couldn't be saved.
             if let Err(e) = saved {
                 log::failure("Settings: saving a change", &e);
+            }
+            // A theme chosen here shows at once. The tools can't be open meanwhile: they cover Settings, and open
+            // again in the theme chosen.
+            if let Control::Theme(theme) = control {
+                follow(theme::mode(theme));
             }
         }
     }

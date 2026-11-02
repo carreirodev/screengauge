@@ -320,6 +320,29 @@ impl FrozenScreen {
         self.windows.get(monitor).copied()
     }
 
+    /// Draws ScreenGauge's own surfaces over the photo in `mode`'s palette from now on: the toolbar, the notices and the
+    /// pinned measurements' labels. A window in the other palette makes what it draws with again, at its next paint.
+    pub fn follow(&self, mode: Mode) {
+        for &window in &self.windows {
+            let changed = with_state(window, |state| {
+                let changed = state.mode.replace(mode) != mode;
+                if changed {
+                    drop(state.drawing.borrow_mut().take());
+                }
+                changed
+            });
+            if changed == Some(true) {
+                // SAFETY: our own window.
+                if !unsafe { InvalidateRect(Some(window), None, false) }.as_bool() {
+                    log::failure(
+                        "frozen screen: drawing it in another theme",
+                        &"InvalidateRect returned FALSE",
+                    );
+                }
+            }
+        }
+    }
+
     /// Hides the windows, so the program in front and the ones behind it show, while Save As waits behind it (the
     /// owner's choice in WPC-318). The session and its photos stay as they were.
     pub fn step_aside(&self) {
@@ -655,8 +678,8 @@ fn destroy(window: HWND) {
 struct Window {
     /// Its monitor's index in the scene's frozen screen.
     monitor: usize,
-    /// The palette of what ScreenGauge draws itself over the photo.
-    mode: Mode,
+    /// The palette of what ScreenGauge draws itself over the photo. It changes with the theme while the tools are open.
+    mode: Cell<Mode>,
     session: Rc<SharedSession>,
     factory: ID2D1Factory,
     /// Made at the first draw, and again when Direct2D says the graphics device was lost.
@@ -713,7 +736,7 @@ fn create_window(
     let height = i32::try_from(rect.height).map_err(|_| too_large())?;
     let mut slot: Slot = Some(Box::new(Window {
         monitor,
-        mode,
+        mode: Cell::new(mode),
         session: Rc::clone(session),
         factory: factory.clone(),
         drawing: RefCell::new(None),
@@ -1115,7 +1138,7 @@ impl Drawing {
                 )
             }
         })??;
-        let overlay = Overlay::new(&target, &graphics::fonts()?, rect, scale, window.mode)?;
+        let overlay = Overlay::new(&target, &graphics::fonts()?, rect, scale, window.mode.get())?;
         Ok(Drawing {
             target,
             bitmap,

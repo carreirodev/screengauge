@@ -7,7 +7,7 @@
 //! with the cursor on it, and the button shrinks while held down on it. The switch and the segments don't react. The
 //! switch's knob moves at once, with no 0.15 s slide, as the owner chose for the toolbar in WPC-311.
 
-use screengauge_core::settings::{Change, ColorFormat, Options};
+use screengauge_core::settings::{Change, ColorFormat, Options, Theme};
 use windows::Win32::Foundation::RECT;
 
 use crate::graphics::{Color, color};
@@ -89,6 +89,7 @@ pub fn colors(mode: Mode) -> &'static Colors {
 /// A part of a control that a click acts on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Control {
+    Theme(Theme),
     ToleranceDown,
     ToleranceUp,
     LogicalPixels,
@@ -98,12 +99,20 @@ pub enum Control {
 /// What a click on `control` changes, with `options` as Settings shows them: the switch turns to the other side.
 pub fn change(control: Control, options: &Options) -> Change {
     match control {
+        Control::Theme(theme) => Change::Theme(theme),
         Control::ToleranceDown => Change::DefaultToleranceDown,
         Control::ToleranceUp => Change::DefaultToleranceUp,
         Control::LogicalPixels => Change::AlsoShowLogicalPixels(!options.also_show_logical_pixels),
         Control::ColorFormat(format) => Change::ColorFormat(format),
     }
 }
+
+/// The choices of "Theme", in the spec's order, with their words.
+pub const THEMES: [(Theme, &str); 3] = [
+    (Theme::Automatic, "Automatic"),
+    (Theme::Light, "Light"),
+    (Theme::Dark, "Dark"),
+];
 
 /// The choices of "Color format", in the spec's order, with their words.
 pub const COLOR_FORMATS: [(ColorFormat, &str); 3] = [
@@ -476,6 +485,10 @@ mod tests {
         assert_eq!(
             change(Control::ColorFormat(ColorFormat::Rgb), &options),
             Change::ColorFormat(ColorFormat::Rgb)
+        );
+        assert_eq!(
+            change(Control::Theme(Theme::Dark), &options),
+            Change::Theme(Theme::Dark)
         );
     }
 

@@ -23,7 +23,9 @@ use windows::Win32::Graphics::DirectWrite::{
 };
 use windows::core::{Error, Interface};
 
-use super::controls::{self, COLOR_FORMATS, Control, Label, LabelKind, Laid, Pointer, dpi_scale};
+use super::controls::{
+    self, COLOR_FORMATS, Control, Label, LabelKind, Laid, Pointer, THEMES, dpi_scale,
+};
 use super::layout::{self, Page, Row, Span};
 use crate::graphics::{Color, Fonts, color, d2d_color, solid_brush};
 use crate::log;
@@ -189,6 +191,14 @@ impl<'a> Rows<'a> {
             self.texts(row, px_i(inner), top, bottom)?;
             let canvas = &self.canvas;
             laid.push(match row {
+                Row::Theme => {
+                    let mut choices = Vec::new();
+                    for (theme, word) in THEMES {
+                        let width = width_of(&text(self.on.fonts, word, &self.segment, None)?)?;
+                        choices.push((Control::Theme(theme), word, width, options.theme == theme));
+                    }
+                    controls::choice(canvas, &choices, right, top, bottom)
+                }
                 Row::DefaultTolerance => {
                     controls::stepper(canvas, options.default_tolerance.get(), right, top, bottom)
                 }
@@ -639,7 +649,7 @@ mod tests {
         CoUninitialize,
     };
 
-    use screengauge_core::settings::ColorFormat;
+    use screengauge_core::settings::{ColorFormat, Theme};
 
     use super::*;
 
@@ -980,6 +990,47 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_theme_s_choice_lights_the_theme_chosen_automatic_by_default() {
+        for mode in [Mode::Dark, Mode::Light] {
+            for (theme, _) in THEMES {
+                let page = drawn_with(
+                    mode,
+                    144,
+                    &Options {
+                        theme,
+                        ..Options::default()
+                    },
+                    Pointer::default(),
+                );
+                for (other, _) in THEMES {
+                    let lit = cyan(&page, page.place_of(Control::Theme(other)));
+                    if other == theme {
+                        assert!(lit > 50.0, "{mode:?} {theme:?}: {lit}");
+                    } else {
+                        assert!(lit.abs() < 25.0, "{mode:?} {theme:?} {other:?}: {lit}");
+                    }
+                }
+            }
+        }
+        let page = drawn(Mode::Light, 144);
+        assert!(cyan(&page, page.place_of(Control::Theme(Theme::Automatic))) > 50.0);
+    }
+
+    #[test]
+    fn the_theme_s_choice_is_in_general_s_last_row_at_the_right_like_the_others() {
+        // Measured in the prototype at 100%: "Automatic · Light · Dark" is 181.67 wide and ends at 531.
+        let page = drawn(Mode::Dark, 96);
+        let automatic = page.place_of(Control::Theme(Theme::Automatic));
+        let dark = page.place_of(Control::Theme(Theme::Dark));
+        assert_eq!(dark.right + 3, 531);
+        let width = dark.right + 3 - (automatic.left - 3);
+        assert!((180..=184).contains(&width), "{width}");
+        let row = layout::place_row(Row::Theme);
+        assert!(automatic.top > i32::try_from(row.span.top).expect("small"));
+        assert!(automatic.bottom < i32::try_from(row.span.bottom).expect("small"));
     }
 
     #[test]

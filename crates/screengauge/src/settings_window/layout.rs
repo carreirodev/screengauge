@@ -121,6 +121,7 @@ pub struct Page {
 /// One option's row: its label on the left, its note under the label when it has one, and its control on the right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Row {
+    Theme,
     DefaultTolerance,
     AlsoShowLogicalPixels,
     ColorFormat,
@@ -129,6 +130,7 @@ pub enum Row {
 impl Row {
     pub fn label(self) -> &'static str {
         match self {
+            Row::Theme => "Theme",
             Row::DefaultTolerance => "Default tolerance",
             Row::AlsoShowLogicalPixels => "Also show logical pixels",
             Row::ColorFormat => "Color format",
@@ -139,13 +141,16 @@ impl Row {
         match self {
             Row::DefaultTolerance => Some("The mouse wheel adjusts it while measuring."),
             Row::AlsoShowLogicalPixels => Some("When the display scale isn't 100%."),
-            Row::ColorFormat => None,
+            Row::Theme | Row::ColorFormat => None,
         }
     }
 
     /// The block it is in, and its place among the block's rows, counted from 0.
     fn slot(self) -> (Block, u32) {
         match self {
+            // The last of General's three: the global shortcut's and "Start with Windows"' rows come above it with their
+            // own tickets (WPC-323, WPC-326), so it never moves.
+            Row::Theme => (Block::General, 2),
             Row::DefaultTolerance => (Block::Measurements, 0),
             Row::AlsoShowLogicalPixels => (Block::Measurements, 1),
             Row::ColorFormat => (Block::Inspect, 0),
@@ -153,9 +158,10 @@ impl Row {
     }
 }
 
-/// The rows ScreenGauge draws, top to bottom. General's and Snip's come with their own tickets (WPC-321 to WPC-326),
-/// into the room their cards already have.
-pub const ROWS: [Row; 3] = [
+/// The rows ScreenGauge draws, top to bottom. General's other two and Snip's come with their own tickets (WPC-322 to
+/// WPC-326), into the room their cards already have.
+pub const ROWS: [Row; 4] = [
+    Row::Theme,
     Row::DefaultTolerance,
     Row::AlsoShowLogicalPixels,
     Row::ColorFormat,
@@ -335,6 +341,16 @@ mod tests {
     }
 
     #[test]
+    fn theme_is_the_last_of_general_s_three_rows_against_the_card_s_bottom() {
+        let card = page().blocks[0].card;
+        let theme = place_row(Row::Theme);
+        // General's 126 pixels inside its border: three rows of 42, 41 and 41, and two lines between them.
+        assert_eq!(theme.span.bottom, card.bottom - 1);
+        assert_eq!(theme.span.top, card.top + 1 + 42 + 1 + 41 + 1);
+        assert!(theme.line_above);
+    }
+
+    #[test]
     fn inspect_s_one_row_fills_its_card() {
         let card = page().blocks[2].card;
         let color = place_row(Row::ColorFormat);
@@ -355,6 +371,7 @@ mod tests {
         assert_eq!(
             texts,
             [
+                ("Theme", None),
                 (
                     "Default tolerance",
                     Some("The mouse wheel adjusts it while measuring.")

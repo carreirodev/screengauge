@@ -445,7 +445,7 @@ fn each_magnification_enlarges_a_pixel_to_its_number_of_pixels_a_side() {
 
 /// What Settings' controls do to the options (WPC-320): each click changes one option, and says whether it changed.
 mod changes {
-    use screengauge_core::settings::{Change, ColorFormat, Options, Tolerance};
+    use screengauge_core::settings::{Change, ColorFormat, Options, Theme, Tolerance};
 
     fn tolerance(value: u8) -> Tolerance {
         Tolerance::new(value).expect("within the limits")
@@ -496,6 +496,18 @@ mod changes {
         assert!(!options.apply(Change::ColorFormat(ColorFormat::Hex)));
         assert!(options.apply(Change::ColorFormat(ColorFormat::Rgb)));
         assert_eq!(options.color_format, ColorFormat::Rgb);
+    }
+
+    #[test]
+    fn the_theme_starts_automatic_and_takes_light_or_dark() {
+        let mut options = Options::default();
+        assert_eq!(options.theme, Theme::Automatic);
+        assert!(options.apply(Change::Theme(Theme::Dark)));
+        assert_eq!(options.theme, Theme::Dark);
+        assert!(!options.apply(Change::Theme(Theme::Dark)));
+        assert!(options.apply(Change::Theme(Theme::Light)));
+        assert!(options.apply(Change::Theme(Theme::Automatic)));
+        assert_eq!(options.theme, Theme::Automatic);
     }
 
     #[test]
