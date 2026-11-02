@@ -9,3 +9,6 @@ tasks.md
 
 # Cargo build output
 target/
+
+# Microsoft Store listing images, kept on this computer only by the owner's choice
+DesignInterface/MS Store images/
