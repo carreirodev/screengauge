@@ -26,6 +26,7 @@ use windows::core::{Error, Interface};
 use super::controls::{self, COLOR_FORMATS, Control, Label, LabelKind, Laid, Pointer, dpi_scale};
 use super::layout::{self, Page, Row, Span};
 use crate::graphics::{Color, Fonts, color, d2d_color, solid_brush};
+use crate::log;
 use crate::relief::{self, Canvas};
 use crate::theme::Mode;
 
@@ -289,8 +290,15 @@ impl<'a> Rows<'a> {
             .try_for_each(|control| controls::paint(&canvas, control, self.on.mode, pointer));
         // SAFETY: ends the BeginDraw above.
         let ended = unsafe { layer.EndDraw(None, None) };
-        painted?;
-        ended?;
+        match (painted, ended) {
+            (Ok(()), Ok(())) => {}
+            (Err(e), Ok(())) | (Ok(()), Err(e)) => return Err(e),
+            // Both failed: the painting's is the cause, and the other is logged, not lost.
+            (Err(e), Err(also)) => {
+                log::failure("Settings: ending the controls' layer", &also);
+                return Err(e);
+            }
+        }
         // SAFETY: no arguments; the bitmap comes back as an owned interface.
         let bitmap = unsafe { layer.GetBitmap() }?;
         // SAFETY: a drawing call on a live render target, with arguments that outlive it. One pixel of the layer is one

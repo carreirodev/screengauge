@@ -384,7 +384,11 @@ extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_LBUTTONDOWN => {
-            if let Some(hit) = hit_at(Some(client_point(lparam))) {
+            let point = Some(client_point(lparam));
+            // A press with no move before it, as after Alt+Tab with the cursor already on +, still finds the cursor
+            // on what it pressed, so a held − or + looks pressed at once.
+            OVER.set(control_at(point));
+            if let Some(hit) = hit_at(point) {
                 PRESSED.set(Some(hit));
                 // SAFETY: our own window; the release comes here wherever the mouse is.
                 unsafe { SetCapture(hwnd) };
