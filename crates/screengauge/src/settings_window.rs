@@ -116,7 +116,8 @@ pub fn open(mode: Mode) -> windows::core::Result<()> {
             // SAFETY: as above. The result says whether it was visible before, not whether this worked.
             let _ = unsafe { ShowWindow(hwnd, SW_RESTORE) };
         }
-        return to_front(hwnd);
+        to_front(hwnd);
+        return Ok(());
     }
     let (work, dpi) = monitor_at(event::cursor_now()?)?;
     let size = window_size(dpi)?;
@@ -168,7 +169,8 @@ pub fn open(mode: Mode) -> windows::core::Result<()> {
     }
     // SAFETY: our own window. The result says whether it was visible before.
     let _ = unsafe { ShowWindow(hwnd, SW_SHOW) };
-    to_front(hwnd)
+    to_front(hwnd);
+    Ok(())
 }
 
 /// Closes Settings, should it be open, as ScreenGauge exits: before the graphics factories are released, since its
@@ -189,7 +191,7 @@ pub fn is(hwnd: HWND) -> bool {
 
 /// Gives the keyboard to `hwnd`. Windows may refuse when another program took the front since the user's last click in
 /// ScreenGauge; the window then flashes on the taskbar instead, as any program's would.
-fn to_front(hwnd: HWND) -> windows::core::Result<()> {
+fn to_front(hwnd: HWND) {
     // SAFETY: our own window.
     if !unsafe { SetForegroundWindow(hwnd) }.as_bool() {
         log::failure(
@@ -197,7 +199,6 @@ fn to_front(hwnd: HWND) -> windows::core::Result<()> {
             &"Windows kept another window in front",
         );
     }
-    Ok(())
 }
 
 /// The work area of the monitor at `cursor`, or the nearest one, without the taskbar, and that monitor's DPI.
@@ -405,9 +406,14 @@ fn cursor_in(hwnd: HWND) -> Option<POINT> {
         return None;
     }
     // SAFETY: our own window; converts a local in place.
-    unsafe { ScreenToClient(hwnd, &mut point) }
-        .as_bool()
-        .then_some(point)
+    if !unsafe { ScreenToClient(hwnd, &mut point) }.as_bool() {
+        log::failure(
+            "Settings: placing the cursor in the window",
+            &"ScreenToClient returned FALSE",
+        );
+        return None;
+    }
+    Some(point)
 }
 
 fn on_link(point: Option<POINT>) -> bool {
@@ -438,7 +444,8 @@ fn open_project_page(hwnd: HWND) {
             SW_SHOWNORMAL,
         )
     };
-    // ShellExecuteW returns a number above 32 when it worked, and an error code otherwise.
+    // ShellExecuteW returns a number above 32 when it worked, and an error code otherwise, in a handle's place: the
+    // pointer's address is that number, and an isize holds every address on x64.
     let code = opened.0 as isize;
     if code <= 32 {
         log::failure(
@@ -490,7 +497,13 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
             redraw(hwnd);
             return Ok(());
         }
-        Err(e) => return Err(e),
+        Err(e) => {
+            // The frame failed as a whole; what failed inside it, if anything, is logged so it isn't lost.
+            if let Err(inside) = drawn {
+                log::failure("Settings: drawing it", &inside);
+            }
+            return Err(e);
+        }
     }
     LINK.set(Some(drawn?));
     Ok(())

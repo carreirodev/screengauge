@@ -347,7 +347,7 @@ fn draw_text(target: &ID2D1RenderTarget, placed: &Placed, brush: &ID2D1SolidColo
 
 /// How many pixels a logical pixel is at `dpi`, for the sizes that are not whole numbers.
 fn dpi_scale(dpi: u32) -> f32 {
-    // A DPI is a few hundred at most, which a float holds exactly.
+    // A DPI is a few hundred at most, which a float holds exactly, so the cast loses nothing.
     dpi as f32 / 96.0
 }
 
@@ -360,6 +360,7 @@ fn px(pixels: u32) -> f32 {
 
 /// A position already rounded to a whole number of pixels, as Windows takes a rectangle. Positions in the window are a
 /// few thousand pixels at most, far inside `i32`.
+// TODO: place the link in whole pixels without going through a float, so no float comes back to `i32` here.
 fn whole(position: f32) -> i32 {
     debug_assert!(
         position.fract() == 0.0 && position.abs() < 1e6,
@@ -414,11 +415,8 @@ mod tests {
     fn drawn(mode: Mode, dpi: u32) -> Drawn {
         let width = scaled(layout::WIDTH, dpi);
         let height = scaled(layout::page().height, dpi);
-        // SAFETY: starts COM for this thread, ended below once every COM object here is dropped.
-        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
-            .ok()
-            .expect("COM starts on a test thread");
-        let drawn = {
+        let _com = Com::start();
+        {
             // SAFETY: COM is started for this thread.
             let wic: IWICImagingFactory =
                 unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER) }
@@ -473,10 +471,28 @@ mod tests {
                     .collect(),
                 link,
             }
-        };
-        // SAFETY: pairs the CoInitializeEx above; every COM object made here was dropped with the block.
-        unsafe { CoUninitialize() };
-        drawn
+        }
+    }
+
+    /// COM for the test's thread, which the bitmap needs, ended when this drops, after every object made with it: also
+    /// when a check fails and unwinds.
+    struct Com;
+
+    impl Com {
+        fn start() -> Com {
+            // SAFETY: starts COM for this thread, undone once by the drop of the Com it returns.
+            unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
+                .ok()
+                .expect("COM starts on a test thread");
+            Com
+        }
+    }
+
+    impl Drop for Com {
+        fn drop(&mut self) {
+            // SAFETY: pairs the CoInitializeEx in `start`.
+            unsafe { CoUninitialize() };
+        }
     }
 
     fn near(pixel: [u8; 3], color: Color, within: u8) -> bool {

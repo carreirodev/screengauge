@@ -36,7 +36,7 @@ const ICON_ID: u32 = 1;
 /// The windows crate has NIN_SELECT and NINF_KEY but not their combination, which Windows' headers define this way.
 const NIN_KEYSELECT: u32 = NIN_SELECT | NINF_KEY;
 
-/// The ID of the exe's icon group, which build.rs writes.
+/// The ID of the exe's icon group, which build.rs writes: the tray icon, Save As's taskbar button and Settings show it.
 pub const APP_ICON_ID: usize = 1;
 
 /// The resident window's timer that follows the taskbar after a change of scale (`follow_scale`). It runs only then:

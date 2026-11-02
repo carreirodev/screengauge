@@ -44,15 +44,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{Error, HRESULT, HSTRING, Interface, PCWSTR, w};
 
 use crate::win32::struct_size;
-use crate::{com, log};
+use crate::{com, log, tray};
 
 const HOST_CLASS: PCWSTR = w!("ScreenGauge.SaveAs");
 
 /// The host's timer that moves Save As to the middle of the monitor once it shows.
 const CENTER_TIMER: usize = 1;
-
-/// The app icon's group in the exe's resources (build.rs), which the host's button on the taskbar shows.
-const APP_ICON_ID: usize = 1;
 
 thread_local! {
     /// Save As while it is open. Never borrowed while Save As runs its message loop: only for a moment, here.
@@ -70,7 +67,7 @@ pub fn register_class(instance: HINSTANCE) -> windows::core::Result<()> {
     let icon = unsafe {
         LoadIconW(
             Some(instance),
-            PCWSTR(std::ptr::without_provenance(APP_ICON_ID)),
+            PCWSTR(std::ptr::without_provenance(tray::APP_ICON_ID)),
         )
     }?;
     let class = WNDCLASSEXW {
