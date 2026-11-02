@@ -33,19 +33,23 @@ pub fn of_message(input: Input) -> Event {
 /// where it is now, since a window's own message loop may have run meanwhile, and the rest as [`of_message`] reads it.
 pub fn now(input: Input) -> Event {
     let mut event = of_message(input);
-    let mut cursor = POINT::default();
-    // SAFETY: fills a local.
-    match unsafe { GetCursorPos(&mut cursor) } {
-        Ok(()) => {
-            event.cursor = Point {
-                x: cursor.x,
-                y: cursor.y,
-            };
-        }
+    match cursor_now() {
+        Ok(cursor) => event.cursor = cursor,
         // The last message's place, then: a notice may show a little off.
         Err(e) => log::failure("event: finding the cursor", &e),
     }
     event
+}
+
+/// Where the cursor is now, in physical pixels of the virtual screen: the process is Per-Monitor V2.
+pub fn cursor_now() -> windows::core::Result<Point> {
+    let mut cursor = POINT::default();
+    // SAFETY: fills a local.
+    unsafe { GetCursorPos(&mut cursor) }?;
+    Ok(Point {
+        x: cursor.x,
+        y: cursor.y,
+    })
 }
 
 /// Where the cursor was when Windows sent the message this thread is handling, in physical pixels of the virtual

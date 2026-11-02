@@ -529,7 +529,7 @@ impl Session {
     /// the user does over the frozen screen counts, so no other drag starts, and Esc is Save As's alone. Another program
     /// coming to the front sends the frozen screen and Save As behind it, to wait, and Save As's button brings them back
     /// (the owner's choice in WPC-318); so does the global shortcut, which never closes the tools while Save As is open,
-    /// as that would lose the image. A change of monitors closes the tools once the file is done with.
+    /// as that would lose the image, and so does calling ScreenGauge from its tray icon or the Start menu. A change of monitors closes the tools once the file is done with.
     fn while_saving(&mut self, event: Event) -> Vec<Effect> {
         match event.input {
             Input::SaveAsClosed(chosen) => self.save_as_closed(chosen, event.cursor, event.uptime),
@@ -537,7 +537,7 @@ impl Session {
             Input::Saved => self.written(true, event.uptime),
             Input::NotSaved => self.written(false, event.uptime),
             Input::OtherProgramInFront => self.step_aside(true),
-            Input::BackInFront | Input::GlobalShortcut => self.step_aside(false),
+            Input::BackInFront | Input::GlobalShortcut | Input::Called => self.step_aside(false),
             Input::MonitorsChanged => {
                 if let Some(saving) = self.saving.as_mut() {
                     saving.close_after = true;

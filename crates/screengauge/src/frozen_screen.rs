@@ -25,7 +25,7 @@ use screengauge_core::session::{
 };
 use windows::Win32::Foundation::{
     D2DERR_RECREATE_TARGET, E_FAIL, ERROR_SUCCESS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT,
-    POINT, SetLastError, WPARAM,
+    SetLastError, WPARAM,
 };
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_SIZE_U, D2D1_ALPHA_MODE_IGNORE, D2D1_PIXEL_FORMAT,
@@ -48,7 +48,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     MOD_ALT, MOD_NOREPEAT, RegisterHotKey, ReleaseCapture, SetCapture, UnregisterHotKey, VK_ESCAPE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CREATESTRUCTW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos,
+    CREATESTRUCTW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
     GetWindowLongPtrW, HTCLIENT, HWND_TOPMOST, IDC_ARROW, IDC_CROSS, KillTimer, LoadCursorW,
     PostMessageW, RegisterClassExW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow,
@@ -139,7 +139,7 @@ pub struct FrozenScreen {
     watch: Option<foreground::Watch>,
     /// Whether the first window holds Alt+Esc ([`ALT_ESC`]): from the moment the frozen screen asked for the keyboard,
     /// unless another program already held it.
-    holds_alt_esc: bool,
+    holds_alt_esc: Cell<bool>,
 }
 
 /// The session, as the windows and the resident window share it.
@@ -183,7 +183,7 @@ impl FrozenScreen {
                 resident,
             }),
             watch: None,
-            holds_alt_esc: false,
+            holds_alt_esc: Cell::new(false),
         };
         for (monitor, &rect) in rects.iter().enumerate() {
             let window = create_window(instance, monitor, rect, mode, &factory, &frozen.session)?;
@@ -202,7 +202,7 @@ impl FrozenScreen {
                 Err(Error::new(E_FAIL, "a frozen screen window has no state"))
             })?;
         }
-        frozen.take_keyboard(&rects);
+        frozen.take_keyboard();
         frozen.watch_the_front();
         frozen.hold_alt_esc();
         Ok(frozen)
@@ -253,23 +253,15 @@ impl FrozenScreen {
     /// on. Each call grants ScreenGauge the right to come to the front: the global shortcut and the tray icon's click
     /// through Windows, and opening ScreenGauge through the program just opened; should Windows refuse anyway, Esc
     /// won't reach the frozen screen until it is clicked.
-    fn take_keyboard(&self, rects: &[Rect]) {
-        let mut cursor = POINT::default();
-        // SAFETY: fills a local.
-        let under_cursor = match unsafe { GetCursorPos(&mut cursor) } {
-            Ok(()) => rects.iter().position(|rect| {
-                rect.contains(Point {
-                    x: cursor.x,
-                    y: cursor.y,
-                })
-            }),
+    fn take_keyboard(&self) {
+        let under_cursor = match event::cursor_now() {
+            Ok(cursor) => self.window_at(cursor),
             Err(e) => {
                 log::failure("frozen screen: finding the cursor", &e);
-                None
+                self.windows.first().copied()
             }
         };
-        // The cursor is always on a monitor; should it not be, the first monitor's window takes the keyboard.
-        if let Some(&window) = self.windows.get(under_cursor.unwrap_or(0)) {
+        if let Some(window) = under_cursor {
             // SAFETY: our own window.
             if !unsafe { SetForegroundWindow(window) }.as_bool() {
                 log::failure(
@@ -300,7 +292,7 @@ impl FrozenScreen {
 
     /// Has the first window hold Alt+Esc while the tools are open ([`ALT_ESC`]). Should another program hold it already,
     /// Alt+Esc does what Windows does with it and closes the tools, as Alt+Tab does, and the call goes on.
-    fn hold_alt_esc(&mut self) {
+    fn hold_alt_esc(&self) {
         // Can't happen: the session core refuses a frozen screen without monitors.
         let Some(&window) = self.windows.first() else {
             return;
@@ -315,8 +307,23 @@ impl FrozenScreen {
                 u32::from(VK_ESCAPE.0),
             )
         } {
-            Ok(()) => self.holds_alt_esc = true,
+            Ok(()) => self.holds_alt_esc.set(true),
             Err(e) => log::failure("frozen screen: holding Alt+Esc", &e),
+        }
+    }
+
+    /// Gives Alt+Esc back to Windows, when the first window holds it.
+    fn give_back_alt_esc(&self) {
+        if !self.holds_alt_esc.get() {
+            return;
+        }
+        let Some(&window) = self.windows.first() else {
+            return;
+        };
+        // SAFETY: our own window, on its thread, which holds the hot key.
+        match unsafe { UnregisterHotKey(Some(window), ALT_ESC) } {
+            Ok(()) => self.holds_alt_esc.set(false),
+            Err(e) => log::failure("frozen screen: giving back Alt+Esc", &e),
         }
     }
 
@@ -344,6 +351,8 @@ impl FrozenScreen {
     /// Hides the windows, so the program in front and the ones behind it show, while Save As waits behind it (the
     /// owner's choice in WPC-318). The session and its photos stay as they were.
     pub fn step_aside(&self) {
+        // The program in front has Alt+Esc as Windows gives it.
+        self.give_back_alt_esc();
         for &window in &self.windows {
             // SAFETY: our own window. ShowWindow returns whether it was visible before, not an error.
             let _ = unsafe { ShowWindow(window, SW_HIDE) };
@@ -353,6 +362,7 @@ impl FrozenScreen {
     /// Shows the windows again over every program, as they were before they stepped aside. Save As comes back over
     /// them afterwards.
     pub fn come_back(&self) {
+        self.hold_alt_esc();
         for &window in &self.windows {
             // SAFETY: our own window. ShowWindow returns whether it was visible before, not an error.
             let _ = unsafe { ShowWindow(window, SW_SHOWNA) };
@@ -381,14 +391,7 @@ impl Drop for FrozenScreen {
         // which isn't one coming to the front while the tools are open.
         self.watch = None;
         // Alt+Esc is Windows' again once the tools close.
-        if self.holds_alt_esc
-            && let Some(&window) = self.windows.first()
-        {
-            // SAFETY: our own window, on its thread, which holds the hot key.
-            if let Err(e) = unsafe { UnregisterHotKey(Some(window), ALT_ESC) } {
-                log::failure("frozen screen: giving back Alt+Esc", &e);
-            }
-        }
+        self.give_back_alt_esc();
         for window in self.windows.drain(..) {
             destroy(window);
         }

@@ -7,17 +7,16 @@ use std::cell::RefCell;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use screengauge_core::session::{Effect, Image, Input, Opening, Point, SaveTo, Session};
-use screengauge_core::settings::Folder;
-use screengauge_core::settings::{Remembered, Stored};
+use screengauge_core::session::{Effect, Image, Input, Opening, SaveTo, Session};
+use screengauge_core::settings::{Folder, Remembered, Stored};
 use windows::Win32::Foundation::{
-    E_FAIL, ERROR_SUCCESS, HINSTANCE, HWND, LPARAM, LRESULT, POINT, SetLastError, WPARAM,
+    E_FAIL, ERROR_SUCCESS, HINSTANCE, HWND, LPARAM, LRESULT, SetLastError, WPARAM,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime;
 use windows::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-    FindWindowW, GetCursorPos, GetMessageW, GetWindowThreadProcessId, IsWindow, MSG, PostMessageW,
+    FindWindowW, GetMessageW, GetWindowThreadProcessId, IsWindow, MSG, PostMessageW,
     PostQuitMessage, RegisterClassExW, RegisterWindowMessageW, SetCursorPos, TranslateMessage,
     WINDOW_EX_STYLE, WM_CONTEXTMENU, WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_HOTKEY,
     WM_SETTINGCHANGE, WM_TIMER, WNDCLASSEXW, WS_OVERLAPPED,
@@ -263,7 +262,7 @@ fn open(
     let mode = theme::mode(options.theme);
     let session = Session::open(Opening {
         frozen_screen,
-        cursor: cursor_now()?,
+        cursor: event::cursor_now()?,
         options,
         remembered,
         second_click_until,
@@ -282,17 +281,6 @@ fn second_click_until(call: &Input) -> Option<Duration> {
     // SAFETY: no arguments.
     let double_click = Duration::from_millis(u64::from(unsafe { GetDoubleClickTime() }));
     Some(event::uptime() + double_click)
-}
-
-/// Where the cursor is now, in physical pixels of the virtual screen: the process is Per-Monitor V2.
-fn cursor_now() -> windows::core::Result<Point> {
-    let mut cursor = POINT::default();
-    // SAFETY: fills a local.
-    unsafe { GetCursorPos(&mut cursor) }?;
-    Ok(Point {
-        x: cursor.x,
-        y: cursor.y,
-    })
 }
 
 /// Does what the session core asked, in its order, for the resident window `resident`.
@@ -388,10 +376,14 @@ fn tell(resident: HWND, input: Input) {
 /// Writes the Snip's `image` as a PNG file where `to` says. The log never shows the path, which holds the Windows user
 /// name.
 fn write_png(to: &SaveTo, image: &Image) -> Input {
-    let written = png::encode(image)
-        .map_err(|e| e.to_string())
-        .and_then(|bytes| snip_file::write(to, &bytes).map_err(|e| e.to_string()));
-    match written {
+    let bytes = match png::encode(image) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            log::failure("Snip: making the PNG", &e);
+            return Input::NotSaved;
+        }
+    };
+    match snip_file::write(to, &bytes) {
         Ok(_) => Input::Saved,
         Err(e) => {
             log::failure("Snip: writing the file", &e);
@@ -403,7 +395,7 @@ fn write_png(to: &SaveTo, image: &Image) -> Input {
 /// Opens Save As in `folder`, suggesting `file_name`, and waits until it closes. Its own message loop runs meanwhile,
 /// which is why it is called here, outside every borrow of the frozen screen.
 fn open_save_as(folder: Option<&Folder>, file_name: &str) -> Input {
-    let cursor = cursor_now().unwrap_or_else(|e| {
+    let cursor = event::cursor_now().unwrap_or_else(|e| {
         log::failure("Save As: finding the cursor", &e);
         event::message_cursor()
     });

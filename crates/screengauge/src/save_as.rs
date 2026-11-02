@@ -41,7 +41,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SetTimer, SetWindowPos, ShowWindow, USER_TIMER_MINIMUM, WM_TIMER, WNDCLASSEXW, WS_EX_APPWINDOW,
     WS_EX_LAYERED, WS_EX_TOPMOST, WS_POPUP,
 };
-use windows::core::{Error, HRESULT, HSTRING, PCWSTR, w};
+use windows::core::{Error, HRESULT, HSTRING, Interface, PCWSTR, w};
 
 use crate::win32::struct_size;
 use crate::{com, log};
@@ -108,9 +108,14 @@ pub fn choose(
             return Ok(None);
         };
         let png = png_path(&chosen);
-        // Should Windows be unable to tell whether the file is there, writing it will fail and say so.
-        if png == chosen || !png.try_exists().unwrap_or(false) {
+        if png == chosen {
             return Ok(Some(chosen));
+        }
+        match png.try_exists() {
+            Ok(false) => return Ok(Some(chosen)),
+            Ok(true) => {}
+            // Whether it is there can't be told: Save As asks, as if it were, rather than replace it unasked.
+            Err(e) => log::failure("Save As: looking for the .png file", &e),
         }
         let (Some(parent), Some(name)) = (png.parent(), png.file_name()) else {
             // Can't happen: Save As gives a file's full path.
@@ -273,7 +278,7 @@ impl Drop for Host {
 }
 
 /// The rectangle of the monitor at `cursor`, or the nearest one, in physical pixels of the virtual screen.
-fn monitor_at(cursor: Point) -> windows::Win32::Foundation::RECT {
+fn monitor_at(cursor: Point) -> RECT {
     let point = POINT {
         x: cursor.x,
         y: cursor.y,
@@ -290,7 +295,7 @@ fn monitor_at(cursor: Point) -> windows::Win32::Foundation::RECT {
     } else {
         log::failure("Save As: finding the monitor", &Error::from_thread());
         // Save As then opens around the cursor.
-        windows::Win32::Foundation::RECT {
+        RECT {
             left: cursor.x,
             top: cursor.y,
             right: cursor.x + 1,
@@ -336,8 +341,7 @@ pub fn come_back() {
             )
         }?;
         // SAFETY: a live dialog, shown, so it has a window.
-        let dialog =
-            unsafe { windows::core::Interface::cast::<IOleWindow>(&open.dialog)?.GetWindow() }?;
+        let dialog = window_of(&open.dialog)?;
         // Coming back by Save As's own button, it is in front already; by the global shortcut, Windows lets
         // ScreenGauge come to the front.
         // SAFETY: a window of this thread.
@@ -370,19 +374,17 @@ fn with_open(context: &str, act: impl FnOnce(&Open) -> windows::core::Result<()>
     });
 }
 
+/// Save As's own window, which exists only while it shows.
+fn window_of(dialog: &IFileSaveDialog) -> windows::core::Result<HWND> {
+    // SAFETY: a live dialog; before it shows, the call fails and says so.
+    unsafe { dialog.cast::<IOleWindow>()?.GetWindow() }
+}
+
 /// Moves Save As to the middle of `host`, the monitor it opened on, once it shows, and stops `host`'s timer then. Until
 /// it shows, the timer ticks again.
 fn center(host: HWND) {
-    let dialog = OPEN.with_borrow(|open| {
-        let open = open.as_ref()?;
-        // SAFETY: a live dialog; it has a window only while it shows, and the call fails before.
-        unsafe {
-            windows::core::Interface::cast::<IOleWindow>(&open.dialog)
-                .ok()?
-                .GetWindow()
-        }
-        .ok()
-    });
+    // Before Save As shows, it has no window yet: the timer ticks again.
+    let dialog = OPEN.with_borrow(|open| window_of(&open.as_ref()?.dialog).ok());
     // SAFETY: a window handle, which IsWindowVisible checks.
     let Some(dialog) = dialog.filter(|&dialog| unsafe { IsWindowVisible(dialog) }.as_bool()) else {
         return;

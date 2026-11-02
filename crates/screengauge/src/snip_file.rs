@@ -43,10 +43,8 @@ fn fill(mut file: File, path: &Path, png: &[u8]) -> io::Result<()> {
 /// half written, or gone.
 fn replace(path: &Path, png: &[u8]) -> io::Result<()> {
     let temporary = temporary_beside(path)?;
-    let file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary)?;
+    // One left by a crash between the write and the rename is written over.
+    let file = File::create(&temporary)?;
     fill(file, &temporary, png)?;
     fs::rename(&temporary, path).map_err(|e| removing(&temporary, e))
 }

@@ -559,6 +559,16 @@ fn the_global_shortcut_with_save_as_open_brings_it_back_and_never_closes_the_too
 }
 
 #[test]
+fn calling_screengauge_from_the_tray_or_start_with_save_as_aside_brings_it_back() {
+    let mut session = open(SnipDestination::File, DefaultFolder::Off(None));
+    snip(&mut session);
+    let call = event(at(960, 540), 3000, Input::Called);
+    assert_eq!(did(session.handle(call.clone())), []);
+    session.handle(event(at(960, 540), 3100, Input::OtherProgramInFront));
+    assert_eq!(did(session.handle(call)), [Did::ComeBack]);
+}
+
+#[test]
 fn after_save_as_another_program_in_front_closes_the_tools_again() {
     let mut session = open(SnipDestination::File, DefaultFolder::Off(None));
     snip(&mut session);

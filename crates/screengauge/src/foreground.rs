@@ -36,9 +36,9 @@ pub struct Watch {
 }
 
 impl Watch {
-    /// Starts telling `window`, with [`OTHER_PROGRAM_IN_FRONT`] or [`OWN_WINDOW_IN_FRONT`]. Only changes from now on reach it: none made before,
-    /// such as the Start menu closing on its way to calling ScreenGauge. Drop the watch before closing `window`, since
-    /// closing the window in front hands the front to another program.
+    /// Starts telling `window`, with [`OTHER_PROGRAM_IN_FRONT`] or [`OWN_WINDOW_IN_FRONT`]. Only changes from now on
+    /// reach it: none made before, such as the Start menu closing on its way to calling ScreenGauge. Drop the watch
+    /// before closing `window`, since closing the window in front hands the front to another program.
     pub fn start(window: HWND) -> windows::core::Result<Watch> {
         // SAFETY: an out-of-context hook, so the callback is a function of this program, which Windows calls on this
         // thread while it waits for messages; no module is needed.
