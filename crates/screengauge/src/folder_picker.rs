@@ -10,13 +10,15 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 
 use screengauge_core::settings::Folder;
-use windows::Win32::Foundation::{ERROR_CANCELLED, HWND};
+use windows::Win32::Foundation::{ERROR_CANCELLED, HWND, LPARAM, WPARAM};
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+use windows::Win32::System::Ole::IOleWindow;
 use windows::Win32::UI::Shell::{
     FOS_FORCEFILESYSTEM, FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog,
     IShellItem, SHCreateItemFromParsingName,
 };
-use windows::core::{HRESULT, HSTRING};
+use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+use windows::core::{HRESULT, HSTRING, Interface};
 
 use crate::{com, log, save_as};
 
@@ -70,14 +72,29 @@ fn starting_folder(folder: &Folder) -> Option<IShellItem> {
     }
 }
 
-/// Closes the folder window as Cancel would, as ScreenGauge exits while it is open. Nothing while it is closed.
+/// Whether the folder window is open.
+pub fn is_open() -> bool {
+    OPEN.with_borrow(Option::is_some)
+}
+
+/// Closes the folder window as Cancel would, as ScreenGauge exits while it is open or Save As comes back over it; the
+/// window is gone, and `choose` returns, once its message is handled. Nothing while it is closed.
+///
+/// It closes its window, as the user's X would: IFileDialog::Close, which Save As is closed with at exit, was seen to
+/// leave this one open (WPC-322).
 pub fn cancel() {
     OPEN.with_borrow(|open| {
-        if let Some(dialog) = open
-            // SAFETY: a live dialog, shown; it closes once this message is handled.
-            && let Err(e) = unsafe { dialog.Close(HRESULT::from_win32(ERROR_CANCELLED.0)) }
-        {
-            log::failure("Folder window: cancelling it at exit", &e);
+        let Some(dialog) = open else {
+            return;
+        };
+        // SAFETY: a live dialog, shown, so it has a window.
+        let window = unsafe { dialog.cast::<IOleWindow>().and_then(|ole| ole.GetWindow()) };
+        let closed = window.and_then(|window| {
+            // SAFETY: a window of this thread; the message carries nothing.
+            unsafe { PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0)) }
+        });
+        if let Err(e) = closed {
+            log::failure("Folder window: cancelling it", &e);
         }
     });
 }

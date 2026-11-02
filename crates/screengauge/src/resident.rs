@@ -3,7 +3,7 @@
 //! opened again. Nothing is prepared at startup and there is no timer at rest: the thread sleeps in GetMessageW until
 //! Windows sends something. While the tools are open, it carries out the effects the session core returns.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
@@ -46,6 +46,11 @@ const CALL_NAME: PCWSTR = w!("ScreenGauge.Call");
 static CALL: AtomicU32 = AtomicU32::new(0);
 
 thread_local! {
+    /// The resident window, once it is made: what tells that ScreenGauge is exiting (`is_exiting`).
+    static RESIDENT: Cell<Option<HWND>> = const { Cell::new(None) };
+    /// Save As and the frozen screen were asked to come back while Settings' folder window was open: they wait for it
+    /// to close, as the front goes to Settings when it does (`folder_window_closed`).
+    static COMING_BACK_AFTER_FOLDER_WINDOW: Cell<bool> = const { Cell::new(false) };
     /// The frozen screen, with its session, while the tools are open. Only the resident window's procedure touches it.
     /// Opening and closing set it and take it out, never while it is borrowed, because they show and destroy windows;
     /// what runs while it is borrowed dispatches no message.
@@ -93,6 +98,7 @@ pub fn run(file: Option<SettingsFile>, stored: Stored) -> windows::core::Result<
             None,
         )
     }?;
+    RESIDENT.set(Some(hwnd));
     // At sign-in the taskbar may not exist yet; the icon then comes with TaskbarCreated, so a failure
     // here leaves ScreenGauge running.
     if let Err(e) = tray::add(hwnd) {
@@ -343,8 +349,15 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
                 FROZEN_SCREEN.with_borrow(|open| open.as_ref().map(FrozenScreen::step_aside));
             }
             Effect::ComeBack => {
-                FROZEN_SCREEN.with_borrow(|open| open.as_ref().map(FrozenScreen::come_back));
-                save_as::come_back();
+                // Settings' folder window may be open, from Settings used while the frozen screen and Save As waited
+                // aside: they come back over everything, and it would be left under them, which Save As's own loop
+                // waits on. It closes as if the user cancelled it, nothing changes, and they come back once it is gone.
+                if folder_picker::is_open() {
+                    folder_picker::cancel();
+                    COMING_BACK_AFTER_FOLDER_WINDOW.set(true);
+                } else {
+                    come_back();
+                }
             }
             // The tools closed just before, by the gear: Settings opens over the programs.
             Effect::OpenSettings => {
@@ -382,6 +395,29 @@ fn open_settings() {
     if let Err(e) = opened {
         log::failure("Settings: opening it", &e);
     }
+}
+
+/// Brings the frozen screen back over every program, and Save As over it.
+fn come_back() {
+    FROZEN_SCREEN.with_borrow(|open| open.as_ref().map(FrozenScreen::come_back));
+    save_as::come_back();
+}
+
+/// Settings' folder window closed: should the frozen screen and Save As have been asked to come back meanwhile, they do
+/// now. Not before: closing it gives the front to Settings, which would send them aside again.
+pub fn folder_window_closed() {
+    if COMING_BACK_AFTER_FOLDER_WINDOW.take() {
+        come_back();
+    }
+}
+
+/// Whether ScreenGauge is exiting: the resident window is destroyed or being destroyed, as when a message loop that was
+/// asked to end kept the request (Save As's, Settings' folder window's). False while it runs.
+pub fn is_exiting() -> bool {
+    RESIDENT.get().is_some_and(|hwnd| {
+        // SAFETY: a handle only compared, never used.
+        !unsafe { IsWindow(Some(hwnd)) }.as_bool()
+    })
 }
 
 /// Hands the session `input`, which the Windows layer made itself, and carries out what it returns. With the tools

@@ -48,13 +48,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GW_OWNER, GetClientRect, GetCursorPos,
-    GetWindow, HTCLIENT, IDC_ARROW, IDC_HAND, IsIconic, LoadCursorW, LoadIconW, PostQuitMessage,
-    RegisterClassExW, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetCursor, SetForegroundWindow, SetWindowPos, ShowWindow,
-    WINDOW_EX_STYLE, WINDOW_STYLE, WM_CAPTURECHANGED, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND,
-    WM_GETDPISCALEDSIZE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_SETCURSOR,
-    WNDCLASSEXW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GW_ENABLEDPOPUP, GW_OWNER, GetClientRect,
+    GetCursorPos, GetWindow, HTCLIENT, IDC_ARROW, IDC_HAND, IsIconic, LoadCursorW, LoadIconW,
+    PostQuitMessage, RegisterClassExW, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetCursor, SetForegroundWindow,
+    SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CAPTURECHANGED, WM_DESTROY,
+    WM_DPICHANGED, WM_ERASEBKGND, WM_GETDPISCALEDSIZE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_PAINT, WM_SETCURSOR, WNDCLASSEXW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
 };
 use windows::core::{BOOL, Error, HSTRING, PCWSTR, w};
 
@@ -144,7 +144,9 @@ pub fn open(mode: Mode) -> windows::core::Result<()> {
             // SAFETY: as above. The result says whether it was visible before, not whether this worked.
             let _ = unsafe { ShowWindow(hwnd, SW_RESTORE) };
         }
-        to_front(hwnd);
+        // With the folder window open, Settings is disabled under it: the front goes to the folder window, which has
+        // the keyboard to answer.
+        to_front(enabled_popup(hwnd).unwrap_or(hwnd));
         return Ok(());
     }
     let (work, dpi) = monitor_at(event::cursor_now()?)?;
@@ -271,6 +273,15 @@ pub fn owns(hwnd: HWND) -> bool {
 
 /// How many owners up `owns` looks: a dialog owned by Settings is one level up, a window of that dialog two.
 const OWNER_DEPTH: usize = 4;
+
+/// The enabled window Settings owns and waits for, Windows' folder window, when it is open.
+fn enabled_popup(hwnd: HWND) -> Option<HWND> {
+    // SAFETY: our own window. With no enabled popup Windows returns the window itself, which is none.
+    match unsafe { GetWindow(hwnd, GW_ENABLEDPOPUP) } {
+        Ok(popup) if popup != hwnd => Some(popup),
+        Ok(_) | Err(_) => None,
+    }
+}
 
 /// Gives the keyboard to `hwnd`. Windows may refuse when another program took the front since the user's last click in
 /// ScreenGauge; the window then flashes on the taskbar instead, as any program's would.
@@ -595,7 +606,10 @@ fn act(hwnd: HWND, hit: Hit) {
             };
             match controls::change(control, &options) {
                 Some(change) => save(|options| options.apply(change)),
-                None => choose_folder(hwnd, control, &options),
+                None => {
+                    choose_folder(hwnd, control, &options);
+                    resident::folder_window_closed();
+                }
             }
             // A theme chosen here shows at once, in Settings and in the tools too: they may be stepped aside while
             // Save As waits, and come back in the theme chosen (seen in review).
@@ -620,10 +634,10 @@ fn save(change: impl FnOnce(&mut Options) -> bool) {
 /// window runs its own message loop.
 fn choose_folder(hwnd: HWND, control: Control, options: &Options) {
     let chosen = folder_picker::choose(hwnd, options.default_folder.folder());
-    // ScreenGauge exited while the folder window was open, as it can from the tray icon: this window went with it, and
-    // the end of the message loop it asked for went to the folder window's own loop, which kept it, so it is asked for
-    // again (as with Save As, seen in WPC-318).
-    if WINDOW.get() != Some(hwnd) {
+    // ScreenGauge exited while the folder window was open, as it can from the tray icon: the end of the message loop it
+    // asked for went to the folder window's own loop, which kept it, so it is asked for again (as with Save As, seen in
+    // WPC-318). Asked of the resident window, not of this one, which closes for no reason a quit should follow.
+    if resident::is_exiting() {
         // SAFETY: ends this thread's message loop.
         unsafe { PostQuitMessage(0) };
         return;
