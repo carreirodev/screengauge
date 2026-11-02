@@ -320,6 +320,27 @@ impl FrozenScreen {
         }
     }
 
+    /// The window over the monitor at `at`, or, should `at` be on none, the first one.
+    pub fn window_at(&self, at: Point) -> Option<HWND> {
+        let monitor = match self.session.core.try_borrow() {
+            Ok(session) => session
+                .scene()
+                .frozen_screen
+                .iter()
+                .position(|photo| photo.rect.contains(at))
+                .unwrap_or(0),
+            // Can't happen: this is read outside the moment the core handles an event.
+            Err(_) => {
+                log::failure(
+                    "frozen screen",
+                    &"a window was asked for while an event was handled",
+                );
+                0
+            }
+        };
+        self.windows.get(monitor).copied()
+    }
+
     /// Hides the windows, so the program in front and the ones behind it show, while Save As waits behind it (the
     /// owner's choice in WPC-318). The session and its photos stay as they were.
     pub fn step_aside(&self) {
@@ -879,6 +900,7 @@ extern "system" fn window_proc(
             // Alt+F4: the core closes the tools as a whole, never one monitor's window alone.
             WM_CLOSE => deliver(Input::CloseAsked),
             foreground::OTHER_PROGRAM_IN_FRONT => deliver(Input::OtherProgramInFront),
+            foreground::OWN_WINDOW_IN_FRONT => deliver(Input::BackInFront),
             // Windows sends this to every top-level window for any change of monitors: one connected or disconnected,
             // a scale, resolution or arrangement changed, HDR turned on or off (seen in WPC-281 and WPC-289). Moving
             // the SDR content brightness sends nothing. It comes from another thread, so it may arrive inside any

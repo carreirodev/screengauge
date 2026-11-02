@@ -5,21 +5,22 @@
 //!
 //! Its owner is a window of its own, the host: invisible, over the frozen screen, with a button on the taskbar and in
 //! Alt+Tab. When another program comes to the front, the frozen screen and Save As step aside behind it and wait, and
-//! that button brings them back (the owner's choice in WPC-318). The frozen screen's windows have no such button, as
-//! tool windows, and Save As itself, an owned window, gets none either.
+//! that button brings them back (the owner's choice in WPC-318); the frozen screen's watch of the window in front
+//! (`foreground`) tells of the way back. The frozen screen's windows have no such button, as tool windows, and Save As
+//! itself, an owned window, gets none either.
 //!
 //! [`choose`] runs Windows' own message loop until Save As closes, so the windows' messages go on meanwhile: it must be
 //! called with nothing borrowed that their procedures borrow.
 
 use std::cell::RefCell;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::OsStringExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use screengauge_core::session::Point;
+use screengauge_core::session::{Point, png_path};
 use screengauge_core::settings::Folder;
 use windows::Win32::Foundation::{
-    COLORREF, ERROR_CANCELLED, HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM,
+    COLORREF, ERROR_CANCELLED, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
 };
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
@@ -30,26 +31,25 @@ use windows::Win32::System::Ole::IOleWindow;
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::{
     FOLDERID_Pictures, FOS_FORCEFILESYSTEM, FOS_NOREADONLYRETURN, FOS_OVERWRITEPROMPT,
-    FOS_PATHMUSTEXIST, FOS_STRICTFILETYPES, FileSaveDialog, IFileSaveDialog, IShellItem,
-    KF_FLAG_DEFAULT, SHCreateItemFromParsingName, SHGetKnownFolderItem, SIGDN_FILESYSPATH,
+    FOS_PATHMUSTEXIST, FileSaveDialog, IFileSaveDialog, IShellItem, KF_FLAG_DEFAULT,
+    SHCreateItemFromParsingName, SHGetKnownFolderItem, SIGDN_FILESYSPATH,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, HWND_BOTTOM, HWND_TOPMOST, LWA_ALPHA,
-    LoadIconW, PostMessageW, RegisterClassExW, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SetForegroundWindow, SetLayeredWindowAttributes, SetWindowPos, ShowWindow, WM_ACTIVATEAPP,
-    WM_APP, WNDCLASSEXW, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_TOPMOST, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GetWindowRect, HWND_BOTTOM, HWND_TOPMOST,
+    IsWindowVisible, KillTimer, LWA_ALPHA, LoadIconW, RegisterClassExW, SW_SHOWNA, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetLayeredWindowAttributes,
+    SetTimer, SetWindowPos, ShowWindow, USER_TIMER_MINIMUM, WM_TIMER, WNDCLASSEXW, WS_EX_APPWINDOW,
+    WS_EX_LAYERED, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{Error, HRESULT, HSTRING, PCWSTR, w};
 
 use crate::win32::struct_size;
 use crate::{com, log};
 
-/// What the host posts to the resident window when the user comes back to Save As after it stepped aside: by its
-/// button on the taskbar, in Alt+Tab, or a click on it. Posted, so the session hears of it outside the window procedure
-/// that saw it.
-pub const BACK_IN_FRONT: u32 = WM_APP + 6;
-
 const HOST_CLASS: PCWSTR = w!("ScreenGauge.SaveAs");
+
+/// The host's timer that moves Save As to the middle of the monitor once it shows.
+const CENTER_TIMER: usize = 1;
 
 /// The app icon's group in the exe's resources (build.rs), which the host's button on the taskbar shows.
 const APP_ICON_ID: usize = 1;
@@ -62,8 +62,6 @@ thread_local! {
 struct Open {
     host: HWND,
     dialog: IFileSaveDialog,
-    /// Receives [`BACK_IN_FRONT`].
-    resident: HWND,
 }
 
 /// Registered once at startup.
@@ -92,12 +90,43 @@ pub fn register_class(instance: HINSTANCE) -> windows::core::Result<()> {
 
 /// Opens Save As over the frozen screen, on the monitor at `cursor`, in `folder` or, with none or one that no longer
 /// exists, in Pictures, suggesting `file_name`, and waits until it closes: `Some` path the user chose, or `None` when
-/// they cancelled. `resident` receives [`BACK_IN_FRONT`].
+/// they cancelled. `front_after`, the frozen screen's window under the cursor, takes the front back as Save As closes.
+///
+/// A name typed with another extension, `button.jpg`, is written as `button.png` (v1 spec WPC-296, Snip), so Windows'
+/// question about replacing a file was about the wrong one. When `button.png` is there already, Save As opens again
+/// with that name, in that folder, and Windows asks about it then: no file is ever replaced without its question.
 pub fn choose(
-    resident: HWND,
     cursor: Point,
+    front_after: Option<HWND>,
     folder: Option<&Folder>,
     file_name: &str,
+) -> windows::core::Result<Option<PathBuf>> {
+    let mut folder = folder.map(|folder| folder.as_path().to_path_buf());
+    let mut file_name = OsString::from(file_name);
+    loop {
+        let Some(chosen) = choose_once(cursor, front_after, folder.as_deref(), &file_name)? else {
+            return Ok(None);
+        };
+        let png = png_path(&chosen);
+        // Should Windows be unable to tell whether the file is there, writing it will fail and say so.
+        if png == chosen || !png.try_exists().unwrap_or(false) {
+            return Ok(Some(chosen));
+        }
+        let (Some(parent), Some(name)) = (png.parent(), png.file_name()) else {
+            // Can't happen: Save As gives a file's full path.
+            return Ok(Some(chosen));
+        };
+        folder = Some(parent.to_path_buf());
+        file_name = name.to_os_string();
+    }
+}
+
+/// Save As, once, in `folder`, suggesting `file_name`.
+fn choose_once(
+    cursor: Point,
+    front_after: Option<HWND>,
+    folder: Option<&Path>,
+    file_name: &OsStr,
 ) -> windows::core::Result<Option<PathBuf>> {
     com::ensure_started()?;
     // SAFETY: a new in-process COM object, on this single-threaded apartment's thread.
@@ -112,8 +141,8 @@ pub fn choose(
         let options = dialog.GetOptions()?;
         dialog.SetOptions(
             options
+                // Not FOS_STRICTFILETYPES, with which Windows makes `button.jpg` into `button.jpg.png`.
                 | FOS_OVERWRITEPROMPT
-                | FOS_STRICTFILETYPES
                 | FOS_FORCEFILESYSTEM
                 | FOS_PATHMUSTEXIST
                 | FOS_NOREADONLYRETURN,
@@ -124,7 +153,7 @@ pub fn choose(
         dialog.SetFileName(&HSTRING::from(file_name))?;
         dialog.SetFolder(&starting_folder(folder)?)?;
     }
-    let host = Host::new(resident, cursor, &dialog)?;
+    let host = Host::new(cursor, front_after, &dialog)?;
     // SAFETY: a live dialog, owned by a live window of this thread. It runs its own message loop until it closes.
     let shown = unsafe { dialog.Show(Some(host.window)) };
     drop(host);
@@ -140,12 +169,10 @@ pub fn choose(
 }
 
 /// The folder Save As opens in: `folder`, or Pictures when there is none or it no longer exists.
-fn starting_folder(folder: Option<&Folder>) -> windows::core::Result<IShellItem> {
+fn starting_folder(folder: Option<&Path>) -> windows::core::Result<IShellItem> {
     if let Some(folder) = folder {
         // SAFETY: a path string that outlives the call; no bind context.
-        match unsafe {
-            SHCreateItemFromParsingName(&HSTRING::from(folder.as_path().as_os_str()), None)
-        } {
+        match unsafe { SHCreateItemFromParsingName(&HSTRING::from(folder.as_os_str()), None) } {
             Ok(item) => return Ok(item),
             // Deleted or out of reach since: Pictures, as the first time.
             Err(e) => log::failure("Save As: opening in the last folder", &e),
@@ -171,10 +198,17 @@ fn path_of(item: &IShellItem) -> windows::core::Result<PathBuf> {
 /// Alt+Tab. Destroyed when dropped, and Save As is forgotten with it.
 struct Host {
     window: HWND,
+    /// The window that takes the front back before this one goes. Otherwise Windows hands the front to the next
+    /// program in line, which counts as another program in front and closes the tools.
+    front_after: Option<HWND>,
 }
 
 impl Host {
-    fn new(resident: HWND, cursor: Point, dialog: &IFileSaveDialog) -> windows::core::Result<Host> {
+    fn new(
+        cursor: Point,
+        front_after: Option<HWND>,
+        dialog: &IFileSaveDialog,
+    ) -> windows::core::Result<Host> {
         let monitor = monitor_at(cursor);
         // SAFETY: no module name, so this is the handle of ScreenGauge.exe itself.
         let instance: HINSTANCE = unsafe { GetModuleHandleW(None) }?.into();
@@ -195,7 +229,10 @@ impl Host {
                 None,
             )
         }?;
-        let host = Host { window };
+        let host = Host {
+            window,
+            front_after,
+        };
         // Fully transparent: the frozen screen shows through it.
         // SAFETY: our own layered window.
         unsafe { SetLayeredWindowAttributes(window, COLORREF(0), 0, LWA_ALPHA) }?;
@@ -204,8 +241,13 @@ impl Host {
         OPEN.set(Some(Open {
             host: window,
             dialog: dialog.clone(),
-            resident,
         }));
+        // Windows puts Save As at its owner's top left corner, which here is the monitor's: it is moved to the middle as
+        // soon as it shows. Should the timer be refused, it stays in the corner.
+        // SAFETY: our own window, on its thread; the timer goes with it.
+        if unsafe { SetTimer(Some(window), CENTER_TIMER, USER_TIMER_MINIMUM, None) } == 0 {
+            log::failure("Save As: centering it", &Error::from_thread());
+        }
         Ok(host)
     }
 }
@@ -213,6 +255,16 @@ impl Host {
 impl Drop for Host {
     fn drop(&mut self) {
         OPEN.set(None);
+        // Save As has closed and given the front back to this window, so ScreenGauge may pass it on.
+        if let Some(front) = self.front_after
+            // SAFETY: a window of this thread.
+            && !unsafe { SetForegroundWindow(front) }.as_bool()
+        {
+            log::failure(
+                "Save As: giving the front back to the frozen screen",
+                &"Windows refused",
+            );
+        }
         // SAFETY: our own window, on its thread.
         if let Err(e) = unsafe { DestroyWindow(self.window) } {
             log::failure("Save As: destroying its window", &e);
@@ -250,7 +302,7 @@ fn monitor_at(cursor: Point) -> windows::Win32::Foundation::RECT {
 /// Sends Save As behind the program in front, with its host, which keeps its button on the taskbar. Nothing while
 /// Save As is closed.
 pub fn step_aside() {
-    with_open(|open| {
+    with_open("Save As: stepping aside", |open| {
         // At the bottom, and so no longer topmost, nor is Save As, which it owns.
         // SAFETY: our own window, on its thread.
         unsafe {
@@ -270,7 +322,7 @@ pub fn step_aside() {
 /// Brings Save As back over every program and over the frozen screen, which comes back first, and gives it the keyboard.
 /// Nothing while Save As is closed.
 pub fn come_back() {
-    with_open(|open| {
+    with_open("Save As: coming back", |open| {
         // SAFETY: our own window, on its thread. Save As, which it owns, becomes topmost with it.
         unsafe {
             SetWindowPos(
@@ -299,30 +351,78 @@ pub fn come_back() {
     });
 }
 
-/// Runs `act` on Save As while it is open, logging its failure: the window then stays where it is.
-fn with_open(act: impl FnOnce(&Open) -> windows::core::Result<()>) {
+/// Closes Save As as Cancel would, as ScreenGauge exits while it is open. Nothing while Save As is closed.
+pub fn cancel() {
+    with_open("Save As: cancelling it at exit", |open| {
+        // SAFETY: a live dialog, shown; it closes once this message is handled.
+        unsafe { open.dialog.Close(HRESULT::from_win32(ERROR_CANCELLED.0)) }
+    });
+}
+
+/// Runs `act` on Save As while it is open, logging its failure under `context`: the window then stays as it is.
+fn with_open(context: &str, act: impl FnOnce(&Open) -> windows::core::Result<()>) {
     OPEN.with_borrow(|open| {
         if let Some(open) = open
             && let Err(e) = act(open)
         {
-            log::failure("Save As: stepping aside or coming back", &e);
+            log::failure(context, &e);
         }
     });
 }
 
-/// The host's procedure. Coming back to ScreenGauge while Save As is open reaches it as the app's activation, whichever
-/// way the user came: Save As takes the front for its disabled owner.
-extern "system" fn host_proc(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if message == WM_ACTIVATEAPP && wparam.0 != 0 {
-        let resident = OPEN.with_borrow(|open| open.as_ref().map(|open| open.resident));
-        if let Some(resident) = resident {
-            // SAFETY: our own window; the message carries nothing.
-            let posted =
-                unsafe { PostMessageW(Some(resident), BACK_IN_FRONT, WPARAM(0), LPARAM(0)) };
-            if let Err(e) = posted {
-                log::failure("Save As: telling of the way back", &e);
-            }
+/// Moves Save As to the middle of `host`, the monitor it opened on, once it shows, and stops `host`'s timer then. Until
+/// it shows, the timer ticks again.
+fn center(host: HWND) {
+    let dialog = OPEN.with_borrow(|open| {
+        let open = open.as_ref()?;
+        // SAFETY: a live dialog; it has a window only while it shows, and the call fails before.
+        unsafe {
+            windows::core::Interface::cast::<IOleWindow>(&open.dialog)
+                .ok()?
+                .GetWindow()
         }
+        .ok()
+    });
+    // SAFETY: a window handle, which IsWindowVisible checks.
+    let Some(dialog) = dialog.filter(|&dialog| unsafe { IsWindowVisible(dialog) }.as_bool()) else {
+        return;
+    };
+    // SAFETY: our own window, on its thread.
+    if let Err(e) = unsafe { KillTimer(Some(host), CENTER_TIMER) } {
+        log::failure("Save As: centering it", &e);
+    }
+    let (mut monitor, mut window) = (RECT::default(), RECT::default());
+    // SAFETY: fill locals, for windows of this thread.
+    let moved = unsafe { GetWindowRect(host, &mut monitor) }
+        .and_then(|()| unsafe { GetWindowRect(dialog, &mut window) })
+        .and_then(|()| {
+            let left =
+                monitor.left + (monitor.right - monitor.left - (window.right - window.left)) / 2;
+            let top =
+                monitor.top + (monitor.bottom - monitor.top - (window.bottom - window.top)) / 2;
+            // SAFETY: a window of this thread, moved and nothing else.
+            unsafe {
+                SetWindowPos(
+                    dialog,
+                    None,
+                    left.max(monitor.left),
+                    top.max(monitor.top),
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                )
+            }
+        });
+    if let Err(e) = moved {
+        log::failure("Save As: centering it", &e);
+    }
+}
+
+/// The host's procedure: its timer centers Save As, and Windows does the rest.
+extern "system" fn host_proc(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if message == WM_TIMER && wparam.0 == CENTER_TIMER {
+        center(hwnd);
+        return LRESULT(0);
     }
     // SAFETY: the arguments are the ones Windows passed to this window procedure.
     unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }

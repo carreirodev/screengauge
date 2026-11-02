@@ -17,7 +17,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime;
 use windows::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-    FindWindowW, GetCursorPos, GetMessageW, GetWindowThreadProcessId, MSG, PostMessageW,
+    FindWindowW, GetCursorPos, GetMessageW, GetWindowThreadProcessId, IsWindow, MSG, PostMessageW,
     PostQuitMessage, RegisterClassExW, RegisterWindowMessageW, SetCursorPos, TranslateMessage,
     WINDOW_EX_STYLE, WM_CONTEXTMENU, WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_HOTKEY,
     WM_SETTINGCHANGE, WM_TIMER, WNDCLASSEXW, WS_OVERLAPPED,
@@ -169,10 +169,6 @@ extern "system" fn window_proc(
             carry_out(hwnd, effects);
             LRESULT(0)
         }
-        save_as::BACK_IN_FRONT => {
-            tell(hwnd, Input::BackInFront);
-            LRESULT(0)
-        }
         notification::SHOW_WAITING => {
             notification::show_waiting(hwnd);
             LRESULT(0)
@@ -193,6 +189,8 @@ extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_DESTROY => {
+            // Save As runs its own message loop, which this exit may be inside of: it closes first.
+            save_as::cancel();
             close(hwnd);
             frozen_screen::release_factory();
             if let Err(e) = global_shortcut::unregister(hwnd) {
@@ -347,7 +345,16 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
                 continue;
             }
             Effect::OpenSaveAs { folder, file_name } => {
-                let closed = open_save_as(resident, folder.as_ref(), &file_name);
+                let closed = open_save_as(folder.as_ref(), &file_name);
+                // ScreenGauge exited while Save As was open: the end of the message loop it asked for went to Save
+                // As's own loop, which kept it, so it is asked for again (seen in WPC-318: the process stayed, with no
+                // window).
+                // SAFETY: a handle only compared, never used.
+                if !unsafe { IsWindow(Some(resident)) }.as_bool() {
+                    // SAFETY: ends this thread's message loop.
+                    unsafe { PostQuitMessage(0) };
+                    return;
+                }
                 tell(resident, closed);
                 continue;
             }
@@ -395,12 +402,13 @@ fn write_png(to: &SaveTo, image: &Image) -> Input {
 
 /// Opens Save As in `folder`, suggesting `file_name`, and waits until it closes. Its own message loop runs meanwhile,
 /// which is why it is called here, outside every borrow of the frozen screen.
-fn open_save_as(resident: HWND, folder: Option<&Folder>, file_name: &str) -> Input {
+fn open_save_as(folder: Option<&Folder>, file_name: &str) -> Input {
     let cursor = cursor_now().unwrap_or_else(|e| {
         log::failure("Save As: finding the cursor", &e);
         event::message_cursor()
     });
-    match save_as::choose(resident, cursor, folder, file_name) {
+    let front_after = FROZEN_SCREEN.with_borrow(|open| open.as_ref()?.window_at(cursor));
+    match save_as::choose(cursor, front_after, folder, file_name) {
         Ok(chosen) => Input::SaveAsClosed(chosen),
         Err(e) => {
             log::failure("Save As: opening it", &e);
