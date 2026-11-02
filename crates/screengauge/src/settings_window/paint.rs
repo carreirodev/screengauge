@@ -1,8 +1,8 @@
 //! Settings drawn onto any Direct2D render target at 96 DPI, so a test can render it on a bitmap and count pixels: the
 //! window's background, each block's heading and card, the rows of Measurements and Inspect with their labels, notes and
-//! controls (`controls`), and the footer with the version, the license and the "Project page" link. The colors are the
-//! prototype's theme tokens for `#settings` (WPC-279), where the `oklch` ones are converted to sRGB; the sizes come
-//! from `layout`, scaled for the monitor's `dpi`.
+//! controls (`controls`), the Snip's card (`snip`), and the footer with the version, the license and the "Project page"
+//! link. The colors are the prototype's theme tokens for `#settings` (WPC-279), where the `oklch` ones are converted to
+//! sRGB; the sizes come from `layout`, scaled for the monitor's `dpi`.
 
 use screengauge_core::session::Point;
 use screengauge_core::session::toolbar::scaled;
@@ -27,10 +27,13 @@ use super::controls::{
     self, COLOR_FORMATS, Control, Label, LabelKind, Laid, Pointer, THEMES, dpi_scale,
 };
 use super::layout::{self, Page, Row, Span};
+use super::snip_card;
 use crate::graphics::{Color, Fonts, color, d2d_color, solid_brush};
 use crate::log;
 use crate::relief::{self, Canvas};
 use crate::theme::Mode;
+
+mod snip;
 
 /// The footer's left text: the version this exe was built as, and the license.
 pub const VERSION: &str = concat!("Version ", env!("CARGO_PKG_VERSION"));
@@ -121,7 +124,8 @@ pub struct Surface<'a> {
 /// click acts.
 pub fn draw(on: &Surface, options: &Options, pointer: Pointer) -> windows::core::Result<Drawn> {
     let palette = palette(on.mode);
-    let page = layout::page();
+    // The Snip's card is shorter without its note, and the window as tall as the page with it.
+    let page = snip_card::fitted(layout::page(), snip_card::note_shown(options));
     let height = px(scaled(page.height, on.dpi));
     let width = px(on.width);
     background(on.target, palette, width, height)?;
@@ -221,12 +225,18 @@ impl<'a> Rows<'a> {
                 }
             });
         }
+        let snip::Snip {
+            laid: snip_laid,
+            path,
+        } = self.snip(options)?;
+        laid.extend(snip_laid);
         self.surfaces(&laid, pointer)?;
         for control in &laid {
             for label in controls::labels(control, self.on.mode, pointer) {
                 self.label(&label)?;
             }
         }
+        self.write_path(&path);
         Ok(laid.iter().flat_map(Laid::hits).collect())
     }
 
@@ -652,6 +662,8 @@ mod tests {
     use screengauge_core::settings::{ColorFormat, Theme};
 
     use super::*;
+
+    mod snip;
 
     /// The page as drawn, as rows of [r, g, b] pixels, where the link went and where the controls' parts are, and the
     /// page as a PNG, for a look at it.

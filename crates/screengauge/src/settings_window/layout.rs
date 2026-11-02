@@ -15,8 +15,9 @@
 //! | the footer (`.sfoot`) | 36.26 | 36 |
 //!
 //! The page measured 556.56 tall; in whole pixels it is 558. The window's height is fixed at that: the user doesn't
-//! change it, and the blocks' rows go inside these cards: Measurements' and Inspect's from WPC-320, the others with their
-//! own tickets.
+//! change it, and the blocks' rows go inside these cards: Measurements' and Inspect's from WPC-320, the Snip's from
+//! WPC-322, the others with their own tickets. The Snip's card is this tall with its note, as measured; without it the
+//! card is shorter (`snip_card::fitted`) and the window stays as it is.
 
 /// The page's width.
 pub const WIDTH: u32 = 560;
@@ -158,8 +159,8 @@ impl Row {
     }
 }
 
-/// The rows ScreenGauge draws, top to bottom. General's other two and Snip's come with their own tickets (WPC-322 to
-/// WPC-326), into the room their cards already have.
+/// The rows ScreenGauge draws, top to bottom, except the Snip's, which `snip_card` places. General's other two come
+/// with their own tickets (WPC-323, WPC-326), into the room their card already has.
 pub const ROWS: [Row; 4] = [
     Row::Theme,
     Row::DefaultTolerance,
@@ -196,7 +197,7 @@ impl Block {
             Block::General => 3,
             Block::Measurements => 2,
             Block::Inspect => 1,
-            // The Snip's card has its own shape (the folder's line and its note), which WPC-322 lays out.
+            // Not used: the Snip's card has its own shape (the folder's line and its note), which `snip_card` lays out.
             Block::Snip => 2,
         }
     }

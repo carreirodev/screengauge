@@ -7,9 +7,10 @@
 //! with the cursor on it, and the button shrinks while held down on it. The switch and the segments don't react. The
 //! switch's knob moves at once, with no 0.15 s slide, as the owner chose for the toolbar in WPC-311.
 
-use screengauge_core::settings::{Change, ColorFormat, Options, Theme};
+use screengauge_core::settings::{Change, ColorFormat, Options, SnipDestination, Theme};
 use windows::Win32::Foundation::RECT;
 
+use super::snip_card;
 use crate::graphics::{Color, color};
 use crate::relief::palette::{self as relief_palette, Shadow, Stop, Surface, rgb, shadow, stop};
 use crate::relief::{Canvas, Motion};
@@ -94,17 +95,31 @@ pub enum Control {
     ToleranceUp,
     LogicalPixels,
     ColorFormat(ColorFormat),
+    SnipDestination(SnipDestination),
+    SaveToDefaultFolder,
+    ChangeFolder,
 }
 
-/// What a click on `control` changes, with `options` as Settings shows them: the switch turns to the other side.
-pub fn change(control: Control, options: &Options) -> Change {
-    match control {
+/// What a click on `control` changes, with `options` as Settings shows them: the switch turns to the other side. `None`
+/// for a click that needs Windows' folder window first, and changes nothing until it answers: "Change…", and the
+/// switch turned on with no folder kept (`Options::choose_default_folder` then keeps the folder).
+pub fn change(control: Control, options: &Options) -> Option<Change> {
+    Some(match control {
         Control::Theme(theme) => Change::Theme(theme),
         Control::ToleranceDown => Change::DefaultToleranceDown,
         Control::ToleranceUp => Change::DefaultToleranceUp,
         Control::LogicalPixels => Change::AlsoShowLogicalPixels(!options.also_show_logical_pixels),
         Control::ColorFormat(format) => Change::ColorFormat(format),
-    }
+        Control::SnipDestination(destination) => Change::SnipDestination(destination),
+        Control::SaveToDefaultFolder if options.default_folder.is_on() => {
+            Change::SaveToDefaultFolder(false)
+        }
+        Control::SaveToDefaultFolder => match options.default_folder.folder() {
+            Some(_) => Change::SaveToDefaultFolder(true),
+            None => return None,
+        },
+        Control::ChangeFolder => return None,
+    })
 }
 
 /// The choices of "Theme", in the spec's order, with their words.
@@ -160,6 +175,14 @@ pub enum Laid {
         plus: RECT,
         value: u8,
     },
+    /// A button with a word (`.pbtn`): a small button of the toolbar's style.
+    Button {
+        control: Control,
+        place: RECT,
+        word: &'static str,
+    },
+    /// The box that shows a folder's path (`.fpath`): a well, whose text `paint::snip` writes.
+    Path { place: RECT },
 }
 
 impl Laid {
@@ -177,6 +200,8 @@ impl Laid {
                     (Control::ToleranceUp, *plus),
                 ]
             }
+            Laid::Button { control, place, .. } => vec![(*control, *place)],
+            Laid::Path { .. } => Vec::new(),
         }
     }
 }
@@ -285,6 +310,20 @@ pub fn stepper(canvas: &Canvas, value: u8, right: i32, top: i32, bottom: i32) ->
     }
 }
 
+/// Where a button whose word is `word_width` pixels wide goes: at the right of the row from `top` to `bottom`, as tall
+/// as the folder's line.
+pub fn button_place(canvas: &Canvas, word_width: f32, right: i32, top: i32, bottom: i32) -> RECT {
+    let width = whole_up(word_width) + 2 * canvas.scaled(snip_card::BUTTON_PADDING);
+    let height = canvas.scaled(snip_card::FIELD_HEIGHT);
+    at_right(right, top, bottom, width, height)
+}
+
+/// Where the path's box goes: from `left` to `right`, as tall as the button beside it, in the row from `top` to `bottom`.
+pub fn path_place(canvas: &Canvas, left: i32, right: i32, top: i32, bottom: i32) -> RECT {
+    let height = canvas.scaled(snip_card::FIELD_HEIGHT);
+    at_right(right, top, bottom, right - left, height)
+}
+
 /// A measured width rounded up to whole pixels, so a segment never cuts into its word. Widths are a few hundred pixels
 /// at most, far inside `i32`.
 fn whole_up(width: f32) -> i32 {
@@ -352,6 +391,10 @@ pub fn paint(
             }
             Ok(())
         }
+        Laid::Button { place, .. } => {
+            canvas.surface(&relief.small, place, snip_card::BUTTON_RADIUS, 0, false)
+        }
+        Laid::Path { place } => canvas.surface(&well(&[]), place, snip_card::PATH_RADIUS, 0, false),
         Laid::Stepper {
             minus,
             number,
@@ -410,7 +453,22 @@ pub fn labels(laid: &Laid, mode: Mode, pointer: Pointer) -> Vec<Label> {
     let relief = relief_palette::palette(mode);
     let colors = colors(mode);
     match laid {
-        Laid::Switch { .. } => Vec::new(),
+        Laid::Switch { .. } | Laid::Path { .. } => Vec::new(),
+        Laid::Button {
+            control,
+            place,
+            word,
+        } => vec![Label {
+            place: *place,
+            text: (*word).to_owned(),
+            ink: if pointer.hovered(*control) {
+                relief.small_ink_hover
+            } else {
+                relief.small_ink
+            },
+            kind: LabelKind::Segment,
+            shrinks: false,
+        }],
         Laid::Choice { segments, .. } => segments
             .iter()
             .map(|&(_, place, word, chosen)| Label {
@@ -455,6 +513,10 @@ pub fn labels(laid: &Laid, mode: Mode, pointer: Pointer) -> Vec<Label> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
+    use screengauge_core::settings::Folder;
+
     use super::*;
 
     #[test]
@@ -462,12 +524,12 @@ mod tests {
         let mut options = Options::default();
         assert_eq!(
             change(Control::LogicalPixels, &options),
-            Change::AlsoShowLogicalPixels(false)
+            Some(Change::AlsoShowLogicalPixels(false))
         );
         options.also_show_logical_pixels = false;
         assert_eq!(
             change(Control::LogicalPixels, &options),
-            Change::AlsoShowLogicalPixels(true)
+            Some(Change::AlsoShowLogicalPixels(true))
         );
     }
 
@@ -476,20 +538,58 @@ mod tests {
         let options = Options::default();
         assert_eq!(
             change(Control::ToleranceDown, &options),
-            Change::DefaultToleranceDown
+            Some(Change::DefaultToleranceDown)
         );
         assert_eq!(
             change(Control::ToleranceUp, &options),
-            Change::DefaultToleranceUp
+            Some(Change::DefaultToleranceUp)
         );
         assert_eq!(
             change(Control::ColorFormat(ColorFormat::Rgb), &options),
-            Change::ColorFormat(ColorFormat::Rgb)
+            Some(Change::ColorFormat(ColorFormat::Rgb))
         );
         assert_eq!(
             change(Control::Theme(Theme::Dark), &options),
-            Change::Theme(Theme::Dark)
+            Some(Change::Theme(Theme::Dark))
         );
+    }
+
+    fn kept_folder() -> Folder {
+        Folder::new(Path::new(r"C:\Snips")).expect("an absolute path")
+    }
+
+    #[test]
+    fn a_destination_changes_it_and_never_the_folder() {
+        let options = Options::default();
+        assert_eq!(
+            change(Control::SnipDestination(SnipDestination::Both), &options),
+            Some(Change::SnipDestination(SnipDestination::Both))
+        );
+    }
+
+    #[test]
+    fn the_folder_switch_with_a_folder_kept_turns_to_the_other_side() {
+        let mut options = Options::default();
+        options.choose_default_folder(kept_folder(), false);
+        assert_eq!(
+            change(Control::SaveToDefaultFolder, &options),
+            Some(Change::SaveToDefaultFolder(true))
+        );
+        options.choose_default_folder(kept_folder(), true);
+        assert_eq!(
+            change(Control::SaveToDefaultFolder, &options),
+            Some(Change::SaveToDefaultFolder(false))
+        );
+    }
+
+    #[test]
+    fn the_folder_switch_with_no_folder_kept_and_change_wait_for_the_folder_window() {
+        let options = Options::default();
+        assert_eq!(change(Control::SaveToDefaultFolder, &options), None);
+        assert_eq!(change(Control::ChangeFolder, &options), None);
+        let mut kept = Options::default();
+        kept.choose_default_folder(kept_folder(), true);
+        assert_eq!(change(Control::ChangeFolder, &kept), None);
     }
 
     #[test]

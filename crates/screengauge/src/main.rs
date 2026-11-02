@@ -11,6 +11,7 @@ mod capture;
 mod clipboard;
 mod com;
 mod event;
+mod folder_picker;
 mod foreground;
 mod frozen_screen;
 mod global_shortcut;

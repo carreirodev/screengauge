@@ -28,8 +28,8 @@ use crate::notification::{self, Notification};
 use crate::settings_file::{self, SettingsFile};
 use crate::win32::{low_word, struct_size};
 use crate::{
-    capture, clipboard, event, global_shortcut, graphics, log, png, save_as, settings_window,
-    snip_file, theme, tray,
+    capture, clipboard, event, folder_picker, global_shortcut, graphics, log, png, save_as,
+    settings_window, snip_file, theme, tray,
 };
 
 /// The resident window's class, which a copy opened again looks for to call the running copy.
@@ -188,6 +188,8 @@ extern "system" fn window_proc(
         WM_DESTROY => {
             // Save As runs its own message loop, which this exit may be inside of: it closes first.
             save_as::cancel();
+            // Settings' folder window runs its own message loop too.
+            folder_picker::cancel();
             close(hwnd);
             // Settings draws with the factories released next, so it closes before them.
             settings_window::close();

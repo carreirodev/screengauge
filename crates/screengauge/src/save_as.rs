@@ -185,7 +185,7 @@ fn starting_folder(folder: Option<&Path>) -> windows::core::Result<IShellItem> {
 }
 
 /// The file system path of `item`.
-fn path_of(item: &IShellItem) -> windows::core::Result<PathBuf> {
+pub(crate) fn path_of(item: &IShellItem) -> windows::core::Result<PathBuf> {
     // SAFETY: a live item; FOS_FORCEFILESYSTEM made it one with a path.
     let path = unsafe { item.GetDisplayName(SIGDN_FILESYSPATH) }?;
     // SAFETY: on success the string is valid and null-terminated until it is freed below.

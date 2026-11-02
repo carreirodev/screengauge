@@ -5,7 +5,8 @@
 //! it, ScreenGauge draws one page that the user can't resize: the blocks' cards with their rows, and the footer with
 //! the version and the link to the project's page. Its X closes only the window, and ScreenGauge keeps running.
 //!
-//! A click on a control changes the option at once, in the settings file too, with no Save or Cancel (WPC-320). Like
+//! A click on a control changes the option at once, in the settings file too, with no Save or Cancel (WPC-320). The Snip's
+//! "Change…", and its switch turned on with no folder kept, open Windows' folder window over this one (WPC-322). Like
 //! the link, a control acts only when the left button comes up on the same one it went down on, as the toolbar's
 //! buttons do (WPC-310).
 //!
@@ -15,10 +16,12 @@
 mod controls;
 mod layout;
 mod paint;
+mod snip_card;
 
 use std::cell::{Cell, RefCell};
 
 use screengauge_core::session::toolbar::scaled;
+use screengauge_core::settings::{Folder, Options};
 use windows::Win32::Foundation::{
     D2DERR_RECREATE_TARGET, E_FAIL, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
 };
@@ -45,19 +48,19 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetCursorPos, HTCLIENT,
-    IDC_ARROW, IDC_HAND, IsIconic, LoadCursorW, LoadIconW, RegisterClassExW, SW_RESTORE, SW_SHOW,
-    SW_SHOWNORMAL, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    SetCursor, SetForegroundWindow, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE,
-    WM_CAPTURECHANGED, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_GETDPISCALEDSIZE,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_SETCURSOR, WNDCLASSEXW, WS_CAPTION,
-    WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GW_OWNER, GetClientRect, GetCursorPos,
+    GetWindow, HTCLIENT, IDC_ARROW, IDC_HAND, IsIconic, LoadCursorW, LoadIconW, PostQuitMessage,
+    RegisterClassExW, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetCursor, SetForegroundWindow, SetWindowPos, ShowWindow,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_CAPTURECHANGED, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND,
+    WM_GETDPISCALEDSIZE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_SETCURSOR,
+    WNDCLASSEXW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
 };
 use windows::core::{BOOL, Error, HSTRING, PCWSTR, w};
 
 use crate::theme::Mode;
 use crate::win32::{low_word, signed_words, struct_size};
-use crate::{com, event, graphics, log, resident, settings_file, tray};
+use crate::{com, event, folder_picker, graphics, log, resident, settings_file, tray};
 use controls::{Control, Pointer};
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.Settings");
@@ -244,6 +247,29 @@ pub fn close() {
 pub fn is(hwnd: HWND) -> bool {
     WINDOW.get() == Some(hwnd)
 }
+
+/// Whether `hwnd` is owned by the Settings window, directly or through a window that is: Windows' folder window is.
+pub fn owns(hwnd: HWND) -> bool {
+    let Some(settings) = WINDOW.get() else {
+        return false;
+    };
+    let mut window = hwnd;
+    for _ in 0..OWNER_DEPTH {
+        // SAFETY: a window handle, which Windows checks. The windows crate turns "no owner", and a window already gone,
+        // into an error, and neither is owned by Settings.
+        let Ok(owner) = (unsafe { GetWindow(window, GW_OWNER) }) else {
+            return false;
+        };
+        if owner == settings {
+            return true;
+        }
+        window = owner;
+    }
+    false
+}
+
+/// How many owners up `owns` looks: a dialog owned by Settings is one level up, a window of that dialog two.
+const OWNER_DEPTH: usize = 4;
 
 /// Gives the keyboard to `hwnd`. Windows may refuse when another program took the front since the user's last click in
 /// ScreenGauge; the window then flashes on the taskbar instead, as any program's would.
@@ -439,7 +465,10 @@ extern "system" fn window_proc(
                 if hit_at(Some(client_point(lparam))) == Some(pressed) {
                     act(hwnd, pressed);
                 }
-                invalidate(hwnd);
+                // ScreenGauge may have exited while the folder window was open, and taken this window with it.
+                if WINDOW.get() == Some(hwnd) {
+                    invalidate(hwnd);
+                }
             }
             LRESULT(0)
         }
@@ -554,13 +583,18 @@ fn act(hwnd: HWND, hit: Hit) {
     match hit {
         Hit::Link => open_project_page(hwnd),
         Hit::Control(control) => {
-            let saved = settings_file::update(|stored| {
-                let change = controls::change(control, &stored.options);
-                stored.options.apply(change)
-            });
-            // The change holds in this run even when the file couldn't be saved.
-            if let Err(e) = saved {
-                log::failure("Settings: saving a change", &e);
+            // Read first and nothing held: the folder window below runs a message loop, in which this window is drawn
+            // from the options and the file is saved again.
+            let options = match settings_file::current() {
+                Ok(stored) => stored.options,
+                Err(e) => {
+                    log::failure("Settings: reading the options for a click", &e);
+                    return;
+                }
+            };
+            match controls::change(control, &options) {
+                Some(change) => save(|options| options.apply(change)),
+                None => choose_folder(hwnd, control, &options),
             }
             // A theme chosen here shows at once, in Settings and in the tools too: they may be stepped aside while
             // Save As waits, and come back in the theme chosen (seen in review).
@@ -569,6 +603,48 @@ fn act(hwnd: HWND, hit: Hit) {
             }
         }
     }
+}
+
+/// Changes the options with `change`, which says whether it changed anything, and saves them at once. The change holds
+/// in this run even when the file couldn't be saved.
+fn save(change: impl FnOnce(&mut Options) -> bool) {
+    if let Err(e) = settings_file::update(|stored| change(&mut stored.options)) {
+        log::failure("Settings: saving a change", &e);
+    }
+}
+
+/// "Change…", and the switch turned on with no folder kept: Windows' folder window opens, in the folder kept when there
+/// is one. The folder chosen is kept, and with the switch it turns it on; cancelling changes nothing, so the switch stays
+/// off (v1 spec WPC-296, Settings). Must be called with nothing borrowed that this window's procedure borrows: the folder
+/// window runs its own message loop.
+fn choose_folder(hwnd: HWND, control: Control, options: &Options) {
+    let chosen = folder_picker::choose(hwnd, options.default_folder.folder());
+    // ScreenGauge exited while the folder window was open, as it can from the tray icon: this window went with it, and
+    // the end of the message loop it asked for went to the folder window's own loop, which kept it, so it is asked for
+    // again (as with Save As, seen in WPC-318).
+    if WINDOW.get() != Some(hwnd) {
+        // SAFETY: ends this thread's message loop.
+        unsafe { PostQuitMessage(0) };
+        return;
+    }
+    let path = match chosen {
+        Ok(Some(path)) => path,
+        Ok(None) => return,
+        Err(e) => {
+            log::failure("Settings: the folder window", &e);
+            return;
+        }
+    };
+    // The log never shows the path, which holds the Windows user name.
+    let Some(folder) = Folder::new(&path) else {
+        log::failure(
+            "Settings: keeping the folder chosen",
+            &"it isn't a full path the settings file can keep",
+        );
+        return;
+    };
+    let turn_on = control == Control::SaveToDefaultFolder;
+    save(|options| options.choose_default_folder(folder, turn_on));
 }
 
 /// Asks for a paint with the render target kept, as after a click or a move that changes what the page shows.

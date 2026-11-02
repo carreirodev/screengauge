@@ -11,10 +11,10 @@ use windows::Win32::Graphics::Direct2D::{
     ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_METRICS, DWRITE_FONT_STRETCH_NORMAL,
-    DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-    DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory, IDWriteFactory, IDWriteFontFamily,
-    IDWriteTextFormat,
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_METRICS, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE,
+    DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
+    DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory,
+    IDWriteFactory, IDWriteFontFamily, IDWriteTextFormat,
 };
 use windows::core::{BOOL, Error, PCWSTR, w};
 
@@ -91,13 +91,31 @@ impl Fonts {
         weight: DWRITE_FONT_WEIGHT,
         size: f32,
     ) -> windows::core::Result<IDWriteTextFormat> {
+        self.styled_format(weight, DWRITE_FONT_STYLE_NORMAL, size)
+    }
+
+    /// The font in `weight`, italic, `size` pixels tall, on one line whatever the room.
+    pub fn italic_format(
+        &self,
+        weight: DWRITE_FONT_WEIGHT,
+        size: f32,
+    ) -> windows::core::Result<IDWriteTextFormat> {
+        self.styled_format(weight, DWRITE_FONT_STYLE_ITALIC, size)
+    }
+
+    fn styled_format(
+        &self,
+        weight: DWRITE_FONT_WEIGHT,
+        style: DWRITE_FONT_STYLE,
+        size: f32,
+    ) -> windows::core::Result<IDWriteTextFormat> {
         // SAFETY: plain values and static strings.
         let format = unsafe {
             self.factory.CreateTextFormat(
                 FAMILY,
                 None,
                 weight,
-                DWRITE_FONT_STYLE_NORMAL,
+                style,
                 DWRITE_FONT_STRETCH_NORMAL,
                 size,
                 w!("en-US"),
