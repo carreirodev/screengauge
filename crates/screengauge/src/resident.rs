@@ -353,8 +353,8 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
 }
 
 /// Draws Settings and the tools, whichever are open, in the palette of the theme as it is now: in Automatic, Windows'
-/// app mode may have just changed (v1 spec WPC-296, Theme; WPC-321).
-fn follow_theme() {
+/// app mode may have just changed, or the user chose another theme in Settings (v1 spec WPC-296, Theme; WPC-321).
+pub fn follow_theme() {
     let theme = match settings_file::current() {
         Ok(stored) => stored.options.theme,
         Err(e) => {

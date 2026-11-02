@@ -55,9 +55,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, Error, HSTRING, PCWSTR, w};
 
-use crate::theme::{self, Mode};
+use crate::theme::Mode;
 use crate::win32::{low_word, signed_words, struct_size};
-use crate::{com, event, graphics, log, settings_file, tray};
+use crate::{com, event, graphics, log, resident, settings_file, tray};
 use controls::{Control, Pointer};
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.Settings");
@@ -562,10 +562,10 @@ fn act(hwnd: HWND, hit: Hit) {
             if let Err(e) = saved {
                 log::failure("Settings: saving a change", &e);
             }
-            // A theme chosen here shows at once. The tools can't be open meanwhile: they cover Settings, and open
-            // again in the theme chosen.
-            if let Control::Theme(theme) = control {
-                follow(theme::mode(theme));
+            // A theme chosen here shows at once, in Settings and in the tools too: they may be stepped aside while
+            // Save As waits, and come back in the theme chosen (seen in review).
+            if let Control::Theme(_) = control {
+                resident::follow_theme();
             }
         }
     }

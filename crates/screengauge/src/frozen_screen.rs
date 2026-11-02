@@ -321,16 +321,11 @@ impl FrozenScreen {
     }
 
     /// Draws ScreenGauge's own surfaces over the photo in `mode`'s palette from now on: the toolbar, the notices and the
-    /// pinned measurements' labels. A window in the other palette makes what it draws with again, at its next paint.
+    /// pinned measurements' labels. A window in the other palette makes what it draws with again at its next paint, which
+    /// only the paint itself does, as it holds the drawing.
     pub fn follow(&self, mode: Mode) {
         for &window in &self.windows {
-            let changed = with_state(window, |state| {
-                let changed = state.mode.replace(mode) != mode;
-                if changed {
-                    drop(state.drawing.borrow_mut().take());
-                }
-                changed
-            });
+            let changed = with_state(window, |state| state.mode.replace(mode) != mode);
             if changed == Some(true) {
                 // SAFETY: our own window.
                 if !unsafe { InvalidateRect(Some(window), None, false) }.as_bool() {
@@ -717,6 +712,8 @@ struct Drawing {
     target: ID2D1HwndRenderTarget,
     bitmap: ID2D1Bitmap,
     overlay: Overlay,
+    /// The palette the overlay draws in. A paint that finds the window in the other one makes the drawing again.
+    mode: Mode,
 }
 
 /// What CreateWindowExW hands to WM_NCCREATE. Should WM_NCCREATE never come, the window state stays here and drops
@@ -1002,8 +999,9 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
         .try_borrow_mut()
         .map_err(|_| Error::new(E_FAIL, "painting started again while painting"))?;
     let ready = match drawing.take() {
-        Some(ready) => ready,
-        None => Drawing::new(hwnd, window)?,
+        Some(ready) if ready.mode == window.mode.get() => ready,
+        // None yet, or made before the theme changed (`FrozenScreen::follow`).
+        _ => Drawing::new(hwnd, window)?,
     };
     // SAFETY: drawing calls on a live render target, between BeginDraw and EndDraw. With no rectangles, the whole
     // bitmap goes to the target's origin at its own size, and both are at 96 DPI: one pixel for one pixel.
@@ -1138,11 +1136,13 @@ impl Drawing {
                 )
             }
         })??;
-        let overlay = Overlay::new(&target, &graphics::fonts()?, rect, scale, window.mode.get())?;
+        let mode = window.mode.get();
+        let overlay = Overlay::new(&target, &graphics::fonts()?, rect, scale, mode)?;
         Ok(Drawing {
             target,
             bitmap,
             overlay,
+            mode,
         })
     }
 }
