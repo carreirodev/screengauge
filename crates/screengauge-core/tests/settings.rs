@@ -97,6 +97,32 @@ fn turning_save_to_default_folder_off_keeps_the_folder() {
     assert_eq!(read(&settings::write(&stored)).stored, stored);
 }
 
+#[test]
+fn every_destination_and_every_state_of_the_default_folder_is_read_back() {
+    let folders = [
+        DefaultFolder::Off(None),
+        DefaultFolder::Off(Some(folder(r"C:\Users\Ana\Pictures\Snips"))),
+        DefaultFolder::On(folder(r"\\server\share\Design Reviews")),
+    ];
+    for destination in [
+        SnipDestination::Clipboard,
+        SnipDestination::File,
+        SnipDestination::Both,
+    ] {
+        for default_folder in &folders {
+            let mut stored = Stored::default();
+            stored.options.snip_destination = destination;
+            stored.options.default_folder = default_folder.clone();
+            let read = read(&settings::write(&stored));
+            assert_eq!(
+                read.stored, stored,
+                "{destination:?} with {default_folder:?}"
+            );
+            assert_eq!(read.resets, []);
+        }
+    }
+}
+
 // A wrong value
 
 fn unusable(key: &'static str, value: &str) -> Reset {
@@ -445,7 +471,11 @@ fn each_magnification_enlarges_a_pixel_to_its_number_of_pixels_a_side() {
 
 /// What Settings' controls do to the options (WPC-320): each click changes one option, and says whether it changed.
 mod changes {
-    use screengauge_core::settings::{Change, ColorFormat, Options, Theme, Tolerance};
+    use std::path::Path;
+
+    use screengauge_core::settings::{
+        Change, ColorFormat, DefaultFolder, Folder, Options, SnipDestination, Theme, Tolerance,
+    };
 
     fn tolerance(value: u8) -> Tolerance {
         Tolerance::new(value).expect("within the limits")
@@ -523,5 +553,108 @@ mod changes {
             ..Options::default()
         };
         assert_eq!(options, wanted);
+    }
+
+    fn folder(path: &str) -> Folder {
+        Folder::new(Path::new(path)).expect("an absolute path")
+    }
+
+    #[test]
+    fn the_destination_starts_at_the_clipboard_and_takes_file_or_both() {
+        let mut options = Options::default();
+        assert_eq!(options.snip_destination, SnipDestination::Clipboard);
+        assert!(options.apply(Change::SnipDestination(SnipDestination::File)));
+        assert_eq!(options.snip_destination, SnipDestination::File);
+        assert!(!options.apply(Change::SnipDestination(SnipDestination::File)));
+        assert!(options.apply(Change::SnipDestination(SnipDestination::Both)));
+        assert!(options.apply(Change::SnipDestination(SnipDestination::Clipboard)));
+        assert_eq!(options.snip_destination, SnipDestination::Clipboard);
+    }
+
+    #[test]
+    fn save_to_default_folder_starts_off_with_no_folder() {
+        assert_eq!(Options::default().default_folder, DefaultFolder::Off(None));
+    }
+
+    #[test]
+    fn turning_it_on_with_no_folder_kept_changes_nothing_until_a_folder_is_chosen() {
+        let mut options = Options::default();
+        assert!(!options.apply(Change::SaveToDefaultFolder(true)));
+        assert_eq!(options.default_folder, DefaultFolder::Off(None));
+        // Choosing the folder is part of turning it on.
+        assert!(options.choose_default_folder(folder(r"C:\Snips"), true));
+        assert_eq!(
+            options.default_folder,
+            DefaultFolder::On(folder(r"C:\Snips"))
+        );
+    }
+
+    #[test]
+    fn turning_it_off_keeps_the_folder_and_turning_it_on_again_uses_the_same_one() {
+        let mut options = Options::default();
+        options.choose_default_folder(folder(r"C:\Snips"), true);
+        assert!(options.apply(Change::SaveToDefaultFolder(false)));
+        assert_eq!(
+            options.default_folder,
+            DefaultFolder::Off(Some(folder(r"C:\Snips")))
+        );
+        assert!(!options.apply(Change::SaveToDefaultFolder(false)));
+        assert!(options.apply(Change::SaveToDefaultFolder(true)));
+        assert_eq!(
+            options.default_folder,
+            DefaultFolder::On(folder(r"C:\Snips"))
+        );
+        assert!(!options.apply(Change::SaveToDefaultFolder(true)));
+    }
+
+    #[test]
+    fn change_stores_a_new_folder_and_leaves_the_switch_as_it_was() {
+        let mut options = Options::default();
+        // Off with none kept: it stores the folder and stays off.
+        assert!(options.choose_default_folder(folder(r"C:\One"), false));
+        assert_eq!(
+            options.default_folder,
+            DefaultFolder::Off(Some(folder(r"C:\One")))
+        );
+        // Off with one kept.
+        assert!(options.choose_default_folder(folder(r"C:\Two"), false));
+        assert_eq!(
+            options.default_folder,
+            DefaultFolder::Off(Some(folder(r"C:\Two")))
+        );
+        // On: it stays on, with the new folder.
+        options.apply(Change::SaveToDefaultFolder(true));
+        assert!(options.choose_default_folder(folder(r"C:\Three"), false));
+        assert_eq!(
+            options.default_folder,
+            DefaultFolder::On(folder(r"C:\Three"))
+        );
+    }
+
+    #[test]
+    fn choosing_the_folder_already_kept_changes_nothing() {
+        let mut options = Options::default();
+        options.choose_default_folder(folder(r"C:\Snips"), true);
+        assert!(!options.choose_default_folder(folder(r"C:\Snips"), false));
+        assert!(!options.choose_default_folder(folder(r"C:\Snips"), true));
+        options.apply(Change::SaveToDefaultFolder(false));
+        // Turning it on by choosing the same folder again does change the switch.
+        assert!(options.choose_default_folder(folder(r"C:\Snips"), true));
+        assert!(options.default_folder.is_on());
+    }
+
+    #[test]
+    fn the_destination_and_the_folder_never_touch_each_other() {
+        // With the clipboard as the destination the switch still only keeps the folder (v1 spec WPC-296, Snip).
+        let mut options = Options::default();
+        options.choose_default_folder(folder(r"C:\Snips"), true);
+        options.apply(Change::SnipDestination(SnipDestination::File));
+        options.apply(Change::SnipDestination(SnipDestination::Clipboard));
+        assert_eq!(
+            options.default_folder,
+            DefaultFolder::On(folder(r"C:\Snips"))
+        );
+        options.apply(Change::SaveToDefaultFolder(false));
+        assert_eq!(options.snip_destination, SnipDestination::Clipboard);
     }
 }

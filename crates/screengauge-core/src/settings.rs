@@ -59,6 +59,11 @@ pub enum Change {
     /// "Also show logical pixels" turned on or off.
     AlsoShowLogicalPixels(bool),
     ColorFormat(ColorFormat),
+    /// "Destination": Clipboard, File or Both.
+    SnipDestination(SnipDestination),
+    /// "Save to default folder" turned on or off, with the folder already kept. Turning it on with none kept changes
+    /// nothing: the folder is chosen first, and [`Options::choose_default_folder`] turns it on with it.
+    SaveToDefaultFolder(bool),
 }
 
 impl Options {
@@ -72,8 +77,24 @@ impl Options {
             Change::DefaultToleranceUp => self.default_tolerance = self.default_tolerance.up(),
             Change::AlsoShowLogicalPixels(on) => self.also_show_logical_pixels = on,
             Change::ColorFormat(format) => self.color_format = format,
+            Change::SnipDestination(destination) => self.snip_destination = destination,
+            Change::SaveToDefaultFolder(on) => self.default_folder = self.default_folder.turned(on),
         }
         *self != before
+    }
+
+    /// Keeps `folder` as the default folder, which Windows' folder window returned. "Save to default folder" stays as it
+    /// is, on or off, and `turn_on` turns it on too, as choosing the folder is part of turning it on. False when
+    /// nothing changed.
+    pub fn choose_default_folder(&mut self, folder: Folder, turn_on: bool) -> bool {
+        let before = self.default_folder.clone();
+        let on = turn_on || before.is_on();
+        self.default_folder = if on {
+            DefaultFolder::On(folder)
+        } else {
+            DefaultFolder::Off(Some(folder))
+        };
+        self.default_folder != before
     }
 }
 
@@ -114,6 +135,15 @@ impl DefaultFolder {
         match self {
             DefaultFolder::Off(folder) => folder.as_ref(),
             DefaultFolder::On(folder) => Some(folder),
+        }
+    }
+
+    /// Turned `on` or off with the folder it keeps. Turning it on with no folder kept leaves it off.
+    fn turned(&self, on: bool) -> DefaultFolder {
+        match (self, on) {
+            (DefaultFolder::Off(Some(folder)), true) => DefaultFolder::On(folder.clone()),
+            (DefaultFolder::On(folder), false) => DefaultFolder::Off(Some(folder.clone())),
+            _ => self.clone(),
         }
     }
 }
