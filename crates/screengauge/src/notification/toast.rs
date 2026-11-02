@@ -3,6 +3,8 @@
 //! Store copy declares them in its manifest instead (WPC-334).
 
 use std::cell::RefCell;
+use std::ffi::{OsStr, OsString};
+use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::{fs, io};
@@ -78,11 +80,11 @@ thread_local! {
 /// closed. Without it, a click in the notification center would only close the notification (WPC-347, scenario s6).
 pub fn register(activator: bool) -> windows::core::Result<()> {
     let key = format!(r"Software\Classes\AppUserModelId\{AUMID}");
-    set_value(&key, Some("DisplayName"), "ScreenGauge")?;
+    set_value(&key, Some("DisplayName"), OsStr::new("ScreenGauge"))?;
     match write_icon() {
-        Ok(icon) => set_value(&key, Some("IconUri"), &icon.to_string_lossy())?,
+        Ok(icon) => set_value(&key, Some("IconUri"), icon.as_os_str())?,
         // Windows then shows a generic icon; the notification still shows.
-        Err(e) => crate::log::failure("notifications: writing the icon", &e),
+        Err(e) => crate::log::failure("notification: writing the icon", &e),
     }
     if !activator {
         // An earlier start's activator would take the clicks with no process to answer them.
@@ -94,16 +96,25 @@ pub fn register(activator: bool) -> windows::core::Result<()> {
     set_value(
         &format!(r"Software\Classes\CLSID\{clsid}\LocalServer32"),
         None,
-        &format!("\"{}\"", exe.display()),
+        &quoted(exe.as_os_str()),
     )?;
-    set_value(&key, Some("CustomActivator"), &clsid)
+    set_value(&key, Some("CustomActivator"), OsStr::new(&clsid))
+}
+
+/// `path` between double quotes.
+fn quoted(path: &OsStr) -> OsString {
+    let mut quoted = OsString::from("\"");
+    quoted.push(path);
+    quoted.push("\"");
+    quoted
 }
 
 /// Sets `name` (the default value without one) of HKCU's `key`, creating the key when it is missing.
-fn set_value(key: &str, name: Option<&str>, value: &str) -> windows::core::Result<()> {
+fn set_value(key: &str, name: Option<&str>, value: &OsStr) -> windows::core::Result<()> {
     let key = HSTRING::from(key);
     let name = name.map(HSTRING::from).unwrap_or_default();
-    let data: Vec<u16> = value.encode_utf16().chain([0]).collect();
+    // From the UTF-16 Windows gave, so a path is written as it is, whatever its characters.
+    let data: Vec<u16> = value.encode_wide().chain([0]).collect();
     let size = u32::try_from(data.len() * size_of::<u16>())
         .map_err(|e| Error::new(E_FAIL, e.to_string()))?;
     // SAFETY: the strings and `data` outlive the call, which reads `size` bytes of `data`.
@@ -189,7 +200,14 @@ pub fn show(toast: &Toast) -> windows::core::Result<()> {
             let reason = match args.ok()?.Reason()? {
                 ToastDismissalReason::UserCanceled => Dismissal::UserCanceled,
                 ToastDismissalReason::ApplicationHidden => Dismissal::ApplicationHidden,
-                _ => Dismissal::TimedOut,
+                ToastDismissalReason::TimedOut => Dismissal::TimedOut,
+                // A reason newer than this build: nothing is learned from it.
+                other => {
+                    return Err(Error::new(
+                        E_FAIL,
+                        format!("notification dismissed for an unknown reason, {}", other.0),
+                    ));
+                }
             };
             report(Event {
                 launch: launch.clone(),

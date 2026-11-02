@@ -12,8 +12,9 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
-use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
+use windows::core::Error;
 
 use crate::{com, log};
 
@@ -161,10 +162,10 @@ pub fn start(window: HWND) {
     RESIDENT.store(window.0, Ordering::Release);
     let activator = com::ensure_started().and_then(|()| activator::register());
     if let Err(e) = &activator {
-        log::failure("notifications: registering the activator", e);
+        log::failure("notification: registering the activator", e);
     }
     if let Err(e) = toast::register(activator.is_ok()) {
-        log::failure("notifications: registering ScreenGauge with Windows", &e);
+        log::failure("notification: registering ScreenGauge with Windows", &e);
     }
 }
 
@@ -245,10 +246,15 @@ fn report(event: Event) -> windows::core::Result<()> {
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .push(event);
-    let window = HWND(RESIDENT.load(Ordering::Acquire));
-    // SAFETY: the resident window, or null before it exists, which fails; the message carries nothing. The event
-    // stays queued either way and is handled with the next one.
-    unsafe { PostMessageW(Some(window), EVENTS_READY, WPARAM(0), LPARAM(0)) }
+    let window = RESIDENT.load(Ordering::Acquire);
+    // Never so far: the window is kept before the activator is registered and before any notification shows. A null
+    // window would post to this thread, whose message would be lost.
+    if window.is_null() {
+        return Err(Error::new(E_FAIL, "no resident window to tell"));
+    }
+    // SAFETY: the resident window; the message carries nothing. Should it be gone, as at exit, the call fails, and the
+    // event stays queued for nothing.
+    unsafe { PostMessageW(Some(HWND(window)), EVENTS_READY, WPARAM(0), LPARAM(0)) }
 }
 
 /// The latest notification of a kind shown by this process, and what Windows told of it.
@@ -272,7 +278,8 @@ struct State {
     /// The frozen screen covers the monitors. Windows takes a full-screen window in front for a reason to keep
     /// notifications out of the corner (`QUNS_BUSY`), so none shows until the tools close.
     tools_open: bool,
-    /// "Couldn't capture the screen. Try again." was shown and is still to leave the notification center.
+    /// "Couldn't capture the screen. Try again." may be in the notification center, still to leave it: shown by this
+    /// process, or by an earlier ScreenGauge, so true at startup. Taking out one that isn't there does nothing.
     capture_failed_in_center: bool,
 }
 
@@ -284,7 +291,7 @@ impl State {
             waiting: Vec::new(),
             shown: Vec::new(),
             tools_open: false,
-            capture_failed_in_center: false,
+            capture_failed_in_center: true,
         }
     }
 
@@ -549,9 +556,26 @@ mod tests {
         assert!(state.waiting.is_empty());
     }
 
+    /// The state once the first capture since startup has taken out what an earlier ScreenGauge may have left.
+    fn state_after_first_capture() -> State {
+        let mut state = state();
+        state.capture_succeeded(&mut Recorded::default());
+        state
+    }
+
+    #[test]
+    fn the_first_capture_takes_out_one_an_earlier_screengauge_left() {
+        // ScreenGauge exited, or Windows started it for a click, after a capture failed.
+        let mut state = state();
+        let mut windows = Recorded::default();
+        state.capture_succeeded(&mut windows);
+        state.capture_succeeded(&mut windows);
+        assert_eq!(windows.removed, [Notification::CaptureFailed]);
+    }
+
     #[test]
     fn the_capture_failure_leaves_the_notification_center_once_a_capture_succeeds() {
-        let mut state = state();
+        let mut state = state_after_first_capture();
         let mut windows = Recorded::default();
         state.show(Notification::CaptureFailed, &mut windows);
         state.capture_succeeded(&mut windows);
@@ -563,7 +587,7 @@ mod tests {
 
     #[test]
     fn a_capture_takes_nothing_out_when_no_capture_failed() {
-        let mut state = state();
+        let mut state = state_after_first_capture();
         let mut windows = Recorded::default();
         state.show(Notification::SettingsReset, &mut windows);
         state.capture_succeeded(&mut windows);
@@ -572,7 +596,7 @@ mod tests {
 
     #[test]
     fn a_capture_failure_windows_refused_has_nothing_to_leave() {
-        let mut state = state();
+        let mut state = state_after_first_capture();
         state.show(Notification::CaptureFailed, &mut Recorded::refusing());
         let mut windows = Recorded::default();
         state.capture_succeeded(&mut windows);

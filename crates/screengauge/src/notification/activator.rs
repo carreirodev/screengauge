@@ -5,7 +5,7 @@
 use std::cell::Cell;
 use std::ffi::c_void;
 
-use windows::Win32::Foundation::{CLASS_E_NOAGGREGATION, E_INVALIDARG};
+use windows::Win32::Foundation::{CLASS_E_NOAGGREGATION, E_INVALIDARG, E_POINTER};
 use windows::Win32::System::Com::{
     CLSCTX_LOCAL_SERVER, CoRegisterClassObject, CoRevokeClassObject, IClassFactory,
     IClassFactory_Impl, REGCLS_AGILE, REGCLS_MULTIPLEUSE,
@@ -82,7 +82,10 @@ impl IClassFactory_Impl for Factory_Impl {
         iid: *const GUID,
         object: *mut *mut c_void,
     ) -> windows::core::Result<()> {
-        // SAFETY: COM passes a valid out pointer, set to null until there is an object to give.
+        if object.is_null() {
+            return Err(E_POINTER.into());
+        }
+        // SAFETY: a non-null out pointer from COM, set to null until there is an object to give.
         unsafe { *object = std::ptr::null_mut() };
         if outer.is_some() {
             return Err(CLASS_E_NOAGGREGATION.into());

@@ -1,7 +1,8 @@
 //! The resident process: one window that is never shown, so ScreenGauge has no taskbar button while idle.
 //! It receives what Windows tells ScreenGauge: the global shortcut, the tray icon's clicks, the calls of a copy opened
-//! again and what becomes of its Windows notifications. At startup only COM and the notifications' activator are
-//! prepared, and there is no timer at rest: the thread sleeps in GetMessageW until Windows sends something. While the tools are open, it carries out the effects the session core returns.
+//! again and what becomes of its Windows notifications. At startup only COM, the notifications' activator and their
+//! registration with Windows are prepared, and there is no timer at rest: the thread sleeps in GetMessageW until
+//! Windows sends something. While the tools are open, it carries out the effects the session core returns.
 
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -486,8 +487,7 @@ fn open_save_as(folder: Option<&Folder>, file_name: &str) -> Input {
 }
 
 /// Dropping the frozen screen closes its windows, drops the session and erases the photos. The notifications that
-/// waited for the tools to close then show. Every way of closing the tools comes
-/// here, so none leaves them waiting.
+/// waited for the tools to close then show. Every way of closing the tools comes here, so none leaves them waiting.
 fn close() {
     drop(FROZEN_SCREEN.with_borrow_mut(Option::take));
     notification::tools_closed();
