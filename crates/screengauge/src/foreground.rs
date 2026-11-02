@@ -7,7 +7,8 @@
 //! behind the frozen screen, where Esc would no longer reach the tools (WPC-319). The windows Settings owns, Windows'
 //! folder window (WPC-322), count as Settings: with Save As waiting, the frozen screen and Save As are already aside
 //! when the folder window opens, so it never brings them back over itself, and with the tools called over it, it
-//! closes them as Settings does, for the same reason.
+//! closes them as Settings does, for the same reason. So does the tray icon's menu (WPC-325): opened while Save As
+//! waits aside, it would otherwise bring the frozen screen and Save As back over itself, and close as it lost the front.
 
 use std::cell::Cell;
 
@@ -20,7 +21,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::Error;
 
-use crate::{log, settings_window};
+use crate::{log, settings_window, tray_menu};
 
 /// What a [`Watch`] posts to the window it tells when another program came to the front.
 pub const OTHER_PROGRAM_IN_FRONT: u32 = WM_APP + 3;
@@ -87,7 +88,8 @@ impl Drop for Watch {
 }
 
 /// What a window coming to the front tells the frozen screen: [`OTHER_PROGRAM_IN_FRONT`] for another program, and for
-/// Settings and the windows it owns (`settings`), which count as one; [`OWN_WINDOW_IN_FRONT`] for one of ScreenGauge's
+/// the windows apart from the tools (`settings`: Settings, the windows it owns, and the tray icon's menu), which count
+/// as one; [`OWN_WINDOW_IN_FRONT`] for one of ScreenGauge's
 /// other windows, such as Save As.
 fn message_for(this_process: bool, settings: bool) -> u32 {
     if this_process && !settings {
@@ -128,7 +130,7 @@ extern "system" fn on_foreground(
     let this_process = process == unsafe { GetCurrentProcessId() };
     let message = message_for(
         this_process,
-        settings_window::is(front) || settings_window::owns(front),
+        settings_window::is(front) || settings_window::owns(front) || tray_menu::is(front),
     );
     // SAFETY: a window of this thread; should it be closed already, PostMessageW fails and says so. The message
     // carries nothing.

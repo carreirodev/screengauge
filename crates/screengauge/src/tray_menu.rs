@@ -94,6 +94,8 @@ pub fn register_class(instance: HINSTANCE) -> windows::core::Result<()> {
 
 /// Where Windows says a right click on the tray icon happened, from the wParam of its `WM_CONTEXTMENU` (version 4): the
 /// cursor for a click, the icon for the keyboard. A monitor left of or above the main one has negative coordinates.
+/// Windows documents coordinates only for the mouse messages; measured in WPC-325, a right click on the taskbar gives
+/// the cursor within a pixel at 150%.
 pub fn anchor_of(wparam: WPARAM) -> POINT {
     let (x, y) = signed_words(wparam.0);
     POINT {
@@ -238,6 +240,11 @@ pub fn close_before_photo() {
     if let Err(e) = unsafe { DwmFlush() } {
         log::failure("tray menu: waiting for the screen without it", &e);
     }
+}
+
+/// Whether `hwnd` is the menu.
+pub fn is(hwnd: HWND) -> bool {
+    WINDOW.get() == Some(hwnd)
 }
 
 /// The item a `CHOSEN` message carries.
