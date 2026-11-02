@@ -21,6 +21,7 @@ mod png;
 mod resident;
 mod save_as;
 mod settings_file;
+mod settings_window;
 mod single_instance;
 mod snip_file;
 #[cfg(test)]

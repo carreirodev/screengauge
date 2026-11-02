@@ -2,7 +2,9 @@
 //! that opens a program. Windows reports every change of the window in front through a WinEvent hook, set only while
 //! the tools are open, so nothing watches at rest. ScreenGauge's own windows, such as Save As, never count as another
 //! program: one of them coming to the front is told apart, as the way back to Save As after it stepped aside behind
-//! another program (WPC-318).
+//! another program (WPC-318). Settings is the exception: it is a window of its own, apart from the tools, so coming to
+//! the front by Alt+Tab or its taskbar button it closes them as another program would, rather than taking the keyboard
+//! behind the frozen screen, where Esc would no longer reach the tools (WPC-319).
 
 use std::cell::Cell;
 
@@ -15,7 +17,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::Error;
 
-use crate::log;
+use crate::{log, settings_window};
 
 /// What a [`Watch`] posts to the window it tells when another program came to the front.
 pub const OTHER_PROGRAM_IN_FRONT: u32 = WM_APP + 3;
@@ -103,12 +105,13 @@ extern "system" fn on_foreground(
     if hook != watched {
         return;
     }
-    let mut process = 0;
-    // SAFETY: no arguments; then fills a local. No window in front, or one gone meanwhile, leaves it 0, which is
-    // another program's.
-    unsafe { GetWindowThreadProcessId(GetForegroundWindow(), Some(&mut process)) };
     // SAFETY: no arguments.
-    let message = if process == unsafe { GetCurrentProcessId() } {
+    let front = unsafe { GetForegroundWindow() };
+    let mut process = 0;
+    // SAFETY: fills a local. No window in front, or one gone meanwhile, leaves it 0, which is another program's.
+    unsafe { GetWindowThreadProcessId(front, Some(&mut process)) };
+    // SAFETY: no arguments.
+    let message = if process == unsafe { GetCurrentProcessId() } && !settings_window::is(front) {
         OWN_WINDOW_IN_FRONT
     } else {
         OTHER_PROGRAM_IN_FRONT

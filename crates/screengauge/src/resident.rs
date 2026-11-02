@@ -28,7 +28,8 @@ use crate::notification::{self, Notification};
 use crate::settings_file::SettingsFile;
 use crate::win32::{low_word, struct_size};
 use crate::{
-    capture, clipboard, event, global_shortcut, graphics, log, png, save_as, snip_file, theme, tray,
+    capture, clipboard, event, global_shortcut, graphics, log, png, save_as, settings_window,
+    snip_file, theme, tray,
 };
 
 /// The resident window's class, which a copy opened again looks for to call the running copy.
@@ -83,6 +84,7 @@ pub fn run(file: Option<SettingsFile>, stored: Stored) -> windows::core::Result<
     }
     frozen_screen::register_class(instance)?;
     save_as::register_class(instance)?;
+    settings_window::register_class(instance)?;
     // SAFETY: the class was just registered in this module. The window is never shown.
     let hwnd = unsafe {
         CreateWindowExW(
@@ -191,6 +193,8 @@ extern "system" fn window_proc(
             // Save As runs its own message loop, which this exit may be inside of: it closes first.
             save_as::cancel();
             close(hwnd);
+            // Settings draws with the factories released next, so it closes before them.
+            settings_window::close();
             graphics::release();
             if let Err(e) = global_shortcut::unregister(hwnd) {
                 log::failure("exit: unregistering the global shortcut", &e);
@@ -286,21 +290,18 @@ fn second_click_until(call: &Input) -> Option<Duration> {
 /// Does what the session core asked, in its order, for the resident window `resident`.
 fn carry_out(resident: HWND, effects: Vec<Effect>) {
     for effect in effects {
-        let not_built = match effect {
+        match effect {
             Effect::Close => {
                 close(resident);
-                continue;
             }
             Effect::SaveRemembered(remembered) => {
                 save_remembered(remembered);
-                continue;
             }
             Effect::MoveCursor(point) => {
                 // SAFETY: no pointers. The process is Per-Monitor V2, so the point is in physical pixels.
                 if let Err(e) = unsafe { SetCursorPos(point.x, point.y) } {
                     log::failure("session: moving the cursor", &e);
                 }
-                continue;
             }
             // The notice "Copied" already shows: should Windows refuse the clipboard after the retries, it is logged.
             // TODO(WPC-352): tell the user when the copy fails instead of showing "Copied" anyway.
@@ -308,7 +309,6 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
                 if let Err(e) = clipboard::copy_text(resident, &text) {
                     log::failure("session: copying text", &e);
                 }
-                continue;
             }
             // As with the text: "Copied" already shows.
             // TODO(WPC-352): tell the user when the copy fails instead of showing "Copied" anyway.
@@ -316,7 +316,6 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
                 if let Err(e) = clipboard::copy_image(resident, &image) {
                     log::failure("session: copying an image", &e);
                 }
-                continue;
             }
             Effect::WakeAt(uptime) => {
                 FROZEN_SCREEN.with_borrow(|open| {
@@ -325,12 +324,10 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
                         frozen.wake_at(uptime);
                     }
                 });
-                continue;
             }
             Effect::WritePng { to, image } => {
                 let written = write_png(&to, &image);
                 tell(resident, written);
-                continue;
             }
             Effect::OpenSaveAs { folder, file_name } => {
                 let closed = open_save_as(folder.as_ref(), &file_name);
@@ -344,22 +341,34 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
                     return;
                 }
                 tell(resident, closed);
-                continue;
             }
             Effect::StepAside => {
                 save_as::step_aside();
                 FROZEN_SCREEN.with_borrow(|open| open.as_ref().map(FrozenScreen::step_aside));
-                continue;
             }
             Effect::ComeBack => {
                 FROZEN_SCREEN.with_borrow(|open| open.as_ref().map(FrozenScreen::come_back));
                 save_as::come_back();
-                continue;
             }
-            // No rule asks for this yet: the gear brings it with WPC-319.
-            Effect::OpenSettings => "opening Settings",
-        };
-        log::failure("session", &format!("{not_built} isn't built yet"));
+            // The tools closed just before, by the gear: Settings opens over the programs.
+            Effect::OpenSettings => {
+                open_settings();
+            }
+        }
+    }
+}
+
+/// Opens Settings, or brings it to the front, in the palette of the theme the settings file holds.
+fn open_settings() {
+    let theme = SETTINGS_FILE.with_borrow(|loaded| {
+        loaded
+            .as_ref()
+            .map(|loaded| loaded.stored.options.theme)
+            .ok_or_else(|| Error::new(E_FAIL, "the settings file wasn't read at startup"))
+    });
+    let opened = theme.and_then(|theme| settings_window::open(theme::mode(theme)));
+    if let Err(e) = opened {
+        log::failure("Settings: opening it", &e);
     }
 }
 

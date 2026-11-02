@@ -842,8 +842,6 @@ mod tests {
     use windows::Win32::Graphics::DirectWrite::{
         DWRITE_FONT_SIMULATIONS_NONE, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
     };
-
-    use crate::graphics::font_family;
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
     use windows::Win32::Graphics::Imaging::{
         CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICBitmap, IWICImagingFactory,
@@ -856,6 +854,7 @@ mod tests {
 
     use super::geometry::Size;
     use super::*;
+    use crate::graphics::font_family;
 
     pub(super) const CYAN: [u8; 3] = [0x22, 0xd3, 0xee];
     pub(super) const BACKGROUND: [u8; 3] = [200, 120, 60];
