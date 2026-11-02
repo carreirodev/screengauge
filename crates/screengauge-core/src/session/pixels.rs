@@ -12,7 +12,7 @@ pub(super) fn row(photo: &Photo, y: i32, left: i32, count: u32) -> &[[u8; 4]] {
     let column = left.abs_diff(photo.rect.left) as usize;
     let line = y.abs_diff(photo.rect.top) as usize;
     let start = line * photo.rect.width as usize + column;
-    &photo.image.bgra().as_chunks::<4>().0[start..start + count as usize]
+    &photo.image.pixels()[start..start + count as usize]
 }
 
 /// The pixels of `rect`, which must lie on the monitor, as an image of their own: Snip's, taken from the frozen screen

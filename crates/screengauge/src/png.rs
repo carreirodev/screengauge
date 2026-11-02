@@ -1,9 +1,7 @@
-//! The Snip's image as the bytes of a PNG file, written by WIC, which comes with Windows (v1 spec WPC-296, Snip: "PNG
-//! opaco, sem opção de outro formato"). The PNG holds 24-bit color and no alpha channel, so it is opaque whatever the
-//! fourth byte of the frozen screen's pixels says, and each pixel keeps the exact red, green and blue the frozen screen
-//! has.
-//!
-//! COM must be started on the calling thread ([`crate::com::Apartment`]).
+//! The Snip's image as the bytes of a PNG file, written by WIC, which comes with Windows: always an opaque PNG, with no
+//! other format to choose (v1 spec WPC-296, Snip). The PNG holds 24-bit color and no alpha channel, so it is opaque
+//! whatever the fourth byte of the frozen screen's pixels says, and each pixel keeps the exact red, green and blue the
+//! frozen screen has.
 
 use screengauge_core::session::Image;
 use windows::Win32::Foundation::E_FAIL;
@@ -17,6 +15,8 @@ use windows::Win32::System::Com::{
 use windows::Win32::UI::Shell::SHCreateMemStream;
 use windows::core::Error;
 
+use crate::com;
+
 /// `image` as the bytes of a PNG file: 24-bit color, opaque, exactly its pixels.
 pub fn encode(image: &Image) -> windows::core::Result<Vec<u8>> {
     let (width, height) = (image.width(), image.height());
@@ -24,6 +24,7 @@ pub fn encode(image: &Image) -> windows::core::Result<Vec<u8>> {
         .checked_mul(3)
         .ok_or_else(|| Error::new(E_FAIL, "the image is too wide for a PNG"))?;
     let bgr = without_fourth_byte(image);
+    com::ensure_started()?;
     let wic = factory()?;
     let stream = memory_stream(None)?;
     // SAFETY: a new encoder writing to a live stream.
@@ -56,15 +57,13 @@ pub fn encode(image: &Image) -> windows::core::Result<Vec<u8>> {
 /// screen has them, and the fourth byte, which says nothing, left out.
 fn without_fourth_byte(image: &Image) -> Vec<u8> {
     image
-        .bgra()
-        .as_chunks::<4>()
-        .0
+        .pixels()
         .iter()
         .flat_map(|&[blue, green, red, _]| [blue, green, red])
         .collect()
 }
 
-/// WIC's factory. COM is started on this thread.
+/// WIC's factory, on a thread where COM is started.
 fn factory() -> windows::core::Result<IWICImagingFactory> {
     // SAFETY: a registered in-process COM class, created with no outer object, on a thread where COM is started.
     unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER) }
@@ -84,7 +83,9 @@ fn read_all(stream: &IStream) -> windows::core::Result<Vec<u8>> {
     unsafe { stream.Stat(&mut status, STATFLAG_NONAME) }?;
     let length =
         u32::try_from(status.cbSize).map_err(|_| Error::new(E_FAIL, "the PNG is over 4 GB"))?;
-    let size = usize::try_from(length).map_err(|_| Error::new(E_FAIL, "the PNG is over 4 GB"))?;
+    // Can't fail: ScreenGauge builds for x64 alone, where a usize holds any u32.
+    let size = usize::try_from(length)
+        .map_err(|_| Error::new(E_FAIL, "the PNG's length doesn't fit in memory"))?;
     let mut bytes = vec![0; size];
     let mut read = 0;
     // SAFETY: rewinds a live stream, then reads into a buffer of exactly `length` bytes.
@@ -108,7 +109,6 @@ mod tests {
     };
 
     use super::*;
-    use crate::com::Apartment;
 
     /// What a PNG decodes to, read back by WIC as a program pasting it would: its size, the pixel format the file holds,
     /// and every pixel as blue, green, red and alpha.
@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn the_png_reads_back_pixel_for_pixel_and_opaque_though_the_fourth_byte_is_zero() {
-        let _com = Apartment::enter().expect("COM starts on a test thread");
+        com::ensure_started().expect("COM starts on a test thread");
         // 37 is odd, so a row of 24-bit pixels isn't a whole number of 4-byte words.
         let image = varied(37, 11);
         let bytes = encode(&image).expect("a PNG");
@@ -187,9 +187,7 @@ mod tests {
             "no alpha channel in the file"
         );
         let wanted: Vec<[u8; 4]> = image
-            .bgra()
-            .as_chunks::<4>()
-            .0
+            .pixels()
             .iter()
             .map(|&[blue, green, red, _]| [blue, green, red, 255])
             .collect();
@@ -198,16 +196,14 @@ mod tests {
 
     #[test]
     fn a_one_pixel_image_and_a_wide_one_survive_too() {
-        let _com = Apartment::enter().expect("COM starts on a test thread");
+        com::ensure_started().expect("COM starts on a test thread");
         for (width, height) in [(1, 1), (3840, 2)] {
             let image = varied(width, height);
             let decoded = decode(&encode(&image).expect("a PNG"));
             assert_eq!((decoded.width, decoded.height), (width, height));
             let rgb: Vec<[u8; 3]> = decoded.bgra.iter().map(|&[b, g, r, _]| [b, g, r]).collect();
             let wanted: Vec<[u8; 3]> = image
-                .bgra()
-                .as_chunks::<4>()
-                .0
+                .pixels()
                 .iter()
                 .map(|&[b, g, r, _]| [b, g, r])
                 .collect();
@@ -217,7 +213,7 @@ mod tests {
 
     #[test]
     fn the_png_says_its_colors_are_srgb_and_carries_no_profile_that_would_change_them() {
-        let _com = Apartment::enter().expect("COM starts on a test thread");
+        com::ensure_started().expect("COM starts on a test thread");
         let bytes = encode(&varied(4, 4)).expect("a PNG");
         // Each chunk after the signature: a 4-byte length, a 4-byte type, the data and a 4-byte CRC.
         let mut chunks = Vec::new();

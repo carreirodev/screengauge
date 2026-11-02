@@ -1,8 +1,8 @@
 //! The measurements drawn over a window's photo: Dimensions' cyan line with its ticks and outline, Bounds' drawn
 //! rectangle and the content it shrinks to, and the label in a pill, for the pinned measurements and the live one; Snip's
 //! corners and label; the toolbar, the tolerance indicator and the notice. Everything about where they go is in
-//! `geometry`, `bounds`, `snip`, `toolbar`, `tolerance` and `notice`, which need no Windows; this draws them onto any Direct2D render target at 96 DPI,
-//! so a test can render them on a bitmap and count pixels.
+//! `geometry`, `bounds`, `snip`, `toolbar`, `tolerance` and `notice`, which need no Windows; this draws them onto any
+//! Direct2D render target at 96 DPI, so a test can render them on a bitmap and count pixels.
 
 mod bounds;
 #[cfg(test)]
@@ -63,6 +63,9 @@ use palette::{Surfaces, color, solid_brush};
 /// The label's font. Its digits differ in width unless asked for tabular figures (a 1 is two pixels narrower than a 0
 /// at this size), which the label does, so the pill keeps its width while the number keeps its length.
 const FAMILY: PCWSTR = w!("Segoe UI");
+
+/// The live label's ink, on the cyan (#04161b): its text, and the camera on Snip's label.
+const LIVE_INK: palette::Color = color(0x04, 0x16, 0x1b, 1.0);
 
 /// How much of the outline's black shows over the photo.
 const OUTLINE_OPACITY: f32 = 0.28;
@@ -340,8 +343,7 @@ impl Overlay {
             shade: brush(0, 0, 0)?,
             white: brush(255, 255, 255)?,
             swatch: brush(0, 0, 0)?,
-            // #04161b
-            ink: brush(0x04, 0x16, 0x1b)?,
+            ink: solid_brush(target, LIVE_INK)?,
             surfaces: Surfaces::new(target, mode)?,
             factory,
             stroke,

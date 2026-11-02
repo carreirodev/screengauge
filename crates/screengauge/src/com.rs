@@ -1,35 +1,28 @@
-//! COM, which WIC needs to write the Snip's PNG, started once for the thread the resident window and the tools run on.
+//! COM, which WIC needs to write the Snip's PNG. It starts the first time the Snip takes an image, not at startup, as
+//! nothing is prepared before the first call (v1 spec WPC-296, Metas de velocidade e de consumo).
 
-use std::marker::PhantomData;
+use std::cell::Cell;
 
 use windows::Win32::System::Com::{
-    COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize,
+    COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx,
 };
 
-/// COM started on this thread in a single-threaded apartment, until it drops. Single-threaded because this is the
-/// thread of ScreenGauge's windows: Windows' Save As window, which the Snip opens with WPC-318, needs that apartment, and
-/// a thread can't change apartments once COM is started on it.
-pub struct Apartment {
-    /// Keeps it on the thread that started COM: a raw pointer is neither Send nor Sync.
-    _thread: PhantomData<*const ()>,
+thread_local! {
+    /// Whether COM is started on this thread.
+    static STARTED: Cell<bool> = const { Cell::new(false) };
 }
 
-impl Apartment {
-    /// Starts COM for this thread, for as long as the [`Apartment`] lives. Every COM object made on the thread must be
-    /// released before it drops.
-    pub fn enter() -> windows::core::Result<Apartment> {
-        // SAFETY: no reserved pointer. Undone once by the drop of the Apartment returned; S_FALSE, a thread that already
-        // started COM this way, is success and is undone the same way.
-        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) }.ok()?;
-        Ok(Apartment {
-            _thread: PhantomData,
-        })
+/// Starts COM on this thread in a single-threaded apartment, once; later calls do nothing. Single-threaded because this
+/// is the thread of ScreenGauge's windows: Windows' Save As window, which the Snip opens with WPC-318, needs that
+/// apartment, and a thread can't change apartments once COM is started on it. COM then stays started until the thread
+/// ends, which for the windows' thread is when ScreenGauge exits, so no COM object made on it outlives COM.
+pub fn ensure_started() -> windows::core::Result<()> {
+    if STARTED.get() {
+        return Ok(());
     }
-}
-
-impl Drop for Apartment {
-    fn drop(&mut self) {
-        // SAFETY: pairs the CoInitializeEx in `enter`, on the same thread: the Apartment is neither Send nor Sync.
-        unsafe { CoUninitialize() };
-    }
+    // SAFETY: no reserved pointer. Never undone: COM goes with the thread. S_FALSE, should COM already be started this
+    // way, is success.
+    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) }.ok()?;
+    STARTED.set(true);
+    Ok(())
 }

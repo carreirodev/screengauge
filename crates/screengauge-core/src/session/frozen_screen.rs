@@ -162,6 +162,12 @@ impl Image {
     pub fn bgra(&self) -> &[u8] {
         &self.bgra
     }
+
+    /// The pixels one by one, row by row from the top: blue, green, red and the byte that says nothing.
+    pub fn pixels(&self) -> &[[u8; 4]] {
+        // `new` took only whole pixels, so nothing is left over.
+        self.bgra.as_chunks::<4>().0
+    }
 }
 
 /// Only the size: a 4K photo's pixels are 33 MB of text.

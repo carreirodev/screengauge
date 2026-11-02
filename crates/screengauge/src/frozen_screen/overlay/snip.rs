@@ -10,10 +10,10 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, ID2D1RenderTarget,
 };
 
+use super::bounds;
 use super::geometry::{self, Size, scaled};
-use super::palette::{Color, color};
 use super::toolbar_icons::CAMERA;
-use super::{Look, Overlay, PlacedLabel, PlacedText, px, whole};
+use super::{LIVE_INK, Look, Overlay, PlacedLabel, PlacedText, px, whole};
 
 /// How thick each corner's arms are, and how far outside the image they lie, in physical pixels whatever the scale (the
 /// prototype's `fillRect(…, arm, 2)` from `r.x - 2`).
@@ -24,21 +24,16 @@ const ARM: u32 = 14;
 const SHORTEST_ARM: i32 = 3;
 /// The gap between the camera and the size on the label (`gap: 5px`), in logical pixels.
 const CAMERA_GAP: u32 = 5;
-/// The gap between the label's bottom and the corners' top, in logical pixels.
-const LABEL_GAP: u32 = 6;
-/// Where the label goes when the monitor has no room above the corners: this far right of their top left corner and
-/// this far down, inside them, over the image (`translate(4px, 6px)`).
-const INSIDE_RIGHT: u32 = 4;
+/// How far down of the corners' top left pixel the label goes when the monitor has no room above them, in logical
+/// pixels (`translate(4px, 6px)`; Bounds' label goes 5 down of its ring).
 const INSIDE_DOWN: u32 = 6;
-
-/// The label's ink, on the cyan, the live label's (#04161b), which the camera is stroked in too.
-const INK: Color = color(0x04, 0x16, 0x1b, 1.0);
 
 /// The cyan corners around `area`, for a monitor of `dpi`: at each of the four corners an arm along the row and one
 /// along the column, each `THICKNESS` pixels thick, lying just outside the image, so not one of its pixels is covered.
 /// Each rectangle's right and bottom are one past its last pixel. The arms of a corner overlap at its outer pixels,
 /// which are the same cyan.
 pub fn corners(area: Rect, dpi: u32) -> Vec<RECT> {
+    // Can't saturate: half a u32 always fits an i32. Should it, the arm is only held to its longest.
     let half = |length: u32| i32::try_from(length / 2).unwrap_or(i32::MAX);
     let arm = scaled(ARM, dpi)
         .min(half(area.width))
@@ -66,28 +61,10 @@ pub fn corners(area: Rect, dpi: u32) -> Vec<RECT> {
 }
 
 /// Where the label of `area` goes: its rectangle in the virtual screen, right and bottom one past its last pixel. Its
-/// left side is on the corners' left column and its bottom `LABEL_GAP` above their top row; where the monitor has no
-/// room above, it goes inside the corners at their top left, over the image. Where it would still stick out of
-/// `monitor`, it slides inside.
+/// left side is on the corners' left column and its bottom 6 logical pixels above their top row, as Bounds' label sits
+/// at its ring; where the monitor has no room above, it goes inside the corners at their top left, over the image.
 pub fn place_label(area: Rect, label: Size, monitor: RECT, dpi: u32) -> RECT {
-    let (corner_x, corner_y) = (area.left - THICKNESS, area.top - THICKNESS);
-    let above = corner_y - scaled(LABEL_GAP, dpi) - label.height;
-    let (left, top) = if above >= monitor.top {
-        (corner_x, above)
-    } else {
-        (
-            corner_x + scaled(INSIDE_RIGHT, dpi),
-            corner_y + scaled(INSIDE_DOWN, dpi),
-        )
-    };
-    let left = geometry::inside(left, label.width, monitor.left, monitor.right);
-    let top = geometry::inside(top, label.height, monitor.top, monitor.bottom);
-    RECT {
-        left,
-        top,
-        right: left + label.width,
-        bottom: top + label.height,
-    }
+    bounds::place_at_corner(area, THICKNESS, INSIDE_DOWN, label, monitor, dpi)
 }
 
 /// Snip's label, ready to draw: the live pill with the size on it, and where the camera goes before the size.
@@ -110,7 +87,8 @@ impl Overlay {
         let snip = self.snip_label(area)?;
         self.draw_shadow(target, &snip.label)?;
         self.draw_pill(target, &snip.label);
-        self.draw_icon(target, &CAMERA, &snip.camera, INK)
+        // In the live label's ink, as the size beside it.
+        self.draw_icon(target, &CAMERA, &snip.camera, LIVE_INK)
     }
 
     /// The cyan corners around `area`.

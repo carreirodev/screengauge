@@ -145,14 +145,29 @@ pub fn dashes(drawn: Rect, dpi: u32) -> Vec<RECT> {
 /// ring's top row; where the monitor has no room above, it goes inside the ring at its top left corner, over the
 /// content. Where it would still stick out of `monitor`, it slides inside.
 pub fn place_label(content: Rect, label: Size, monitor: RECT, dpi: u32) -> RECT {
-    let (corner_x, corner_y) = (content.left - 1, content.top - 1);
+    place_at_corner(content, 1, INSIDE_DOWN, label, monitor, dpi)
+}
+
+/// Where a label goes at the top left corner of what is drawn `out` pixels outside `area`, as Bounds' ring and Snip's
+/// corners have it: its left side on that corner's column and its bottom `LABEL_GAP` above that corner's row; where
+/// the monitor has no room above, `INSIDE_RIGHT` right and `inside_down` logical pixels down of the corner, over the
+/// area. Where it would still stick out of `monitor`, it slides inside.
+pub fn place_at_corner(
+    area: Rect,
+    out: i32,
+    inside_down: u32,
+    label: Size,
+    monitor: RECT,
+    dpi: u32,
+) -> RECT {
+    let (corner_x, corner_y) = (area.left - out, area.top - out);
     let above = corner_y - scaled(LABEL_GAP, dpi) - label.height;
     let (left, top) = if above >= monitor.top {
         (corner_x, above)
     } else {
         (
             corner_x + scaled(INSIDE_RIGHT, dpi),
-            corner_y + scaled(INSIDE_DOWN, dpi),
+            corner_y + scaled(inside_down, dpi),
         )
     };
     let left = geometry::inside(left, label.width, monitor.left, monitor.right);

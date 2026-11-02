@@ -137,7 +137,7 @@ fn wide_with_nul(text: &str) -> Vec<u16> {
 }
 
 /// The size of a BITMAPINFOHEADER, the bitmap's header.
-const HEADER: u32 = 40;
+const BITMAP_INFO_HEADER_SIZE: u32 = 40;
 
 /// `image` as a CF_DIB: a BITMAPINFOHEADER and then the pixels, 32 bits each, blue, green, red and an alpha of 255, so
 /// no program takes a pixel for see-through whatever the fourth byte said, in rows from the bottom up, as a bitmap whose
@@ -150,9 +150,10 @@ fn dib(image: &Image) -> windows::core::Result<Vec<u8>> {
         .and_then(|pixels| pixels.checked_mul(4))
         .ok_or_else(too_large)?;
     let signed = |length: u32| i32::try_from(length).map_err(|_| too_large());
-    let mut bytes =
-        Vec::with_capacity(usize::try_from(HEADER + size_image).map_err(|_| too_large())?);
-    bytes.extend(HEADER.to_le_bytes()); // biSize
+    let mut bytes = Vec::with_capacity(
+        usize::try_from(BITMAP_INFO_HEADER_SIZE + size_image).map_err(|_| too_large())?,
+    );
+    bytes.extend(BITMAP_INFO_HEADER_SIZE.to_le_bytes()); // biSize
     bytes.extend(signed(width)?.to_le_bytes()); // biWidth
     bytes.extend(signed(height)?.to_le_bytes()); // biHeight: above zero, so the bottom row comes first
     bytes.extend(1_u16.to_le_bytes()); // biPlanes
@@ -164,7 +165,7 @@ fn dib(image: &Image) -> windows::core::Result<Vec<u8>> {
     bytes.extend(0_u32.to_le_bytes()); // biClrUsed: no color table
     bytes.extend(0_u32.to_le_bytes()); // biClrImportant
     let row = usize::try_from(width).map_err(|_| too_large())?;
-    let pixels = image.bgra().as_chunks::<4>().0;
+    let pixels = image.pixels();
     // An image of no pixels has no rows, and `chunks` would refuse a row of none.
     if row > 0 {
         for line in pixels.chunks(row).rev() {

@@ -120,9 +120,7 @@ fn images(effects: &[Effect]) -> Vec<&Image> {
 /// Every pixel of `image` as red, green and blue, row by row from the top.
 fn colors(image: &Image) -> Vec<[u8; 3]> {
     image
-        .bgra()
-        .as_chunks::<4>()
-        .0
+        .pixels()
         .iter()
         .map(|&[blue, green, red, _]| [red, green, blue])
         .collect()
@@ -350,7 +348,7 @@ fn an_area_of_nothing_but_background_takes_no_image_and_says_no_content_found() 
     assert_eq!(notice(&session), Some(Message::NoContentFoundToSnip));
     assert_eq!(
         Message::NoContentFoundToSnip.text(),
-        "No content found · Hold Alt to capture the rectangle"
+        "No content found · Hold Alt to snip the rectangle"
     );
 }
 

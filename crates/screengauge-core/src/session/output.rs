@@ -215,7 +215,7 @@ impl Message {
         match self {
             Message::Copied => "Copied",
             Message::NoContentFound => "No content found · Hold Alt to measure the rectangle",
-            Message::NoContentFoundToSnip => "No content found · Hold Alt to capture the rectangle",
+            Message::NoContentFoundToSnip => "No content found · Hold Alt to snip the rectangle",
         }
     }
 

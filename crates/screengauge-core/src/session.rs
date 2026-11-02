@@ -249,8 +249,8 @@ impl Session {
             // The second click of the double-click that called ScreenGauge does nothing, on the toolbar as on the tool
             // (WPC-308): it would act on a button the user never aimed at.
             Input::Toolbar(_) if self.is_second_click(event.uptime) => Vec::new(),
-            // Esc with the button held while Bounds or Snip draws a rectangle cancels only that drag, and closes nothing for as
-            // long as the button stays down (v1 spec WPC-296, Fechar as ferramentas).
+            // Esc with the button held while Bounds or Snip draws a rectangle cancels only that drag, and closes nothing
+            // for as long as the button stays down (v1 spec WPC-296, Fechar as ferramentas).
             Input::KeyDown(Key::Esc) if self.tool_holds_the_press() => self.cancel_drag(),
             // Esc without a drag closes the tools whatever tool is active (v1 spec WPC-296, derived rule 3), and so do
             // the toolbar's close button and the global shortcut pressed again. Alt+F4 closes them as a whole, never one
@@ -368,8 +368,8 @@ impl Session {
         self.drag.is_some() || self.held_after_cancel
     }
 
-    /// What the button coming up does: it lets go of the dragged toolbar, or ends the drag Bounds or Snip was drawing, or, after
-    /// Esc cancelled that drag, does nothing.
+    /// What the button coming up does: it lets go of the dragged toolbar, or ends the drag Bounds or Snip was drawing,
+    /// or, after Esc cancelled that drag, does nothing.
     fn release(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
         self.held_after_cancel = false;
         match self.drag.take() {
@@ -404,19 +404,16 @@ impl Session {
         if drag.is_click() {
             return Vec::new();
         }
+        let nothing_found = match (self.remembered.last_tool, measured, snipped) {
+            (Tool::Snip, _, Some(area)) => return self.copy_image(&area, uptime),
+            (Tool::Snip, _, None) => Message::NoContentFoundToSnip,
+            (_, Some(measurement), _) => return self.pin_and_copy(measurement, held.shift, uptime),
+            (_, None, _) => Message::NoContentFound,
+        };
         let monitor = self.notice_monitor(drag.monitor);
-        match (self.remembered.last_tool, measured, snipped) {
-            (Tool::Snip, _, Some(area)) => self.copy_image(&area, uptime),
-            (Tool::Snip, _, None) => self
-                .show(Message::NoContentFoundToSnip, monitor, uptime)
-                .into_iter()
-                .collect(),
-            (_, Some(measurement), _) => self.pin_and_copy(measurement, held.shift, uptime),
-            (_, None, _) => self
-                .show(Message::NoContentFound, monitor, uptime)
-                .into_iter()
-                .collect(),
-        }
+        self.show(nothing_found, monitor, uptime)
+            .into_iter()
+            .collect()
     }
 
     /// Copies the image of `area`, from the frozen screen and never from the screen as it is now, and shows "Copied"
@@ -673,17 +670,17 @@ impl Session {
 
     /// Whether the tool pauses with the cursor at `at`: on the toolbar, and anywhere while the toolbar is dragged, as the
     /// cursor may leave it where it stops at a margin, the other monitor included (the owner's choice in WPC-312). While
-    /// Bounds or Snip draws a rectangle, nowhere: the rectangle may go over the toolbar, which the photo doesn't have. Nor while
-    /// the button that drew a rectangle Esc cancelled is still down: the press is still the tool's.
+    /// Bounds or Snip draws a rectangle, nowhere: the rectangle may go over the toolbar, which the photo doesn't have.
+    /// Nor while the button that drew a rectangle Esc cancelled is still down: the press is still the tool's.
     fn pauses_at(&self, at: Point) -> bool {
         !self.tool_holds_the_press()
             && (self.toolbar_grab.is_some() || self.toolbar_hit(at).is_some())
     }
 
-    /// Puts the cursor at `to`, the dragged toolbar following it, notes how far the drag Bounds or Snip is drawing has gone from
-    /// its start, and measures there. The arrow keys come here too, so they nudge a held toolbar a pixel at a time, or ten
-    /// with Shift (the owner's choice in WPC-312), and count towards the click limit as the mouse going that far would
-    /// (the owner's choice in WPC-314).
+    /// Puts the cursor at `to`, the dragged toolbar following it, notes how far the drag Bounds or Snip is drawing has
+    /// gone from its start, and measures there. The arrow keys come here too, so they nudge a held toolbar a pixel at a
+    /// time, or ten with Shift (the owner's choice in WPC-312), and count towards the click limit as the mouse going that
+    /// far would (the owner's choice in WPC-314).
     fn move_cursor(&mut self, to: Point) {
         self.cursor = to;
         self.drag_toolbar();

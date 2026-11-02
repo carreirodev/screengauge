@@ -5,7 +5,7 @@
 use screengauge_core::session::{Label, Rect, SnipArea};
 
 use super::bounds_tests::{check_every_pixel, check_live_pill, pixel, rect};
-use super::tests::{BACKGROUND, CYAN, Canvas, MONITOR, Picture, SCALES, near, text_width};
+use super::tests::{BACKGROUND, CYAN, Canvas, INK, MONITOR, Picture, SCALES, near, text_width};
 use super::*;
 
 /// What the prototype does with `n` logical pixels on a monitor of `dpi`: `Math.round(n * dpr)`, which for these
@@ -14,9 +14,9 @@ fn device(n: u32, dpi: u32) -> i32 {
     i32::try_from((2 * n * dpi + 96) / 192).expect("a few dozen pixels")
 }
 
-/// Whether (`x`, `y`) is on one of the corners the prototype fills around `r`: at each corner a bar `arm` long and 2
-/// thick along the row and one along the column, from 2 pixels outside the image, where `arm` is 14 logical pixels, or
-/// less for a small image, but never under 3.
+/// Whether (`x`, `y`) is on one of the corners the prototype fills around `r`, in the prototype's own names: at each
+/// corner a bar `arm` long and 2 thick along the row and one along the column, from 2 pixels outside the image, where
+/// `arm` is 14 logical pixels, or less for a small image, but never under 3.
 fn on_corner(r: Rect, dpi: u32, x: i32, y: i32) -> bool {
     let (w, h) = (
         i32::try_from(r.width).expect("small"),
@@ -41,6 +41,17 @@ fn on_corner(r: Rect, dpi: u32, x: i32, y: i32) -> bool {
     })
 }
 
+/// What a pixel of the window is with only the corners of `area` drawn: cyan on a corner, the background elsewhere.
+fn with_corners(area: Rect, dpi: u32) -> impl Fn(i32, i32) -> [u8; 3] {
+    move |x, y| {
+        if on_corner(area, dpi, x, y) {
+            CYAN
+        } else {
+            BACKGROUND
+        }
+    }
+}
+
 #[test]
 fn the_corners_are_cyan_two_pixels_thick_just_outside_the_image_and_cover_none_of_it() {
     let canvas = Canvas::new(480, 320);
@@ -49,13 +60,12 @@ fn the_corners_are_cyan_two_pixels_thick_just_outside_the_image_and_cover_none_o
         let picture = canvas.render(MONITOR, dpi, |overlay, target| {
             overlay.draw_corners(target, area);
         });
-        check_every_pixel(&picture, &canvas, &format!("{dpi} DPI"), |x, y| {
-            if on_corner(area, dpi, x, y) {
-                CYAN
-            } else {
-                BACKGROUND
-            }
-        });
+        check_every_pixel(
+            &picture,
+            &canvas,
+            &format!("{dpi} DPI"),
+            with_corners(area, dpi),
+        );
     }
 }
 
@@ -72,13 +82,7 @@ fn a_small_image_has_shorter_arms_and_never_under_three_pixels() {
                 &picture,
                 &canvas,
                 &format!("{area:?} at {dpi} DPI"),
-                |x, y| {
-                    if on_corner(area, dpi, x, y) {
-                        CYAN
-                    } else {
-                        BACKGROUND
-                    }
-                },
+                with_corners(area, dpi),
             );
         }
     }
@@ -167,9 +171,8 @@ fn with_no_room_above_the_label_goes_inside_the_corners() {
 /// How many pixels of `picture` in the columns `columns` and the rows `rows` are the label's dark ink, give or take
 /// the edges the strokes and the letters blend with the cyan.
 fn inked(picture: &Picture, columns: std::ops::Range<i32>, rows: std::ops::Range<i32>) -> usize {
-    let ink = [0x04, 0x16, 0x1b];
     rows.flat_map(|y| columns.clone().map(move |x| (x, y)))
-        .filter(|&(x, y)| near(pixel(picture, x, y), ink, 60))
+        .filter(|&(x, y)| near(pixel(picture, x, y), INK, 60))
         .count()
 }
 
