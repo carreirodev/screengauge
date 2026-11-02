@@ -518,6 +518,39 @@ mod changes {
     }
 
     #[test]
+    fn a_recorded_shortcut_is_kept_and_written_and_read_back_as_it_was() {
+        use screengauge_core::settings::{self, Key, Modifiers, Shortcut, Stored};
+
+        let win_alt = Modifiers {
+            win: true,
+            alt: true,
+            ..Modifiers::default()
+        };
+        let recorded = Shortcut::new(win_alt, Key::Letter('J')).expect("allowed");
+        let mut stored = Stored::default();
+        assert!(stored.options.apply(Change::GlobalShortcut(recorded)));
+        assert!(!stored.options.apply(Change::GlobalShortcut(recorded)));
+        let text = settings::write(&stored);
+        assert!(
+            text.contains("\nglobal_shortcut = Win + Alt + J\n"),
+            "{text}"
+        );
+        let read = settings::read(text.as_bytes()).expect("the file isn't damaged");
+        assert_eq!(read.stored.options.global_shortcut, recorded);
+        assert!(read.resets.is_empty(), "{:?}", read.resets);
+        // Reset is the default again.
+        assert!(
+            stored
+                .options
+                .apply(Change::GlobalShortcut(Shortcut::default()))
+        );
+        assert_eq!(
+            stored.options.global_shortcut.to_string(),
+            "Win + Shift + X"
+        );
+    }
+
+    #[test]
     fn a_color_format_is_chosen_and_choosing_it_again_changes_nothing() {
         let mut options = Options::default();
         assert_eq!(options.color_format, ColorFormat::Both);

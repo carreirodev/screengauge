@@ -4,11 +4,13 @@
 //! The Windows layer reads the file and hands its bytes to [`read`], and saves the text [`write`] returns. Not kept
 //! anywhere: the tolerance adjusted with the mouse wheel, the pinned measurements and the frozen screen.
 
+mod recorder;
 mod shortcut;
 mod text;
 
 use std::path::Path;
 
+pub use recorder::{Pressed, Recorder, Refusal, Step, Tried};
 pub use shortcut::{Key, Modifiers, Shortcut, ShortcutError};
 pub use text::{Damaged, Loaded, Problem, Reset, read, write};
 
@@ -51,6 +53,8 @@ impl Default for Options {
 /// WPC-296, Settings): the next call opens with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Change {
+    /// "Global shortcut": a combination the recorder took, or Reset's `Win + Shift + X`, once Windows has registered it.
+    GlobalShortcut(Shortcut),
     /// "Theme": Automatic, Light or Dark.
     Theme(Theme),
     /// "Default tolerance"'s − and +: the same step as a notch of the mouse wheel, stopping at the limits.
@@ -72,6 +76,7 @@ impl Options {
     pub fn apply(&mut self, change: Change) -> bool {
         let before = self.clone();
         match change {
+            Change::GlobalShortcut(shortcut) => self.global_shortcut = shortcut,
             Change::Theme(theme) => self.theme = theme,
             Change::DefaultToleranceDown => self.default_tolerance = self.default_tolerance.down(),
             Change::DefaultToleranceUp => self.default_tolerance = self.default_tolerance.up(),
