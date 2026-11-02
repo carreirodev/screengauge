@@ -20,7 +20,7 @@ use windows::Win32::System::Registry::{
 use windows::core::{Error, GUID, HSTRING, Ref};
 
 use super::{Dismissal, Event, Notification, Toast, What, report};
-use crate::settings_file;
+use crate::{settings_file, tray};
 
 /// The name Windows knows ScreenGauge's notifications by: the header shows the `DisplayName` registered for it.
 pub const AUMID: &str = "WPCSolutions.ScreenGauge";
@@ -32,10 +32,40 @@ pub const CLSID: GUID = GUID::from_u128(0x3beb9695_da23_4599_b10c_7cd6cd96e50c);
 /// Every notification's group, which taking one out of the notification center names along with its tag.
 const GROUP: &str = "ScreenGauge";
 
-/// The app icon the header shows, at 48 pixels: Windows draws it at 16, 24 and 32 pixels at 100%, 150% and 200% scale.
-/// Unplated, so it has no background of its own.
-const ICON: &[u8] =
-    include_bytes!("../../../../assets/package/AppList.targetsize-48_altform-unplated.png");
+/// The app icon the header shows, unplated (no background of its own), at each size it is drawn for. Windows draws it
+/// at the small icon size, as the tray icon: given that size, it shows the drawing pixel for pixel (174 of 174 pixels
+/// at 150% scale, measured in WPC-347), and scales any other (20 of 223 for the 48-pixel drawing). 28 pixels, at 175%,
+/// has no drawing of its own and takes the 32-pixel one.
+const ICONS: [(i32, &[u8]); 7] = [
+    (
+        16,
+        include_bytes!("../../../../assets/package/AppList.targetsize-16_altform-unplated.png"),
+    ),
+    (
+        20,
+        include_bytes!("../../../../assets/package/AppList.targetsize-20_altform-unplated.png"),
+    ),
+    (
+        24,
+        include_bytes!("../../../../assets/package/AppList.targetsize-24_altform-unplated.png"),
+    ),
+    (
+        32,
+        include_bytes!("../../../../assets/package/AppList.targetsize-32_altform-unplated.png"),
+    ),
+    (
+        36,
+        include_bytes!("../../../../assets/package/AppList.targetsize-36_altform-unplated.png"),
+    ),
+    (
+        40,
+        include_bytes!("../../../../assets/package/AppList.targetsize-40_altform-unplated.png"),
+    ),
+    (
+        48,
+        include_bytes!("../../../../assets/package/AppList.targetsize-48_altform-unplated.png"),
+    ),
+];
 
 thread_local! {
     /// The latest notification of each kind shown, kept until the next of its kind replaces it, so its events still
@@ -103,15 +133,22 @@ fn delete_value(key: &str, name: &str) -> windows::core::Result<()> {
     }
 }
 
-/// Writes the icon into ScreenGauge's folder, where `IconUri` points. The file name carries the icon's contents,
+/// Writes the icon at the size the taskbar draws its icons now into ScreenGauge's folder, where `IconUri` points; a
+/// change of scale while ScreenGauge runs takes effect at its next start. The file name carries the icon's contents,
 /// because Windows keeps what it read from a path: another icon goes to another file (the uninstaller, WPC-337,
 /// removes every `notification-icon-*.png`).
-fn write_icon() -> io::Result<PathBuf> {
-    let folder = settings_file::installer_copy_folder().map_err(io::Error::other)?;
-    let path = folder.join(format!("notification-icon-{:08x}.png", fnv1a(ICON)));
+fn write_icon() -> windows::core::Result<PathBuf> {
+    let size = tray::icon_size()?;
+    let icon = ICONS
+        .iter()
+        .find(|(drawn, _)| *drawn >= size)
+        .map_or(ICONS[ICONS.len() - 1].1, |(_, bytes)| bytes);
+    let folder = settings_file::installer_copy_folder()?;
+    let path = folder.join(format!("notification-icon-{:08x}.png", fnv1a(icon)));
     if !path.exists() {
-        fs::create_dir_all(&folder)?;
-        write_whole(&path, ICON)?;
+        fs::create_dir_all(&folder)
+            .and_then(|()| write_whole(&path, icon))
+            .map_err(|e| Error::new(E_FAIL, e.to_string()))?;
     }
     Ok(path)
 }

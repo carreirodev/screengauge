@@ -368,7 +368,17 @@ impl State {
                     // Clicked before anything else was told: it was in the corner.
                     decide(shown, Seen::InCorner);
                 }
-                Notification::of_launch(&event.launch)
+                let clicked = Notification::of_launch(&event.launch);
+                match clicked {
+                    Some(notification) => {
+                        log::note(&format!("notification: {notification:?} clicked"))
+                    }
+                    None => log::failure(
+                        "notification: a click",
+                        &format!("no notification is {:?}", event.launch),
+                    ),
+                }
+                clicked
             }
             What::Dismissed { reason, after } => {
                 let seen = match reason {

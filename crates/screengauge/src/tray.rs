@@ -247,8 +247,8 @@ pub fn remove(hwnd: HWND) -> windows::core::Result<()> {
     removed
 }
 
-/// The pixel size the taskbar draws its icons at now.
-fn icon_size() -> windows::core::Result<i32> {
+/// The pixel size the taskbar draws its icons at now, which Windows notifications draw the app icon at too.
+pub fn icon_size() -> windows::core::Result<i32> {
     // The system's DPI when there is no taskbar to ask.
     let dpi = taskbar_dpi().unwrap_or_else(|| {
         // SAFETY: no arguments.
