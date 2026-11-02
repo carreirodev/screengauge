@@ -9,7 +9,10 @@
 //!
 //! The colors are the prototype's `--warn` (WPC-279), the same the tools' notices use (`frozen_screen::overlay::palette`).
 
+use std::fmt;
+
 use screengauge_core::session::toolbar::scaled;
+use screengauge_core::settings::Shortcut;
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
 use windows::Win32::Graphics::Direct2D::{
@@ -53,11 +56,31 @@ const ROW_PADDING: f32 = 5.0;
 const TEXT: f32 = layout::NOTE_TEXT;
 const LINE: f32 = layout::NOTE_LINE;
 
+/// What a message says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Text {
+    Fixed(&'static str),
+    /// Windows refused this global shortcut at startup, and still has no other (WPC-324).
+    ShortcutBusy(Shortcut),
+}
+
+impl fmt::Display for Text {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Text::Fixed(text) => f.write_str(text),
+            Text::ShortcutBusy(shortcut) => write!(
+                f,
+                "{shortcut} is already used by another program. Choose another one."
+            ),
+        }
+    }
+}
+
 /// A message showing under a row's label.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Message {
     pub row: Row,
-    pub text: &'static str,
+    pub text: Text,
     /// Whether the whole row shows the amber band too.
     pub band: bool,
     /// The room for its lines, in logical pixels: from the label's left to the row's control, less the gap before it.
@@ -70,7 +93,7 @@ impl Message {
     /// layout's top.
     fn layout(&self, fonts: &Fonts, scale: f32) -> windows::core::Result<Laid> {
         let format = fonts.text_format(DWRITE_FONT_WEIGHT_SEMI_BOLD, TEXT * scale)?;
-        let text: Vec<u16> = self.text.encode_utf16().collect();
+        let text: Vec<u16> = self.text.to_string().encode_utf16().collect();
         // Half a pixel more than the room, drawn at any scale but 100%: a line that fits at 100% fits at every scale,
         // though DirectWrite's widths grow with the scale only to a float's precision. The lines counted for the row's
         // height are then never fewer than the lines drawn.

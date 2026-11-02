@@ -36,7 +36,7 @@ thread_local! {
 }
 
 /// Registers `shortcut` for `hwnd`, the resident window, at startup. It fails when another program already holds the
-/// combination; telling the user comes with WPC-324.
+/// combination, or Windows itself took it: the global shortcut is then busy ([`is_busy`]) until a change registers one.
 pub fn register(hwnd: HWND, shortcut: Shortcut) -> windows::core::Result<()> {
     RESIDENT.set(Some(hwnd));
     change(shortcut)
@@ -74,6 +74,13 @@ pub fn unregister() -> windows::core::Result<()> {
         return Ok(());
     };
     release_id(hwnd, registered.id)
+}
+
+/// Whether ScreenGauge runs without its global shortcut, since Windows refused the settings file's at startup (WPC-324):
+/// another program holds it, or Windows took it. A change that registers one ends it, as Settings' recorder makes.
+/// Also true once [`unregister`] let it go as ScreenGauge exits.
+pub fn is_busy() -> bool {
+    RESIDENT.get().is_some() && REGISTERED.get().is_none()
 }
 
 /// Whether a WM_HOTKEY's wParam names the global shortcut as it is now.

@@ -6,6 +6,8 @@
 //! (`is_recording`).
 //!
 //! A refusal shows as a message under the row's label (`row_message`), and the window grows to hold it while it shows.
+//! So does the global shortcut Windows refused at startup, on the amber band, from the moment Settings opens and until a
+//! combination is taken (WPC-324).
 //!
 //! Only the resident thread touches it, from Settings' window procedure.
 
@@ -22,7 +24,7 @@ use super::paint;
 use super::recorder_field::{self, View};
 use super::row_message::Message;
 use crate::keyboard_hook::{self, KeyEvent, KeyboardHook};
-use crate::{global_shortcut, graphics, log, settings_file};
+use crate::{global_shortcut, graphics, log, notification, settings_file};
 
 /// The timer that draws the field again while it records, so its text blinks, and how often, in milliseconds: 25 times
 /// a second, smooth for a fade of half a second.
@@ -247,8 +249,13 @@ fn blink(hwnd: HWND, on: bool) {
 /// Makes `shortcut` the global shortcut and saves it, or says another program holds it. Any other failure to register
 /// is logged, and the user sees the same message: the shortcut there was still works.
 fn register(shortcut: Shortcut) -> Tried {
+    let was_busy = global_shortcut::is_busy();
     match global_shortcut::change(shortcut) {
         Ok(()) => {
+            // The busy shortcut's notification would now be about nothing.
+            if was_busy {
+                notification::shortcut_free();
+            }
             let saved = settings_file::update(|stored| {
                 stored.options.apply(Change::GlobalShortcut(shortcut))
             });
@@ -267,9 +274,24 @@ fn register(shortcut: Shortcut) -> Tried {
     }
 }
 
+/// Settings is opening: the message it shows from the start, the busy shortcut's (WPC-324), is measured before the
+/// window is sized.
+pub fn opening() {
+    measure();
+}
+
 /// Draws the field again, with the message there is now, and resizes the window should the message's row change height.
 fn refresh(hwnd: HWND) {
     HOLD_PAGE.set(false);
+    if measure() {
+        super::follow_page(hwnd);
+    } else {
+        super::invalidate(hwnd);
+    }
+}
+
+/// Keeps the message there is now, and how much it grows its row; returns whether the row's height changed.
+fn measure() -> bool {
     let (message, grown) = match measured() {
         Ok(measured) => measured,
         Err(e) => {
@@ -278,34 +300,36 @@ fn refresh(hwnd: HWND) {
         }
     };
     MESSAGE.set(message);
-    if GROWN.replace(grown) == grown {
-        super::invalidate(hwnd);
-    } else {
-        super::follow_page(hwnd);
-    }
+    GROWN.replace(grown) != grown
 }
 
-/// The message the recorder's refusal shows, should there be one, and how much it grows the row. The message showing
-/// already stays as it was measured: its room doesn't change with the keys held (`message_room`).
+/// The message under the row's label, should there be one (`recorder_field::said_under_label`), and how much it grows
+/// the row. The message showing already stays as it was measured: its room doesn't change with the keys held
+/// (`message_room`).
 fn measured() -> windows::core::Result<(Option<Message>, Option<Grown>)> {
-    let Some(refusal) = RECORDER.get().refusal() else {
-        return Ok((None, None));
-    };
-    if let Some(message) = MESSAGE.get()
-        && message.text == recorder_field::message(refusal)
-    {
-        return Ok((Some(message), GROWN.get()));
-    }
     let shortcut = settings_file::current()
         .map_err(|e| Error::new(E_FAIL, e.to_string()))?
         .options
         .global_shortcut;
+    let recorder = RECORDER.get();
+    let busy = global_shortcut::is_busy().then_some(shortcut);
+    let Some((text, band)) =
+        recorder_field::said_under_label(recorder.refusal(), recorder.is_recording(), busy)
+    else {
+        return Ok((None, None));
+    };
+    if let Some(message) = MESSAGE.get()
+        && message.text == text
+        && message.band == band
+    {
+        return Ok((Some(message), GROWN.get()));
+    }
     let fonts = graphics::fonts()?;
     let measure = paint::measurer(&fonts, 1.0);
     let message = Message {
         row: Row::GlobalShortcut,
-        text: recorder_field::message(refusal),
-        band: false,
+        text,
+        band,
         width: recorder_field::message_room(shortcut, &measure)?,
     };
     let grown = message.growth(&fonts)?;

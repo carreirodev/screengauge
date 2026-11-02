@@ -12,6 +12,7 @@ use screengauge_core::settings::{Modifiers, Refusal, Shortcut};
 use windows::Win32::Foundation::RECT;
 
 use super::controls::{self, Control, Label, LabelKind, at_right, rounded, whole_up};
+use super::row_message::Text;
 use super::{layout, snip_card};
 
 use crate::graphics::{Color, color};
@@ -35,6 +36,21 @@ pub fn message(refusal: Refusal) -> &'static str {
         }
         Refusal::AlreadyUsed => "Already used by another program",
         Refusal::Common => "Used by Windows and most programs.",
+    }
+}
+
+/// What the row says under its label, and whether the amber band shows across it, with `refusal` the recorder's,
+/// should it have one, and `busy` the global shortcut Windows refused at startup, while it has no other (WPC-324). As in
+/// the prototype (`settings.js`, `shortcutBusy && !rec`), the field resting says the shortcut is busy, on the band, even
+/// after a combination tried was refused; while it records, the band goes, and only the recorder's refusals show.
+pub fn said_under_label(
+    refusal: Option<Refusal>,
+    recording: bool,
+    busy: Option<Shortcut>,
+) -> Option<(Text, bool)> {
+    match busy {
+        Some(shortcut) if !recording => Some((Text::ShortcutBusy(shortcut), true)),
+        _ => refusal.map(|refusal| (Text::Fixed(message(refusal)), false)),
     }
 }
 
@@ -387,6 +403,51 @@ mod tests {
 
     fn texts(view: &View) -> Vec<String> {
         words(view).into_iter().map(|(_, word)| word).collect()
+    }
+
+    #[test]
+    fn the_busy_shortcut_s_message_names_it() {
+        assert_eq!(
+            Text::ShortcutBusy(Shortcut::default()).to_string(),
+            "Win + Shift + X is already used by another program. Choose another one."
+        );
+        assert_eq!(
+            Text::Fixed("Already used by another program").to_string(),
+            "Already used by another program"
+        );
+    }
+
+    #[test]
+    fn resting_while_the_shortcut_is_busy_the_row_says_so_on_the_band() {
+        let busy = Some(Shortcut::default());
+        let said = Some((Text::ShortcutBusy(Shortcut::default()), true));
+        assert_eq!(said_under_label(None, false, busy), said);
+        // A combination tried and refused stops recording: the field shows the busy one again, and says so again, as
+        // the prototype does.
+        assert_eq!(
+            said_under_label(Some(Refusal::AlreadyUsed), false, busy),
+            said
+        );
+    }
+
+    #[test]
+    fn recording_while_the_shortcut_is_busy_the_band_goes_and_the_recorder_speaks() {
+        let busy = Some(Shortcut::default());
+        assert_eq!(said_under_label(None, true, busy), None);
+        assert_eq!(
+            said_under_label(Some(Refusal::Incomplete), true, busy),
+            Some((Text::Fixed(message(Refusal::Incomplete)), false))
+        );
+    }
+
+    #[test]
+    fn with_the_shortcut_working_only_the_recorder_s_refusals_show_with_no_band() {
+        assert_eq!(said_under_label(None, false, None), None);
+        assert_eq!(said_under_label(None, true, None), None);
+        assert_eq!(
+            said_under_label(Some(Refusal::AlreadyUsed), false, None),
+            Some((Text::Fixed(message(Refusal::AlreadyUsed)), false))
+        );
     }
 
     #[test]

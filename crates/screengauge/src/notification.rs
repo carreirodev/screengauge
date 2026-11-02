@@ -12,11 +12,12 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
+use screengauge_core::settings::Shortcut;
 use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 use windows::core::Error;
 
-use crate::{com, log};
+use crate::{com, log, settings_file};
 
 /// Posted to the resident window to show the notifications waiting, once the messages posted before it are handled.
 /// WM_APP + 3 is taken by the frozen screen's "another program in front" (WPC-302).
@@ -37,18 +38,32 @@ pub enum Notification {
     CaptureFailed,
     /// The settings file was damaged, and ScreenGauge went back to the defaults (v1 spec WPC-296, Settings file).
     SettingsReset,
+    /// Windows refused the global shortcut at startup: another program holds it, or Windows took it (WPC-324). Its
+    /// click opens Settings, to choose another one.
+    ShortcutBusy,
 }
 
-const EVERY_NOTIFICATION: [Notification; 2] =
-    [Notification::CaptureFailed, Notification::SettingsReset];
+const EVERY_NOTIFICATION: [Notification; 3] = [
+    Notification::CaptureFailed,
+    Notification::SettingsReset,
+    Notification::ShortcutBusy,
+];
 
 impl Notification {
-    fn text(self) -> &'static str {
+    /// Its text as it shows now, which names the global shortcut the settings file holds.
+    fn text(self) -> windows::core::Result<String> {
+        let stored = settings_file::current().map_err(|e| Error::new(E_FAIL, e.to_string()))?;
+        Ok(self.text_with(stored.options.global_shortcut))
+    }
+
+    /// Its text with `shortcut` the global shortcut, which only the busy shortcut's names.
+    fn text_with(self, shortcut: Shortcut) -> String {
         match self {
-            Notification::CaptureFailed => "Couldn't capture the screen. Try again.",
+            Notification::CaptureFailed => "Couldn't capture the screen. Try again.".to_owned(),
             Notification::SettingsReset => {
-                "Your settings were damaged and have been reset. A copy was kept."
+                "Your settings were damaged and have been reset. A copy was kept.".to_owned()
             }
+            Notification::ShortcutBusy => shortcut_busy_text(shortcut),
         }
     }
 
@@ -57,6 +72,7 @@ impl Notification {
         match self {
             Notification::CaptureFailed => "capture-failed",
             Notification::SettingsReset => "settings-reset",
+            Notification::ShortcutBusy => "shortcut-busy",
         }
     }
 
@@ -72,13 +88,21 @@ impl Notification {
         matches!(self, Notification::CaptureFailed)
     }
 
-    /// What its click does. The spec gives these two no action: Windows closes the notification and ScreenGauge stays
-    /// running, as when the click started it.
-    fn clicked(self) {
+    /// Whether its click opens Settings. The spec gives the others no action: Windows closes the notification and
+    /// ScreenGauge stays running, as when the click started it.
+    pub fn opens_settings(self) -> bool {
         match self {
-            Notification::CaptureFailed | Notification::SettingsReset => {}
+            Notification::ShortcutBusy => true,
+            Notification::CaptureFailed | Notification::SettingsReset => false,
         }
     }
+}
+
+/// The busy shortcut's text for `shortcut` (v1 spec WPC-296; WPC-324).
+fn shortcut_busy_text(shortcut: Shortcut) -> String {
+    format!(
+        "{shortcut} is already used by another program. Click to choose another one in Settings."
+    )
 }
 
 /// Whether a notification appeared in the corner of the screen, or went only to the notification center.
@@ -229,15 +253,20 @@ pub fn seen(notification: Notification) -> Option<Seen> {
     STATE.with_borrow(|state| state.seen(notification))
 }
 
-/// Handles what Windows told about notifications since the last time ([`EVENTS_READY`]).
-pub fn on_events_ready() {
+/// Handles what Windows told about notifications since the last time ([`EVENTS_READY`]), and returns the ones
+/// clicked, in the order they were, for the resident window to do what their click asks.
+pub fn on_events_ready() -> Vec<Notification> {
     let events = std::mem::take(&mut *EVENTS.lock().unwrap_or_else(PoisonError::into_inner));
-    for event in events {
-        // The click runs once the state is no longer borrowed, since an action may show another notification.
-        if let Some(clicked) = STATE.with_borrow_mut(|state| state.on_event(event)) {
-            clicked.clicked();
-        }
-    }
+    events
+        .into_iter()
+        .filter_map(|event| STATE.with_borrow_mut(|state| state.on_event(event)))
+        .collect()
+}
+
+/// The global shortcut works now: the busy shortcut's notification no longer waits, and leaves the notification center,
+/// should this process or an earlier ScreenGauge have left it there.
+pub fn shortcut_free() {
+    STATE.with_borrow_mut(|state| state.shortcut_free(&mut Windows));
 }
 
 /// Hands `event`, told on any thread, to the resident window.
@@ -355,6 +384,14 @@ impl State {
         }
     }
 
+    fn shortcut_free(&mut self, toasts: &mut impl Toasts) {
+        self.waiting
+            .retain(|waiting| *waiting != Notification::ShortcutBusy);
+        if let Err(e) = toasts.remove(Notification::ShortcutBusy) {
+            log::failure("notification: taking the busy shortcut out", &e);
+        }
+    }
+
     fn seen(&self, notification: Notification) -> Option<Seen> {
         self.shown
             .iter()
@@ -433,6 +470,7 @@ fn decide(shown: &mut Shown, seen: Seen) {
 
 #[cfg(test)]
 mod tests {
+    use screengauge_core::settings::{Key, Modifiers};
     use windows::Win32::Foundation::E_FAIL;
     use windows::core::Error;
 
@@ -489,13 +527,17 @@ mod tests {
 
     #[test]
     fn the_texts_are_the_specs() {
-        let texts: Vec<_> = EVERY_NOTIFICATION.iter().map(|n| n.text()).collect();
         assert_eq!(
-            texts,
-            [
-                "Couldn't capture the screen. Try again.",
-                "Your settings were damaged and have been reset. A copy was kept.",
-            ]
+            Notification::CaptureFailed.text_with(Shortcut::default()),
+            "Couldn't capture the screen. Try again."
+        );
+        assert_eq!(
+            Notification::SettingsReset.text_with(Shortcut::default()),
+            "Your settings were damaged and have been reset. A copy was kept."
+        );
+        assert_eq!(
+            Notification::ShortcutBusy.text_with(Shortcut::default()),
+            shortcut_busy_text(Shortcut::default())
         );
     }
 
@@ -766,6 +808,67 @@ mod tests {
             what: dismissed(Dismissal::UserCanceled, 2000),
         });
         assert_eq!(clicked, None);
+    }
+
+    #[test]
+    fn the_busy_shortcut_names_the_shortcut_of_the_moment() {
+        assert_eq!(
+            shortcut_busy_text(Shortcut::default()),
+            "Win + Shift + X is already used by another program. Click to choose another one in Settings."
+        );
+        let ctrl_alt_win_f9 = Shortcut::new(
+            Modifiers {
+                win: true,
+                ctrl: true,
+                alt: true,
+                shift: false,
+            },
+            Key::Function(9),
+        )
+        .expect("allowed");
+        assert_eq!(
+            shortcut_busy_text(ctrl_alt_win_f9),
+            "Win + Ctrl + Alt + F9 is already used by another program. Click to choose another one in Settings."
+        );
+    }
+
+    #[test]
+    fn the_busy_shortcut_waits_for_the_next_chance_when_windows_refuses_it() {
+        // At sign-in, before the taskbar exists: it still has to reach the user.
+        let mut state = state();
+        state.show(Notification::ShortcutBusy, &mut Recorded::refusing());
+        assert_eq!(state.waiting, [Notification::ShortcutBusy]);
+    }
+
+    #[test]
+    fn a_free_shortcut_takes_the_busy_one_out_of_the_center_and_of_the_waiting() {
+        let mut state = state();
+        let mut windows = Recorded::default();
+        state.tools_opened();
+        state.show(Notification::ShortcutBusy, &mut windows);
+        state.show(Notification::SettingsReset, &mut windows);
+        state.shortcut_free(&mut windows);
+        assert_eq!(windows.removed, [Notification::ShortcutBusy]);
+        state.tools_closed(&mut windows);
+        assert_eq!(windows.notifications(), [Notification::SettingsReset]);
+    }
+
+    #[test]
+    fn only_a_click_on_the_busy_shortcut_opens_settings() {
+        assert!(Notification::ShortcutBusy.opens_settings());
+        assert!(!Notification::CaptureFailed.opens_settings());
+        assert!(!Notification::SettingsReset.opens_settings());
+    }
+
+    #[test]
+    fn a_click_on_a_busy_shortcut_an_earlier_screengauge_showed_comes_back_too() {
+        // ScreenGauge was closed, and Windows started it for the click: it opens Settings all the same.
+        let mut state = state();
+        let clicked = state.on_event(Event {
+            launch: "shortcut-busy:999.1".to_string(),
+            what: What::Clicked,
+        });
+        assert_eq!(clicked, Some(Notification::ShortcutBusy));
     }
 
     #[test]

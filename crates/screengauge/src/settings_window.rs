@@ -158,6 +158,7 @@ pub fn open(mode: Mode) -> windows::core::Result<()> {
         return Ok(());
     }
     let (work, dpi) = monitor_at(event::cursor_now()?)?;
+    recorder::opening();
     let size = window_size(dpi)?;
     let corner = centered(work, size);
     // SAFETY: no module name, so this is the handle of ScreenGauge.exe itself.
@@ -1008,7 +1009,9 @@ mod tests {
         let fonts = graphics::Fonts::new().expect("the fonts");
         let message = row_message::Message {
             row: layout::Row::GlobalShortcut,
-            text: recorder_field::message(screengauge_core::settings::Refusal::CtrlAltWithoutWin),
+            text: row_message::Text::Fixed(recorder_field::message(
+                screengauge_core::settings::Refusal::CtrlAltWithoutWin,
+            )),
             band: false,
             width: recorder_field::message_room(widest, &paint::measurer(&fonts, 1.0))
                 .expect("the room"),

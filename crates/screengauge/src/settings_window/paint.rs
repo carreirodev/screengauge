@@ -800,6 +800,7 @@ mod tests {
     use screengauge_core::settings::{ColorFormat, Theme};
 
     use super::*;
+    use crate::settings_window::row_message::Text;
 
     mod snip;
 
@@ -1337,12 +1338,7 @@ mod tests {
 
     /// What Settings shows with `text` under the global shortcut's label, the field recording or not, and the band
     /// should `band` say so: the message's room and the row's growth worked out as the window works them out.
-    fn showing_message(
-        options: &Options,
-        text: &'static str,
-        band: bool,
-        recording: bool,
-    ) -> Shown {
+    fn showing_message(options: &Options, text: Text, band: bool, recording: bool) -> Shown {
         let fonts = Fonts::new().expect("the fonts");
         let mut shown = resting(options);
         shown.recorder.recording = recording;
@@ -1470,7 +1466,7 @@ mod tests {
     #[test]
     fn a_message_shows_in_amber_under_the_label_inside_its_grown_row_at_every_scale() {
         let options = Options::default();
-        let shown = showing_message(&options, CTRL_ALT, false, false);
+        let shown = showing_message(&options, Text::Fixed(CTRL_ALT), false, false);
         let grown = shown.grown.expect("grown");
         assert!(grown.by > 20, "three lines or so: {grown:?}");
         for mode in [Mode::Dark, Mode::Light] {
@@ -1519,7 +1515,7 @@ mod tests {
     #[test]
     fn the_snip_s_card_and_the_footer_move_down_with_a_message_in_general() {
         let options = Options::default();
-        let shown = showing_message(&options, CTRL_ALT, false, false);
+        let shown = showing_message(&options, Text::Fixed(CTRL_ALT), false, false);
         let by = shown.grown.expect("grown").by;
         for dpi in [96, 144] {
             let still = drawn(Mode::Dark, dpi);
@@ -1561,7 +1557,12 @@ mod tests {
     #[test]
     fn a_short_message_takes_one_line_and_grows_the_row_by_a_few_pixels() {
         let options = Options::default();
-        let shown = showing_message(&options, "Already used by another program", false, false);
+        let shown = showing_message(
+            &options,
+            Text::Fixed("Already used by another program"),
+            false,
+            false,
+        );
         let fonts = Fonts::new().expect("the fonts");
         let message = shown.message.expect("a message");
         assert_eq!(message.lines(&fonts).expect("lines"), 1);
@@ -1588,14 +1589,19 @@ mod tests {
                 dpi,
                 &options,
                 Pointer::default(),
-                &showing_message(&options, "Already used by another program", false, false),
+                &showing_message(
+                    &options,
+                    Text::Fixed("Already used by another program"),
+                    false,
+                    false,
+                ),
             );
             let banded = drawn_showing(
                 mode,
                 dpi,
                 &options,
                 Pointer::default(),
-                &showing_message(&options, "Already used by another program", true, false),
+                &showing_message(&options, busy(&options), true, false),
             );
             let row = layout::place_row(Row::GlobalShortcut, banded_grown(&options));
             let middle = whole_px((row.span.top + row.span.bottom) / 2, dpi);
@@ -1624,8 +1630,13 @@ mod tests {
         }
     }
 
+    /// The busy shortcut's message, for the global shortcut `options` hold (WPC-324).
+    fn busy(options: &Options) -> Text {
+        Text::ShortcutBusy(options.global_shortcut)
+    }
+
     fn banded_grown(options: &Options) -> Option<layout::Grown> {
-        showing_message(options, "Already used by another program", true, false).grown
+        showing_message(options, busy(options), true, false).grown
     }
 
     /// Writes the page in both modes and at the owner's scales to target\settings-pages, for a look at it.
@@ -1655,10 +1666,13 @@ mod tests {
                     shown.recorder.recording = true;
                     shown
                 }),
-                ("ctrl-alt", showing_message(&options, CTRL_ALT, false, true)),
+                (
+                    "ctrl-alt",
+                    showing_message(&options, Text::Fixed(CTRL_ALT), false, true),
+                ),
                 (
                     "busy-band",
-                    showing_message(&options, "Already used by another program", true, false),
+                    showing_message(&options, busy(&options), true, false),
                 ),
             ] {
                 let page = drawn_showing(mode, 144, &options, Pointer::default(), &shown);

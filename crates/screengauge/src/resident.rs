@@ -11,7 +11,8 @@ use std::time::Duration;
 use screengauge_core::session::{Effect, Image, Input, Opening, SaveTo, Session};
 use screengauge_core::settings::{Folder, Remembered, Stored};
 use windows::Win32::Foundation::{
-    E_FAIL, ERROR_SUCCESS, HINSTANCE, HWND, LPARAM, LRESULT, SetLastError, WPARAM,
+    E_FAIL, ERROR_HOTKEY_ALREADY_REGISTERED, ERROR_SUCCESS, HINSTANCE, HWND, LPARAM, LRESULT,
+    SetLastError, WPARAM,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime;
@@ -113,9 +114,17 @@ pub fn run(
     if let Err(e) = tray::add(hwnd) {
         log::failure("tray icon: adding it at startup", &e);
     }
-    // Another program may hold the combination; ScreenGauge keeps running, and telling the user comes with WPC-324.
-    if let Err(e) = global_shortcut::register(hwnd, shortcut) {
-        log::failure(&format!("global shortcut: registering {shortcut}"), &e);
+    // Another program may hold the combination, or Windows may have taken it: ScreenGauge keeps running, called from
+    // the tray icon, and a notification leads the user to Settings to choose another one (WPC-324). Whatever the
+    // failure, the user hears of it the same way, as in Settings' recorder; only another program's hold isn't logged.
+    match global_shortcut::register(hwnd, shortcut) {
+        Ok(()) => notification::shortcut_free(),
+        Err(e) => {
+            if e.code() != ERROR_HOTKEY_ALREADY_REGISTERED.to_hresult() {
+                log::failure(&format!("global shortcut: registering {shortcut}"), &e);
+            }
+            notification::wait(Notification::ShortcutBusy);
+        }
     }
     if !for_a_click {
         post_call(hwnd);
@@ -185,7 +194,12 @@ extern "system" fn window_proc(
             LRESULT(0)
         }
         notification::EVENTS_READY => {
-            notification::on_events_ready();
+            // Once the notifications' state is no longer borrowed: opening Settings dispatches messages.
+            for clicked in notification::on_events_ready() {
+                if clicked.opens_settings() {
+                    open_settings();
+                }
+            }
             LRESULT(0)
         }
         // The scale of the display the taskbar is on may have changed, and the tray icon then needs another size.

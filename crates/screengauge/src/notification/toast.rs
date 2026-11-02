@@ -186,7 +186,7 @@ fn fnv1a(bytes: &[u8]) -> u32 {
 pub fn show(toast: &Toast) -> windows::core::Result<()> {
     let xml = XmlDocument::new()?;
     xml.LoadXml(&HSTRING::from(content(
-        toast.notification.text(),
+        &toast.notification.text()?,
         &toast.launch,
     )))?;
     let shown = ToastNotification::CreateToastNotification(&xml)?;
