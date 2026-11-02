@@ -1,8 +1,8 @@
 //! Settings drawn onto any Direct2D render target at 96 DPI, so a test can render it on a bitmap and count pixels: the
-//! window's background, each block's heading and card, the rows of Measurements and Inspect with their labels, notes and
-//! controls (`controls`), the Snip's card (`snip`), and the footer with the version, the license and the "Project page"
-//! link. The colors are the prototype's theme tokens for `#settings` (WPC-279), where the `oklch` ones are converted to
-//! sRGB; the sizes come from `layout`, scaled for the monitor's `dpi`.
+//! window's background, each block's heading and card, the rows with their labels, notes, messages (`row_message`) and
+//! controls (`controls`, `recorder_field`), the Snip's card (`snip`), and the footer with the version, the license and
+//! the "Project page" link. The colors are the prototype's theme tokens for `#settings` (WPC-279), where the `oklch`
+//! ones are converted to sRGB; the sizes come from `layout`, scaled for the monitor's `dpi`.
 
 use screengauge_core::session::Point;
 use screengauge_core::session::toolbar::scaled;
@@ -17,16 +17,19 @@ use windows::Win32::Graphics::Direct2D::{
     ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL,
-    DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_LINE_METRICS, DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE,
-    IDWriteTextFormat, IDWriteTextLayout, IDWriteTextLayout1,
+    DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_BOLD,
+    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_LINE_METRICS,
+    DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE, IDWriteTextFormat, IDWriteTextLayout,
+    IDWriteTextLayout1,
 };
 use windows::core::{Error, Interface};
 
 use super::controls::{
     self, COLOR_FORMATS, Control, Label, LabelKind, Laid, Pointer, THEMES, dpi_scale,
 };
-use super::layout::{self, Page, Row, Span};
+use super::layout::{self, Grown, Page, Row, Span};
+use super::recorder_field::{self, View};
+use super::row_message::{self, Message};
 use super::snip_card;
 use crate::graphics::{Color, Fonts, color, d2d_color, solid_brush};
 use crate::log;
@@ -120,17 +123,32 @@ pub struct Surface<'a> {
     pub width: u32,
 }
 
-/// Draws Settings on `on`, with `options` as they are now and the controls reacting to `pointer`, and returns where a
-/// click acts.
-pub fn draw(on: &Surface, options: &Options, pointer: Pointer) -> windows::core::Result<Drawn> {
+/// What Settings shows apart from the options: the global shortcut recorder's field, and the message under a row's
+/// label with how much it grows the page, while one shows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shown {
+    pub recorder: View,
+    pub message: Option<Message>,
+    pub grown: Option<Grown>,
+}
+
+/// Draws Settings on `on`, with `options` as they are now, the controls reacting to `pointer`, and what `shown` says,
+/// and returns where a click acts.
+pub fn draw(
+    on: &Surface,
+    options: &Options,
+    pointer: Pointer,
+    shown: &Shown,
+) -> windows::core::Result<Drawn> {
     let palette = palette(on.mode);
-    // The Snip's card is shorter without its note, and the window as tall as the page with it.
-    let page = snip_card::fitted(layout::page(), snip_card::note_shown(options));
+    // The page grows while a message shows under a row's label, and the blocks below move down with it. The Snip's
+    // card is shorter without its note, and the window as tall as the page with it.
+    let page = snip_card::fitted(layout::page(shown.grown), snip_card::note_shown(options));
     let height = px(scaled(page.height, on.dpi));
     let width = px(on.width);
     background(on.target, palette, width, height)?;
     cards(on.target, on.fonts, palette, &page, on.dpi, width)?;
-    let controls = Rows::new(on, palette)?.draw(options, pointer, &page)?;
+    let controls = Rows::new(on, palette)?.draw(options, pointer, shown, &page)?;
     let link = footer(on.target, on.fonts, palette, page.footer, on.dpi, width)?;
     Ok(Drawn { link, controls })
 }
@@ -171,11 +189,12 @@ impl<'a> Rows<'a> {
         })
     }
 
-    /// Each row's line above it, label, note and control, and where its control's parts are, on `page`.
+    /// Each row's band, line above it, label, note, message and control, and where its control's parts are, on `page`.
     fn draw(
         &self,
         options: &Options,
         pointer: Pointer,
+        shown: &Shown,
         page: &Page,
     ) -> windows::core::Result<Vec<(Control, RECT)>> {
         let dpi = self.on.dpi;
@@ -185,17 +204,50 @@ impl<'a> Rows<'a> {
             dpi,
         ))?;
         let right = width - inner;
+        let measure = measurer(self.on.fonts, self.scale);
         let mut laid = Vec::new();
         for row in layout::ROWS {
-            let placed = layout::place_row(row);
+            let placed = layout::place_row(row, shown.grown);
             let top = to_i32(scaled(placed.span.top, dpi))?;
             let bottom = to_i32(scaled(placed.span.bottom, dpi))?;
+            let message = shown.message.filter(|message| message.row == row);
+            if let Some(message) = message
+                && message.band
+            {
+                let card = page
+                    .blocks
+                    .iter()
+                    .find(|block| {
+                        block.card.top <= placed.span.top && placed.span.bottom <= block.card.bottom
+                    })
+                    .map(|block| block.card)
+                    .ok_or_else(|| Error::new(E_FAIL, "a row outside every card"))?;
+                row_message::band(
+                    self.on.target,
+                    self.on.factory,
+                    self.on.mode,
+                    card,
+                    placed.span,
+                    dpi,
+                    width,
+                )?;
+            }
             if placed.line_above {
                 self.separator(width, top)?;
             }
-            self.texts(row, px_i(inner), top, bottom)?;
+            self.texts(row, message.as_ref(), px_i(inner), top, bottom)?;
             let canvas = &self.canvas;
-            laid.push(match row {
+            let control = match row {
+                Row::GlobalShortcut => {
+                    let (field, reset) =
+                        recorder_field::lay(&shown.recorder, dpi, &measure, right, top, bottom)?;
+                    laid.push(Laid::Button {
+                        control: Control::ShortcutReset,
+                        place: reset,
+                        word: recorder_field::RESET,
+                    });
+                    Laid::Shortcut(field)
+                }
                 Row::Theme => {
                     let mut choices = Vec::new();
                     for (theme, word) in THEMES {
@@ -224,14 +276,15 @@ impl<'a> Rows<'a> {
                     }
                     controls::choice(canvas, &choices, right, top, bottom)
                 }
-            });
+            };
+            laid.push(control);
         }
         let snip::Snip {
             laid: snip_laid,
             path,
         } = self.snip(options, page)?;
         laid.extend(snip_laid);
-        self.surfaces(&laid, pointer)?;
+        self.surfaces(&laid, pointer, page)?;
         for control in &laid {
             for label in controls::labels(control, self.on.mode, pointer) {
                 self.label(&label)?;
@@ -261,16 +314,29 @@ impl<'a> Rows<'a> {
         Ok(())
     }
 
-    /// `row`'s label, and its note under it, at `left`, the two together centered in the row from `top` to `bottom`.
-    fn texts(&self, row: Row, left: f32, top: i32, bottom: i32) -> windows::core::Result<()> {
+    /// `row`'s label, its note under it and the message under them, at `left`, all together centered in the row from
+    /// `top` to `bottom`.
+    fn texts(
+        &self,
+        row: Row,
+        message: Option<&Message>,
+        left: f32,
+        top: i32,
+        bottom: i32,
+    ) -> windows::core::Result<()> {
         let fonts = self.on.fonts;
         let label_line = layout::LABEL_LINE * self.scale;
         let note_line = layout::NOTE_LINE * self.scale;
         let gap = layout::NOTE_GAP * self.scale;
-        let height = match row.note() {
+        let above_message = match row.note() {
             Some(_) => label_line + gap + note_line,
             None => label_line,
         };
+        let message_height = match message {
+            Some(message) => Message::height(message.lines(fonts)?, self.scale),
+            None => 0.0,
+        };
+        let height = above_message + message_height;
         let line = px_i(top) + (px_i(bottom - top) - height) / 2.0;
         let label = place(
             text(fonts, row.label(), &self.label, None)?,
@@ -288,15 +354,25 @@ impl<'a> Rows<'a> {
             )?;
             draw_text(self.on.target, &note, &self.dim);
         }
+        if let Some(message) = message {
+            message.draw(
+                self.on.target,
+                fonts,
+                self.on.mode,
+                left,
+                line + above_message,
+                self.scale,
+            )?;
+        }
         Ok(())
     }
 
     /// The controls' surfaces, painted with their shadows on a transparent layer the size of the page, which is then
     /// laid over it: faint shadow layers painted straight over the page's opaque pixels would round away (`relief`).
-    fn surfaces(&self, laid: &[Laid], pointer: Pointer) -> windows::core::Result<()> {
+    fn surfaces(&self, laid: &[Laid], pointer: Pointer, page: &Page) -> windows::core::Result<()> {
         let target = self.on.target;
         let width = to_i32(self.on.width)?;
-        let height = to_i32(scaled(layout::page().height, self.on.dpi))?;
+        let height = to_i32(scaled(page.height, self.on.dpi))?;
         let layer = relief::transparent_layer(target, width, height)?;
         let canvas = Canvas::new(&layer, self.on.factory, self.on.dpi, Point { x: 0, y: 0 })?;
         // SAFETY: the layer is ours, and ended below whatever happens in between. Premultiplied transparent: nothing
@@ -338,13 +414,7 @@ impl<'a> Rows<'a> {
 
     /// A control's word or sign, centered in its box, shrunk with a held button.
     fn label(&self, label: &Label) -> windows::core::Result<()> {
-        let (weight, size): (DWRITE_FONT_WEIGHT, f32) = match label.kind {
-            LabelKind::Segment => (DWRITE_FONT_WEIGHT_SEMI_BOLD, controls::SEGMENT_TEXT),
-            LabelKind::Number => (DWRITE_FONT_WEIGHT_BOLD, controls::NUMBER_TEXT),
-            LabelKind::Sign => (DWRITE_FONT_WEIGHT_BOLD, controls::SIGN_TEXT),
-        };
-        let format = self.on.fonts.text_format(weight, size * self.scale)?;
-        let layout = text(self.on.fonts, &label.text, &format, None)?;
+        let layout = word(self.on.fonts, &label.text, label.kind, self.scale)?;
         let room = px_i(label.place.right - label.place.left);
         let left = px_i(label.place.left) + ((room - width_of(&layout)?) / 2.0).round();
         let placed = place(
@@ -365,6 +435,62 @@ impl<'a> Rows<'a> {
             write()
         }
     }
+}
+
+/// The font of a control's word: its weight, its size in logical pixels, and whether it is italic.
+fn font_of(kind: LabelKind) -> (DWRITE_FONT_WEIGHT, f32, bool) {
+    match kind {
+        LabelKind::Segment => (DWRITE_FONT_WEIGHT_SEMI_BOLD, controls::SEGMENT_TEXT, false),
+        LabelKind::Number => (DWRITE_FONT_WEIGHT_BOLD, controls::NUMBER_TEXT, false),
+        LabelKind::Sign => (DWRITE_FONT_WEIGHT_BOLD, controls::SIGN_TEXT, false),
+        LabelKind::Keycap => (
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            recorder_field::KEYCAP_TEXT,
+            false,
+        ),
+        LabelKind::Plus => (DWRITE_FONT_WEIGHT_NORMAL, recorder_field::PLUS_TEXT, false),
+        LabelKind::Waiting => (
+            DWRITE_FONT_WEIGHT_NORMAL,
+            recorder_field::WAITING_TEXT,
+            true,
+        ),
+    }
+}
+
+/// A control's `words` laid out on one line in the font of `kind`, at `scale`.
+fn word(
+    fonts: &Fonts,
+    words: &str,
+    kind: LabelKind,
+    scale: f32,
+) -> windows::core::Result<IDWriteTextLayout> {
+    let (weight, size, italic) = font_of(kind);
+    let format = fonts.text_format(weight, size * scale)?;
+    let layout = text(fonts, words, &format, None)?;
+    if italic {
+        let length = u32::try_from(words.encode_utf16().count())
+            .map_err(|_| Error::new(E_FAIL, "the text is too long"))?;
+        // SAFETY: the range is the whole text.
+        unsafe {
+            layout.SetFontStyle(
+                DWRITE_FONT_STYLE_ITALIC,
+                DWRITE_TEXT_RANGE {
+                    startPosition: 0,
+                    length,
+                },
+            )
+        }?;
+    }
+    Ok(layout)
+}
+
+/// How wide a control's word is, in pixels at `scale`, in the font of its kind: what the global shortcut's field is
+/// laid out with.
+pub fn measurer(
+    fonts: &Fonts,
+    scale: f32,
+) -> impl Fn(&str, LabelKind) -> windows::core::Result<f32> + '_ {
+    move |words, kind| width_of(&word(fonts, words, kind, scale)?)
 }
 
 /// A position in pixels as the float Direct2D takes.
@@ -609,14 +735,25 @@ fn place(
 }
 
 fn draw_text(target: &ID2D1RenderTarget, placed: &Placed, brush: &ID2D1SolidColorBrush) {
+    write(target, &placed.layout, placed.left, placed.top, brush);
+}
+
+/// Draws `layout` with its top left corner at (`left`, `top`).
+pub fn write(
+    target: &ID2D1RenderTarget,
+    layout: &IDWriteTextLayout,
+    left: f32,
+    top: f32,
+    brush: &ID2D1SolidColorBrush,
+) {
     // The point type Direct2D takes, which windows 0.62 takes from a crate it doesn't re-export, as in the overlay.
     let mut origin = D2D1_ELLIPSE::default().point;
-    origin.X = placed.left;
-    origin.Y = placed.top;
+    origin.X = left;
+    origin.Y = top;
     // SAFETY: drawing calls on a live render target, with arguments that outlive them.
     unsafe {
         target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
-        target.DrawTextLayout(origin, &placed.layout, brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+        target.DrawTextLayout(origin, layout, brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
     }
 }
 
@@ -702,11 +839,35 @@ mod tests {
         drawn_with(mode, dpi, &Options::default(), Pointer::default())
     }
 
+    /// What Settings shows with the field resting and no message.
+    fn resting(options: &Options) -> Shown {
+        Shown {
+            recorder: View {
+                shortcut: options.global_shortcut,
+                recording: false,
+                held: screengauge_core::settings::Modifiers::default(),
+                opacity: 1.0,
+            },
+            message: None,
+            grown: None,
+        }
+    }
+
+    fn drawn_with(mode: Mode, dpi: u32, options: &Options, pointer: Pointer) -> Picture {
+        drawn_showing(mode, dpi, options, pointer, &resting(options))
+    }
+
     /// Draws the page in software on a bitmap of its size at `dpi`, with no window, monitor or graphics card. COM,
     /// which the bitmap needs, is started for the test's thread and ended once everything made with it is dropped.
-    fn drawn_with(mode: Mode, dpi: u32, options: &Options, pointer: Pointer) -> Picture {
+    fn drawn_showing(
+        mode: Mode,
+        dpi: u32,
+        options: &Options,
+        pointer: Pointer,
+        shown: &Shown,
+    ) -> Picture {
         let width = scaled(layout::WIDTH, dpi);
-        let height = scaled(layout::page().height, dpi);
+        let height = scaled(layout::page(shown.grown).height, dpi);
         let _com = Com::start();
         {
             // SAFETY: COM is started for this thread.
@@ -752,7 +913,7 @@ mod tests {
                 dpi,
                 width,
             };
-            let drawn = draw(&surface, options, pointer).expect("the page is drawn");
+            let drawn = draw(&surface, options, pointer, shown).expect("the page is drawn");
             // SAFETY: ends the BeginDraw above.
             unsafe { target.EndDraw(None, None) }.expect("the drawing is finished");
             let stride = width * 4;
@@ -881,9 +1042,9 @@ mod tests {
             ] {
                 let place = page.place_of(control);
                 let row = match control {
-                    Control::LogicalPixels => layout::place_row(Row::AlsoShowLogicalPixels),
-                    Control::ColorFormat(_) => layout::place_row(Row::ColorFormat),
-                    _ => layout::place_row(Row::DefaultTolerance),
+                    Control::LogicalPixels => layout::place_row(Row::AlsoShowLogicalPixels, None),
+                    Control::ColorFormat(_) => layout::place_row(Row::ColorFormat, None),
+                    _ => layout::place_row(Row::DefaultTolerance, None),
                 };
                 let above = place.top - i32::try_from(row.span.top).expect("small");
                 let below = i32::try_from(row.span.bottom).expect("small") - place.bottom;
@@ -1041,7 +1202,7 @@ mod tests {
         assert_eq!(dark.right + 3, 531);
         let width = dark.right + 3 - (automatic.left - 3);
         assert!((180..=184).contains(&width), "{width}");
-        let row = layout::place_row(Row::Theme);
+        let row = layout::place_row(Row::Theme, None);
         assert!(automatic.top > i32::try_from(row.span.top).expect("small"));
         assert!(automatic.bottom < i32::try_from(row.span.bottom).expect("small"));
     }
@@ -1130,11 +1291,11 @@ mod tests {
         let dpi = 144;
         for mode in [Mode::Dark, Mode::Light] {
             let page = drawn(mode, dpi);
-            let row = layout::place_row(Row::AlsoShowLogicalPixels);
+            let row = layout::place_row(Row::AlsoShowLogicalPixels, None);
             let line = whole_px(row.span.top, dpi) - 1;
             let x = whole_px(200, dpi);
             assert_ne!(page.at(x, line), page.at(x, line - 2), "{mode:?}");
-            let color = layout::place_row(Row::ColorFormat);
+            let color = layout::place_row(Row::ColorFormat, None);
             let middle = whole_px((color.span.top + color.span.bottom) / 2, dpi);
             assert!(
                 // Only the background's gradient changes from one pixel row to the next, by a level at most.
@@ -1156,7 +1317,7 @@ mod tests {
         let dpi = 144;
         for mode in [Mode::Dark, Mode::Light] {
             let page = drawn(mode, dpi);
-            let row = layout::place_row(Row::DefaultTolerance);
+            let row = layout::place_row(Row::DefaultTolerance, None);
             let (top, bottom) = (whole_px(row.span.top, dpi), whole_px(row.span.bottom, dpi));
             let middle = (top + bottom) / 2;
             let left = whole_px(29, dpi);
@@ -1172,6 +1333,299 @@ mod tests {
                 "{mode:?} note"
             );
         }
+    }
+
+    /// What Settings shows with `text` under the global shortcut's label, the field recording or not, and the band
+    /// should `band` say so: the message's room and the row's growth worked out as the window works them out.
+    fn showing_message(
+        options: &Options,
+        text: &'static str,
+        band: bool,
+        recording: bool,
+    ) -> Shown {
+        let fonts = Fonts::new().expect("the fonts");
+        let mut shown = resting(options);
+        shown.recorder.recording = recording;
+        let width = recorder_field::message_room(&shown.recorder, &measurer(&fonts, 1.0))
+            .expect("the message's room");
+        let message = Message {
+            row: Row::GlobalShortcut,
+            text,
+            band,
+            width,
+        };
+        shown.grown = Some(message.growth(&fonts).expect("the row's growth"));
+        shown.message = Some(message);
+        shown
+    }
+
+    const CTRL_ALT: &str = "Ctrl + Alt without Win isn't allowed: on Brazilian keyboards it's AltGr and would take \
+                            characters like / and ?.";
+
+    /// Whether a pixel is amber: far redder than blue, which no grey, ink or cyan of the page is.
+    fn amber(pixel: [u8; 3]) -> bool {
+        i32::from(pixel[0]) - i32::from(pixel[2]) > 50
+    }
+
+    #[test]
+    fn the_shortcut_s_field_is_left_of_reset_at_the_right_of_general_s_first_row() {
+        // The prototype's `.rec` is 156 wide at least and 32 tall, `.pbtn` 30 tall, 10 apart, ending at 531.
+        for mode in [Mode::Dark, Mode::Light] {
+            let page = drawn(mode, 96);
+            let field = page.place_of(Control::ShortcutField);
+            let reset = page.place_of(Control::ShortcutReset);
+            assert_eq!(reset.right, 531, "{mode:?}");
+            assert_eq!(height_of_rect(reset), 30, "{mode:?}");
+            assert_eq!(field.right, reset.left - 10, "{mode:?}");
+            assert_eq!(height_of_rect(field), 32, "{mode:?}");
+            assert!(width_of_rect(field) >= 156, "{mode:?}: {field:?}");
+            // Reset's word is a few dozen pixels: "Reset" at 600 12px and 11 either side.
+            assert!((50..=62).contains(&width_of_rect(reset)), "{reset:?}");
+            let row = layout::place_row(Row::GlobalShortcut, None);
+            let above = field.top - i32::try_from(row.span.top).expect("small");
+            let below = i32::try_from(row.span.bottom).expect("small") - field.bottom;
+            assert!((above - below).abs() <= 1, "{above} above, {below} below");
+        }
+    }
+
+    #[test]
+    fn the_field_shows_the_shortcut_s_keys_in_relief_inside_its_well() {
+        let dpi = 144;
+        for mode in [Mode::Dark, Mode::Light] {
+            let page = drawn(mode, dpi);
+            let field = page.place_of(Control::ShortcutField);
+            let middle = (field.top + field.bottom) / 2;
+            // Win + Shift + X: three keys lighter or darker than the well, and the ink of their words on them.
+            let well = page.at(field.right - whole_px(6, dpi), middle);
+            let changes = (field.left..field.right)
+                .filter(|&x| page.at(x, middle) != page.at(x + 1, middle))
+                .count();
+            assert!(changes > 12, "{mode:?}: {changes} changes across the field");
+            let ink = relief::palette::palette(mode).ink;
+            let inked = (field.top..field.bottom)
+                .flat_map(|y| (field.left..field.right).map(move |x| (x, y)))
+                .filter(|&(x, y)| near(page.at(x, y), ink, 30))
+                .count();
+            assert!(inked > 30, "{mode:?}: {inked} pixels of the keys' ink");
+            assert_ne!(
+                well,
+                page.at(field.left + whole_px(20, dpi), middle),
+                "{mode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn recording_the_field_has_a_cyan_border_and_ring_and_resting_none() {
+        let dpi = 144;
+        for mode in [Mode::Dark, Mode::Light] {
+            let options = Options::default();
+            let resting_page = drawn(mode, dpi);
+            let mut recording = resting(&options);
+            recording.recorder.recording = true;
+            let recording_page = drawn_showing(mode, dpi, &options, Pointer::default(), &recording);
+            let field = recording_page.place_of(Control::ShortcutField);
+            let middle = (field.top + field.bottom) / 2;
+            let bluer = |page: &Picture, x: i32| {
+                let [r, _, b] = page.at(x, middle);
+                i32::from(b) - i32::from(r)
+            };
+            assert!(bluer(&recording_page, field.left) > 60, "{mode:?} border");
+            assert!(
+                bluer(&resting_page, field.left).abs() < 25,
+                "{mode:?} resting"
+            );
+            // The ring, a few pixels out.
+            assert!(
+                bluer(&recording_page, field.left - 2) > bluer(&resting_page, field.left - 2) + 10,
+                "{mode:?} ring"
+            );
+        }
+    }
+
+    #[test]
+    fn recording_with_nothing_held_the_field_asks_for_the_keys_in_the_dim_color() {
+        let dpi = 144;
+        for mode in [Mode::Dark, Mode::Light] {
+            let options = Options::default();
+            let mut shown = resting(&options);
+            shown.recorder.recording = true;
+            let page = drawn_showing(mode, dpi, &options, Pointer::default(), &shown);
+            let field = page.place_of(Control::ShortcutField);
+            let dim = (field.top..field.bottom)
+                .flat_map(|y| (field.left..field.right).map(move |x| (x, y)))
+                .filter(|&(x, y)| near(page.at(x, y), palette(mode).dim, 30))
+                .count();
+            assert!(dim > 60, "{mode:?}: {dim} pixels of \"Press the keys…\"");
+            // No key in relief: the keys' ink is nowhere in the field.
+            let ink = relief::palette::palette(mode).ink;
+            let inked = (field.top..field.bottom)
+                .flat_map(|y| (field.left..field.right).map(move |x| (x, y)))
+                .filter(|&(x, y)| near(page.at(x, y), ink, 8))
+                .count();
+            assert!(inked < 10, "{mode:?}: {inked}");
+        }
+    }
+
+    #[test]
+    fn a_message_shows_in_amber_under_the_label_inside_its_grown_row_at_every_scale() {
+        let options = Options::default();
+        let shown = showing_message(&options, CTRL_ALT, false, false);
+        let grown = shown.grown.expect("grown");
+        assert!(grown.by > 20, "three lines or so: {grown:?}");
+        for mode in [Mode::Dark, Mode::Light] {
+            for dpi in [96, 120, 144, 168] {
+                let page = drawn_showing(mode, dpi, &options, Pointer::default(), &shown);
+                let row = layout::place_row(Row::GlobalShortcut, shown.grown);
+                let (top, bottom) = (whole_px(row.span.top, dpi), whole_px(row.span.bottom, dpi));
+                let field = page.place_of(Control::ShortcutField);
+                let left = whole_px(layout::SIDE + layout::CARD_BORDER, dpi);
+                let amber_rows: Vec<i32> = (top - whole_px(4, dpi)..bottom + whole_px(8, dpi))
+                    .filter(|&y| (left..field.left).any(|x| amber(page.at(x, y))))
+                    .collect();
+                let (Some(&first), Some(&last)) = (amber_rows.first(), amber_rows.last()) else {
+                    panic!("{mode:?} {dpi}: no amber in the row");
+                };
+                // Below the label, and inside the row with room to spare below the last line.
+                assert!(
+                    first > top + whole_px(15, dpi),
+                    "{mode:?} {dpi}: {first} from {top}"
+                );
+                assert!(
+                    last < bottom - whole_px(3, dpi),
+                    "{mode:?} {dpi}: {last} to {bottom}"
+                );
+                // Its lines never reach the field.
+                assert!(
+                    (top..bottom).all(|y| (field.left - whole_px(6, dpi)..field.left)
+                        .all(|x| !amber(page.at(x, y)))),
+                    "{mode:?} {dpi}: amber against the field"
+                );
+                // The rows below moved down with it: the theme's choice is as far below the row as ever.
+                let theme = page.place_of(Control::Theme(Theme::Automatic));
+                let theme_row = layout::place_row(Row::Theme, shown.grown);
+                assert!(
+                    theme.top > whole_px(theme_row.span.top, dpi),
+                    "{mode:?} {dpi}"
+                );
+                assert!(
+                    theme.bottom < whole_px(theme_row.span.bottom, dpi),
+                    "{mode:?} {dpi}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_snip_s_card_and_the_footer_move_down_with_a_message_in_general() {
+        let options = Options::default();
+        let shown = showing_message(&options, CTRL_ALT, false, false);
+        let by = shown.grown.expect("grown").by;
+        for dpi in [96, 144] {
+            let still = drawn(Mode::Dark, dpi);
+            let grown = drawn_showing(Mode::Dark, dpi, &options, Pointer::default(), &shown);
+            let moved = whole_px(by, dpi);
+            for control in [
+                Control::SnipDestination(screengauge_core::settings::SnipDestination::File),
+                Control::SaveToDefaultFolder,
+                Control::ChangeFolder,
+            ] {
+                let (was, is) = (still.place_of(control), grown.place_of(control));
+                assert_eq!(is.left, was.left, "{dpi} {control:?}");
+                // Within a pixel of the growth: each part's top is rounded on its own at the scale.
+                assert!(
+                    (is.top - was.top - moved).abs() <= 1,
+                    "{dpi} {control:?}: {was:?} -> {is:?}, by {moved}"
+                );
+            }
+            assert!(
+                (grown.link.top - still.link.top - moved).abs() <= 1,
+                "{dpi}: the footer's link {:?} -> {:?}",
+                still.link,
+                grown.link
+            );
+            // The Snip's card is drawn where it moved: its top border is a card's color, not the background's.
+            let card =
+                snip_card::fitted(layout::page(shown.grown), snip_card::note_shown(&options))
+                    .blocks[3]
+                    .card;
+            let y = whole_px(card.top + 4, dpi);
+            let x = whole_px(layout::SIDE + 30, dpi);
+            assert!(
+                brightness(grown.at(x, y)) > brightness(grown.at(2, y)),
+                "{dpi}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_short_message_takes_one_line_and_grows_the_row_by_a_few_pixels() {
+        let options = Options::default();
+        let shown = showing_message(&options, "Already used by another program", false, false);
+        let fonts = Fonts::new().expect("the fonts");
+        let message = shown.message.expect("a message");
+        assert_eq!(message.lines(&fonts).expect("lines"), 1);
+        // 5 + 16.9 + 2 + 14.95 + 5 = 43.85: 44, against the row's 42.
+        assert_eq!(shown.grown.expect("grown").by, 2);
+    }
+
+    #[test]
+    fn with_no_message_the_page_has_no_amber() {
+        for mode in [Mode::Dark, Mode::Light] {
+            let page = drawn(mode, 144);
+            let amber_pixels = page.pixels.iter().filter(|&&pixel| amber(pixel)).count();
+            assert_eq!(amber_pixels, 0, "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn the_band_tints_the_whole_row_with_a_bar_of_amber_on_its_left() {
+        let dpi = 144;
+        let options = Options::default();
+        for mode in [Mode::Dark, Mode::Light] {
+            let plain = drawn_showing(
+                mode,
+                dpi,
+                &options,
+                Pointer::default(),
+                &showing_message(&options, "Already used by another program", false, false),
+            );
+            let banded = drawn_showing(
+                mode,
+                dpi,
+                &options,
+                Pointer::default(),
+                &showing_message(&options, "Already used by another program", true, false),
+            );
+            let row = layout::place_row(Row::GlobalShortcut, banded_grown(&options));
+            let middle = whole_px((row.span.top + row.span.bottom) / 2, dpi);
+            let inner_left = whole_px(layout::SIDE, dpi) + whole_px(1, dpi).max(1);
+            // The bar: 3 logical pixels of --warn against the card's border.
+            assert!(
+                near(
+                    banded.at(inner_left + 1, middle),
+                    row_message::warn(mode),
+                    12
+                ),
+                "{mode:?}: {:?}",
+                banded.at(inner_left + 1, middle)
+            );
+            assert!(!amber(plain.at(inner_left + 1, middle)), "{mode:?}");
+            // The tint, where nothing else is drawn: just inside the row's top, halfway across.
+            let y = whole_px(row.span.top, dpi) + 2;
+            let x = whole_px(250, dpi);
+            let ([r, _, b], [pr, _, pb]) = (banded.at(x, y), plain.at(x, y));
+            assert!(
+                i32::from(r) - i32::from(b) > i32::from(pr) - i32::from(pb) + 8,
+                "{mode:?}: {:?} against {:?}",
+                banded.at(x, y),
+                plain.at(x, y)
+            );
+        }
+    }
+
+    fn banded_grown(options: &Options) -> Option<layout::Grown> {
+        showing_message(options, "Already used by another program", true, false).grown
     }
 
     /// Writes the page in both modes and at the owner's scales to target\settings-pages, for a look at it.
@@ -1194,6 +1648,30 @@ mod tests {
                     .expect("the page as a PNG");
                 std::fs::write(folder.join(format!("{mode:?}-{dpi}.png")), png).expect("the PNG");
             }
+            let options = Options::default();
+            for (name, shown) in [
+                ("recording", {
+                    let mut shown = resting(&options);
+                    shown.recorder.recording = true;
+                    shown
+                }),
+                ("ctrl-alt", showing_message(&options, CTRL_ALT, false, true)),
+                (
+                    "busy-band",
+                    showing_message(&options, "Already used by another program", true, false),
+                ),
+            ] {
+                let page = drawn_showing(mode, 144, &options, Pointer::default(), &shown);
+                let width = u32::try_from(page.width).expect("small");
+                let image = screengauge_core::session::Image::new(width, page.height, page.bgra)
+                    .expect("the bitmap's size");
+                let png = std::thread::spawn(move || crate::png::encode(&image))
+                    .join()
+                    .expect("the encoder's thread")
+                    .expect("the page as a PNG");
+                std::fs::write(folder.join(format!("{mode:?}-144-{name}.png")), png)
+                    .expect("the PNG");
+            }
         }
     }
 
@@ -1202,7 +1680,7 @@ mod tests {
         for mode in [Mode::Dark, Mode::Light] {
             for dpi in DPIS {
                 let page = drawn(mode, dpi);
-                let bottom = whole_px(layout::page().height, dpi) - 1;
+                let bottom = whole_px(layout::page(None).height, dpi) - 1;
                 assert!(near(page.at(2, 0), palette(mode).top, 1), "{mode:?} {dpi}");
                 assert!(
                     near(page.at(2, bottom), palette(mode).bottom, 1),
@@ -1218,7 +1696,7 @@ mod tests {
             for dpi in DPIS {
                 let page = drawn(mode, dpi);
                 let link = page.link;
-                let footer = layout::page().footer;
+                let footer = layout::page(None).footer;
                 // It ends 16 logical pixels in from the right, inside the footer.
                 let right = whole_px(layout::WIDTH - layout::SIDE, dpi);
                 assert!(
@@ -1257,7 +1735,7 @@ mod tests {
         let dpi = 144;
         for mode in [Mode::Dark, Mode::Light] {
             let page = drawn(mode, dpi);
-            for placed in layout::page().blocks {
+            for placed in layout::page(None).blocks {
                 // Inside the card, past its border and corner and above its rows' labels, and beside it on the same row.
                 let y = whole_px(placed.card.top + 4, dpi);
                 let inside = page.at(whole_px(layout::SIDE + 30, dpi), y);
@@ -1269,7 +1747,7 @@ mod tests {
                 );
             }
             // The footer's 1-pixel line differs from the background just above it.
-            let line = whole_px(layout::page().footer.top, dpi);
+            let line = whole_px(layout::page(None).footer.top, dpi);
             assert_ne!(page.at(300, line), page.at(300, line - 1), "{mode:?}");
         }
     }

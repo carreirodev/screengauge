@@ -16,6 +16,8 @@ use crate::relief::palette::{self as relief_palette, Shadow, Stop, Surface, rgb,
 use crate::relief::{Canvas, Motion};
 use crate::theme::Mode;
 
+use super::recorder_field;
+
 // Every size below is in logical pixels, which the canvas's `scaled` turns into physical pixels for the window's scale.
 
 /// The switch's track (`.tgl`) and its knob (`::after`): the knob's side, and how far it sits in from the track.
@@ -49,11 +51,11 @@ pub const NUMBER_TEXT: f32 = 14.0;
 pub const SIGN_TEXT: f32 = 16.0;
 
 /// Segoe UI's `line-height: normal`: its ascent and descent over its em, (2210 + 514) / 2048.
-const NORMAL_LINE: f32 = 1.33;
+pub const NORMAL_LINE: f32 = 1.33;
 
 /// `--well`'s inset shadow under the choice and the number (`inset 0 1px 3px rgba(0,0,0,.3)`), and the switch's, a
 /// little darker (`.35`). Black in both palettes.
-const WELL_INSET: [Shadow; 1] = [shadow(1, 3, 0, color(0, 0, 0, 0.3))];
+pub const WELL_INSET: [Shadow; 1] = [shadow(1, 3, 0, color(0, 0, 0, 0.3))];
 const TRACK_INSET: [Shadow; 1] = [shadow(1, 3, 0, color(0, 0, 0, 0.35))];
 
 /// The knob of a switch that is on (`.tgl.on::after`): white, a little grey at the bottom, in both palettes.
@@ -90,6 +92,9 @@ pub fn colors(mode: Mode) -> &'static Colors {
 /// A part of a control that a click acts on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Control {
+    /// The global shortcut recorder's field, and Reset beside it.
+    ShortcutField,
+    ShortcutReset,
     Theme(Theme),
     ToleranceDown,
     ToleranceUp,
@@ -101,10 +106,13 @@ pub enum Control {
 }
 
 /// What a click on `control` changes, with `options` as Settings shows them: the switch turns to the other side. `None`
-/// for a click that needs Windows' folder window first, and changes nothing until it answers: "Change…", and the
-/// switch turned on with no folder kept (`Options::choose_default_folder` then keeps the folder).
+/// for a click that changes nothing by itself: one that needs Windows' folder window first, and changes nothing until it
+/// answers ("Change…", and the switch turned on with no folder kept: `Options::choose_default_folder` then keeps the
+/// folder), and the global shortcut's field and Reset, as the recorder registers a combination with Windows first
+/// (`recorder`).
 pub fn change(control: Control, options: &Options) -> Option<Change> {
     Some(match control {
+        Control::ShortcutField | Control::ShortcutReset => return None,
         Control::Theme(theme) => Change::Theme(theme),
         Control::ToleranceDown => Change::DefaultToleranceDown,
         Control::ToleranceUp => Change::DefaultToleranceUp,
@@ -175,7 +183,8 @@ pub enum Laid {
         plus: RECT,
         value: u8,
     },
-    /// A button with a word (`.pbtn`): a small button of the toolbar's style.
+    /// A button with a word (`.pbtn`): a small button of the toolbar's style, as the Snip's "Change…" and the global
+    /// shortcut's Reset.
     Button {
         control: Control,
         place: RECT,
@@ -183,6 +192,8 @@ pub enum Laid {
     },
     /// The box that shows a folder's path (`.fpath`): a well, whose text `paint::snip` writes.
     Path { place: RECT },
+    /// The global shortcut recorder's field.
+    Shortcut(recorder_field::Laid),
 }
 
 impl Laid {
@@ -202,12 +213,13 @@ impl Laid {
             }
             Laid::Button { control, place, .. } => vec![(*control, *place)],
             Laid::Path { .. } => Vec::new(),
+            Laid::Shortcut(laid) => laid.hits(),
         }
     }
 }
 
 /// A box `width` by `height` pixels whose right side is at `right`, centered in the row from `top` to `bottom`.
-fn at_right(right: i32, top: i32, bottom: i32, width: i32, height: i32) -> RECT {
+pub fn at_right(right: i32, top: i32, bottom: i32, width: i32, height: i32) -> RECT {
     let top = top + (bottom - top - height) / 2;
     RECT {
         left: right - width,
@@ -218,7 +230,7 @@ fn at_right(right: i32, top: i32, bottom: i32, width: i32, height: i32) -> RECT 
 }
 
 /// `logical` pixels of a size that isn't whole, at `dpi`, rounded to whole pixels.
-fn rounded(logical: f32, dpi: u32) -> i32 {
+pub fn rounded(logical: f32, dpi: u32) -> i32 {
     let pixels = (logical * dpi_scale(dpi)).round();
     debug_assert!((0.0..1e6).contains(&pixels), "{pixels}");
     // A control's size is a few hundred pixels at most, which the cast keeps exactly.
@@ -326,7 +338,7 @@ pub fn path_place(canvas: &Canvas, left: i32, right: i32, top: i32, bottom: i32)
 
 /// A measured width rounded up to whole pixels, so a segment never cuts into its word. Widths are a few hundred pixels
 /// at most, far inside `i32`.
-fn whole_up(width: f32) -> i32 {
+pub fn whole_up(width: f32) -> i32 {
     debug_assert!((0.0..1e6).contains(&width), "a word {width} pixels wide");
     width.ceil() as i32
 }
@@ -415,6 +427,7 @@ pub fn paint(
             }
             Ok(())
         }
+        Laid::Shortcut(laid) => recorder_field::paint(canvas, laid, mode),
     }
 }
 
@@ -446,6 +459,12 @@ pub enum LabelKind {
     Number,
     /// − or +: `700 16px/1`.
     Sign,
+    /// A key in relief in the global shortcut's field: `600 11.5px`.
+    Keycap,
+    /// The plus between two keys: `11px`.
+    Plus,
+    /// The field's blinking text while it records: the window's `13px`, italic.
+    Waiting,
 }
 
 /// The words and signs `laid` shows, in `mode`, centered in their boxes.
@@ -508,6 +527,7 @@ pub fn labels(laid: &Laid, mode: Mode, pointer: Pointer) -> Vec<Label> {
                 sign(Control::ToleranceUp, *plus, "+"),
             ]
         }
+        Laid::Shortcut(laid) => recorder_field::labels(laid, mode),
     }
 }
 
@@ -590,6 +610,13 @@ mod tests {
         let mut kept = Options::default();
         kept.choose_default_folder(kept_folder(), true);
         assert_eq!(change(Control::ChangeFolder, &kept), None);
+    }
+
+    #[test]
+    fn the_shortcut_s_field_and_reset_change_no_option_by_themselves() {
+        let options = Options::default();
+        assert_eq!(change(Control::ShortcutField, &options), None);
+        assert_eq!(change(Control::ShortcutReset, &options), None);
     }
 
     #[test]

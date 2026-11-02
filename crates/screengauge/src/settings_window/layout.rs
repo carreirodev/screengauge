@@ -14,10 +14,12 @@
 //! | Snip's card (Destination, Save to default folder, the folder's line and its note) | 145.28 | 145 |
 //! | the footer (`.sfoot`) | 36.26 | 36 |
 //!
-//! The page measured 556.56 tall; in whole pixels it is 558. The window's height is fixed at that: the user doesn't
-//! change it, and the blocks' rows go inside these cards: Measurements' and Inspect's from WPC-320, the Snip's from
-//! WPC-322, the others with their own tickets. The Snip's card is this tall with its note, as measured; without it the
-//! card is shorter (`snip_card::fitted`) and the window stays as it is.
+//! The page measured 556.56 tall; in whole pixels it is 558. The user doesn't change the window's height, and the
+//! blocks' rows go inside these cards: Measurements' and Inspect's from WPC-320, the Snip's from WPC-322, the global
+//! shortcut's from WPC-323, the others with their own tickets. The Snip's card is this tall with its note, as measured;
+//! without it the card is shorter (`snip_card::fitted`) and the window stays as it is. Only a message under a row's
+//! label makes the page taller, while it shows: the row grows to hold it, and its card, the blocks below and the window
+//! with it ([`Grown`], WPC-323).
 
 /// The page's width.
 pub const WIDTH: u32 = 560;
@@ -122,6 +124,7 @@ pub struct Page {
 /// One option's row: its label on the left, its note under the label when it has one, and its control on the right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Row {
+    GlobalShortcut,
     Theme,
     DefaultTolerance,
     AlsoShowLogicalPixels,
@@ -131,6 +134,7 @@ pub enum Row {
 impl Row {
     pub fn label(self) -> &'static str {
         match self {
+            Row::GlobalShortcut => "Global shortcut",
             Row::Theme => "Theme",
             Row::DefaultTolerance => "Default tolerance",
             Row::AlsoShowLogicalPixels => "Also show logical pixels",
@@ -142,15 +146,16 @@ impl Row {
         match self {
             Row::DefaultTolerance => Some("The mouse wheel adjusts it while measuring."),
             Row::AlsoShowLogicalPixels => Some("When the display scale isn't 100%."),
-            Row::Theme | Row::ColorFormat => None,
+            Row::GlobalShortcut | Row::Theme | Row::ColorFormat => None,
         }
     }
 
     /// The block it is in, and its place among the block's rows, counted from 0.
     fn slot(self) -> (Block, u32) {
         match self {
-            // The last of General's three: the global shortcut's and "Start with Windows"' rows come above it with their
-            // own tickets (WPC-323, WPC-326), so it never moves.
+            Row::GlobalShortcut => (Block::General, 0),
+            // The last of General's three: "Start with Windows"' row comes between with its own ticket (WPC-326), so it
+            // never moves.
             Row::Theme => (Block::General, 2),
             Row::DefaultTolerance => (Block::Measurements, 0),
             Row::AlsoShowLogicalPixels => (Block::Measurements, 1),
@@ -159,9 +164,10 @@ impl Row {
     }
 }
 
-/// The rows ScreenGauge draws, top to bottom, except the Snip's, which `snip_card` places. General's other two come
-/// with their own tickets (WPC-323, WPC-326), into the room their card already has.
-pub const ROWS: [Row; 4] = [
+/// The rows ScreenGauge draws, top to bottom, except the Snip's, which `snip_card` places. General's "Start with
+/// Windows" comes with its own ticket (WPC-326), into the room its card already has.
+pub const ROWS: [Row; 5] = [
+    Row::GlobalShortcut,
     Row::Theme,
     Row::DefaultTolerance,
     Row::AlsoShowLogicalPixels,
@@ -204,6 +210,27 @@ impl Block {
     }
 }
 
+/// A row grown by `by` logical pixels to hold a message under its label: its card, everything below it and the page grow
+/// as much.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Grown {
+    pub row: Row,
+    pub by: u32,
+}
+
+impl Grown {
+    /// How much it adds to `block`'s card.
+    fn in_block(grown: Option<Grown>, block: Block) -> u32 {
+        grown.map_or(0, |grown| {
+            if grown.row.slot().0 == block {
+                grown.by
+            } else {
+                0
+            }
+        })
+    }
+}
+
 /// A row in its card: from below the line above it, or the card's border, to the line or the border below it, and
 /// whether a line runs above it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,16 +240,20 @@ pub struct PlacedRow {
     pub line_above: bool,
 }
 
-/// Where `row` is on the page. A card's rows share the room inside its border, the first ones a pixel taller when it
-/// doesn't divide evenly.
-pub fn place_row(row: Row) -> PlacedRow {
+/// Where `row` is on the page, with `grown` taller should it be shown. A card's rows share the room inside its border,
+/// the first ones a pixel taller when it doesn't divide evenly; the grown row has its share and the growth.
+pub fn place_row(row: Row, grown: Option<Grown>) -> PlacedRow {
     let (block, index) = row.slot();
-    let placed = page().blocks[block.index()];
+    let placed = page(grown).blocks[block.index()];
     let count = block.rows();
-    let inside = placed.card.bottom - placed.card.top - 2 * CARD_BORDER;
+    let inside = block.card() - 2 * CARD_BORDER;
     let room = inside - (count - 1);
     let (each, extra) = (room / count, room % count);
-    let height = |i: u32| each + u32::from(i < extra);
+    let growth = |i: u32| match grown {
+        Some(grown) if grown.row.slot() == (block, i) => grown.by,
+        _ => 0,
+    };
+    let height = |i: u32| each + u32::from(i < extra) + growth(i);
     let top = placed.card.top + CARD_BORDER + (0..index).map(|i| height(i) + 1).sum::<u32>();
     PlacedRow {
         row,
@@ -234,14 +265,14 @@ pub fn place_row(row: Row) -> PlacedRow {
     }
 }
 
-/// The page, laid out.
-pub fn page() -> Page {
+/// The page, laid out, with `grown` taller should it be shown.
+pub fn page(grown: Option<Grown>) -> Page {
     let mut top = PADDING;
     let blocks = BLOCKS.map(|block| {
         let heading = top;
         let card = Span {
             top: heading + HEADING,
-            bottom: heading + HEADING + block.card(),
+            bottom: heading + HEADING + block.card() + Grown::in_block(grown, block),
         };
         top = card.bottom + GAP;
         Placed {
@@ -271,7 +302,7 @@ mod tests {
     fn the_page_is_as_tall_as_the_prototype_without_the_language_row_in_whole_pixels() {
         // Measured in a browser for WPC-319: 588.56 for the prototype's window, less its 32 of drawn title bar.
         let measured = 556.56;
-        let height = f64::from(page().height);
+        let height = f64::from(page(None).height);
         assert!(
             (measured..measured + 2.0).contains(&height),
             "{height} for the {measured} measured"
@@ -280,7 +311,7 @@ mod tests {
 
     #[test]
     fn the_blocks_come_in_the_spec_s_order_one_below_the_other_with_the_footer_last() {
-        let page = page();
+        let page = page(None);
         let order: Vec<Block> = page.blocks.iter().map(|placed| placed.block).collect();
         assert_eq!(
             order,
@@ -307,7 +338,7 @@ mod tests {
     #[test]
     fn each_card_is_as_tall_as_the_prototype_s() {
         let measured = [128.0, 87.69, 43.33, 145.28];
-        for (placed, measured) in page().blocks.iter().zip(measured) {
+        for (placed, measured) in page(None).blocks.iter().zip(measured) {
             let height = f64::from(placed.card.bottom - placed.card.top);
             assert!(
                 (height - measured).abs() <= 0.5,
@@ -326,9 +357,9 @@ mod tests {
 
     #[test]
     fn measurements_two_rows_share_its_card_with_a_line_between_them() {
-        let card = page().blocks[1].card;
-        let tolerance = place_row(Row::DefaultTolerance);
-        let logical = place_row(Row::AlsoShowLogicalPixels);
+        let card = page(None).blocks[1].card;
+        let tolerance = place_row(Row::DefaultTolerance, None);
+        let logical = place_row(Row::AlsoShowLogicalPixels, None);
         // Inside the card's border, one below the other, a pixel apart for the line, filling the card.
         assert_eq!(tolerance.span.top, card.top + 1);
         assert_eq!(logical.span.top, tolerance.span.bottom + 1);
@@ -344,8 +375,8 @@ mod tests {
 
     #[test]
     fn theme_is_the_last_of_general_s_three_rows_against_the_card_s_bottom() {
-        let card = page().blocks[0].card;
-        let theme = place_row(Row::Theme);
+        let card = page(None).blocks[0].card;
+        let theme = place_row(Row::Theme, None);
         // General's 126 pixels inside its border: three rows of 42, 41 and 41, and two lines between them.
         assert_eq!(theme.span.bottom, card.bottom - 1);
         assert_eq!(theme.span.top, card.top + 1 + 42 + 1 + 41 + 1);
@@ -354,8 +385,8 @@ mod tests {
 
     #[test]
     fn inspect_s_one_row_fills_its_card() {
-        let card = page().blocks[2].card;
-        let color = place_row(Row::ColorFormat);
+        let card = page(None).blocks[2].card;
+        let color = place_row(Row::ColorFormat, None);
         assert_eq!(
             color.span,
             Span {
@@ -373,6 +404,7 @@ mod tests {
         assert_eq!(
             texts,
             [
+                ("Global shortcut", None),
                 ("Theme", None),
                 (
                     "Default tolerance",
@@ -385,6 +417,72 @@ mod tests {
                 ("Color format", None),
             ]
         );
+    }
+
+    #[test]
+    fn the_global_shortcut_is_general_s_first_row_against_the_card_s_top() {
+        let card = page(None).blocks[0].card;
+        let shortcut = place_row(Row::GlobalShortcut, None);
+        assert_eq!(
+            shortcut.span,
+            Span {
+                top: card.top + 1,
+                bottom: card.top + 1 + 42
+            }
+        );
+        assert!(!shortcut.line_above);
+    }
+
+    #[test]
+    fn a_message_makes_its_row_its_card_and_the_page_taller_and_moves_what_is_below() {
+        let grown = Some(Grown {
+            row: Row::GlobalShortcut,
+            by: 31,
+        });
+        let (before, after) = (page(None), page(grown));
+        assert_eq!(after.height, before.height + 31);
+        assert_eq!(after.blocks[0].card.top, before.blocks[0].card.top);
+        assert_eq!(
+            after.blocks[0].card.bottom,
+            before.blocks[0].card.bottom + 31
+        );
+        for (was, is) in before.blocks.iter().zip(&after.blocks).skip(1) {
+            assert_eq!(is.heading, was.heading + 31, "{:?}", is.block);
+            assert_eq!(is.card.top, was.card.top + 31, "{:?}", is.block);
+            assert_eq!(is.card.bottom, was.card.bottom + 31, "{:?}", is.block);
+        }
+        assert_eq!(after.footer.top, before.footer.top + 31);
+        assert_eq!(after.footer.bottom, after.height);
+
+        // The row itself is 31 taller from where it was; the rows below it in its card move down as much.
+        let shortcut = place_row(Row::GlobalShortcut, grown);
+        assert_eq!(
+            shortcut.span.top,
+            place_row(Row::GlobalShortcut, None).span.top
+        );
+        assert_eq!(shortcut.span.bottom - shortcut.span.top, 42 + 31);
+        let theme = place_row(Row::Theme, grown);
+        assert_eq!(theme.span.top, place_row(Row::Theme, None).span.top + 31);
+        assert_eq!(theme.span.bottom, after.blocks[0].card.bottom - 1);
+        for row in [
+            Row::DefaultTolerance,
+            Row::AlsoShowLogicalPixels,
+            Row::ColorFormat,
+        ] {
+            let (was, is) = (place_row(row, None), place_row(row, grown));
+            assert_eq!(is.span.top, was.span.top + 31, "{row:?}");
+            assert_eq!(is.span.bottom, was.span.bottom + 31, "{row:?}");
+        }
+    }
+
+    #[test]
+    fn with_no_message_the_page_is_as_it_always_was() {
+        assert_eq!(page(None).height, 558);
+        let grown_by_nothing = Some(Grown {
+            row: Row::GlobalShortcut,
+            by: 0,
+        });
+        assert_eq!(page(grown_by_nothing), page(None));
     }
 
     #[test]

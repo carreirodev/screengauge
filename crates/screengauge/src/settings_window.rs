@@ -8,7 +8,8 @@
 //! A click on a control changes the option at once, in the settings file too, with no Save or Cancel (WPC-320). The Snip's
 //! "Change…", and its switch turned on with no folder kept, open Windows' folder window over this one (WPC-322). Like
 //! the link, a control acts only when the left button comes up on the same one it went down on, as the toolbar's
-//! buttons do (WPC-310).
+//! buttons do (WPC-310). The global shortcut's field records a new combination (`recorder`, WPC-323); a press anywhere
+//! else, on the title bar too, or Settings losing the front, stops it.
 //!
 //! Only the resident thread touches it. Its state lives here rather than in the window, since there is one window at
 //! most, and nothing holds a borrow of it across a call that may send the window a message.
@@ -16,6 +17,9 @@
 mod controls;
 mod layout;
 mod paint;
+mod recorder;
+mod recorder_field;
+mod row_message;
 mod snip_card;
 
 use std::cell::{Cell, RefCell};
@@ -52,15 +56,18 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetWindow, HTCLIENT, IDC_ARROW, IDC_HAND, IsIconic, LoadCursorW, LoadIconW,
     PostQuitMessage, RegisterClassExW, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, SWP_FRAMECHANGED,
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetCursor, SetForegroundWindow,
-    SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CAPTURECHANGED, WM_DESTROY,
-    WM_DPICHANGED, WM_ERASEBKGND, WM_GETDPISCALEDSIZE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-    WM_PAINT, WM_SETCURSOR, WNDCLASSEXW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
+    SetWindowPos, ShowWindow, WA_INACTIVE, WINDOW_EX_STYLE, WINDOW_STYLE, WM_ACTIVATE,
+    WM_CAPTURECHANGED, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_GETDPISCALEDSIZE,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCLBUTTONDOWN, WM_PAINT, WM_SETCURSOR, WM_TIMER,
+    WNDCLASSEXW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
 };
 use windows::core::{BOOL, Error, HSTRING, PCWSTR, w};
 
 use crate::theme::Mode;
 use crate::win32::{low_word, signed_words, struct_size};
-use crate::{com, event, folder_picker, graphics, log, resident, settings_file, tray};
+use crate::{
+    com, event, folder_picker, graphics, keyboard_hook, log, resident, settings_file, tray,
+};
 use controls::{Control, Pointer};
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.Settings");
@@ -245,6 +252,11 @@ pub fn close() {
     }
 }
 
+/// Whether the global shortcut's field records: the global shortcut then doesn't call ScreenGauge.
+pub fn is_recording() -> bool {
+    recorder::is_recording()
+}
+
 /// Whether `hwnd` is the Settings window.
 pub fn is(hwnd: HWND) -> bool {
     WINDOW.get() == Some(hwnd)
@@ -317,15 +329,16 @@ fn monitor_at(cursor: screengauge_core::session::Point) -> windows::core::Result
     Ok((info.rcWork, dpi))
 }
 
-/// The window's whole size at `dpi`, title bar and frame included, for the page's 560 logical pixels wide and its fixed
-/// height inside.
+/// The window's whole size at `dpi`, title bar and frame included, for the page's 560 logical pixels wide and its height
+/// inside, taller while a message shows under a row's label.
 fn window_size(dpi: u32) -> windows::core::Result<SIZE> {
     let too_large = || Error::new(E_FAIL, "the page is too large for a window");
     let mut rect = RECT {
         left: 0,
         top: 0,
         right: i32::try_from(scaled(layout::WIDTH, dpi)).map_err(|_| too_large())?,
-        bottom: i32::try_from(scaled(layout::page().height, dpi)).map_err(|_| too_large())?,
+        bottom: i32::try_from(scaled(layout::page(recorder::grown()).height, dpi))
+            .map_err(|_| too_large())?,
     };
     // SAFETY: adjusts a local.
     unsafe { AdjustWindowRectExForDpi(&mut rect, STYLE, false, EX_STYLE, dpi) }?;
@@ -364,6 +377,16 @@ fn fit(hwnd: HWND, dpi: u32) -> windows::core::Result<()> {
     }?;
     redraw(hwnd);
     Ok(())
+}
+
+/// Sizes the window for the page as it is now, where it is: a message under a row's label came or went. The top stays
+/// where it is, and the window grows or shrinks at the bottom.
+fn follow_page(hwnd: HWND) {
+    // SAFETY: our own window.
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    if let Err(e) = fit(hwnd, dpi) {
+        log::failure("Settings: following the page's height", &e);
+    }
 }
 
 /// Drops the render target, made for the old size, and asks for a paint.
@@ -456,6 +479,10 @@ extern "system" fn window_proc(
         }
         WM_LBUTTONDOWN => {
             let point = Some(client_point(lparam));
+            // A press anywhere but on the field stops it recording; the press then acts as it would.
+            if hit_at(point) != Some(Hit::Control(Control::ShortcutField)) {
+                recorder::cancel(hwnd);
+            }
             // A press with no move before it, as after Alt+Tab with the cursor already on +, still finds the cursor
             // on what it pressed, so a held − or + looks pressed at once.
             OVER.set(control_at(point));
@@ -491,7 +518,32 @@ extern "system" fn window_proc(
             }
             LRESULT(0)
         }
+        // A press on the title bar or the frame, and another window coming to the front, stop the field recording.
+        WM_NCLBUTTONDOWN => {
+            recorder::cancel(hwnd);
+            default(hwnd, message, wparam, lparam)
+        }
+        WM_ACTIVATE => {
+            if low_word(LPARAM(wparam.0.cast_signed())) == WA_INACTIVE {
+                recorder::cancel(hwnd);
+            }
+            default(hwnd, message, wparam, lparam)
+        }
+        WM_TIMER if wparam.0 == recorder::BLINK_TIMER => {
+            invalidate(hwnd);
+            LRESULT(0)
+        }
+        keyboard_hook::KEY => {
+            recorder::on_key(hwnd, wparam, lparam);
+            LRESULT(0)
+        }
+        keyboard_hook::ENDED => {
+            recorder::on_hook_ended(hwnd, wparam);
+            LRESULT(0)
+        }
         WM_DESTROY => {
+            // The keyboard goes back to Windows at once.
+            recorder::close();
             WINDOW.set(None);
             drop(TARGET.take());
             DRAWN.set(None);
@@ -594,6 +646,8 @@ fn track_leave(hwnd: HWND) {
 fn act(hwnd: HWND, hit: Hit) {
     match hit {
         Hit::Link => open_project_page(hwnd),
+        Hit::Control(Control::ShortcutField) => recorder::click_field(hwnd),
+        Hit::Control(Control::ShortcutReset) => recorder::click_reset(hwnd),
         Hit::Control(control) => {
             // Read first and nothing held: the folder window below runs a message loop, in which this window is drawn
             // from the options and the file is saved again.
@@ -738,6 +792,11 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
     let options = settings_file::current()
         .map_err(|e| Error::new(E_FAIL, e.to_string()))?
         .options;
+    let shown = paint::Shown {
+        recorder: recorder::view(options.global_shortcut),
+        message: recorder::message(),
+        grown: recorder::grown(),
+    };
     let pointer = Pointer {
         over: OVER.get(),
         held: match PRESSED.get() {
@@ -755,7 +814,7 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
     };
     // SAFETY: drawing calls on a live render target, between BeginDraw and EndDraw.
     unsafe { target.BeginDraw() };
-    let drawn = paint::draw(&surface, &options, pointer);
+    let drawn = paint::draw(&surface, &options, pointer, &shown);
     // SAFETY: ends the BeginDraw above.
     match unsafe { target.EndDraw(None, None) } {
         Ok(()) => TARGET.set(Some(target)),

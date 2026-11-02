@@ -155,7 +155,10 @@ extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_HOTKEY if global_shortcut::is_global_shortcut(wparam) => {
-            on_call(hwnd, Input::GlobalShortcut);
+            // While Settings' field records a new combination, the global shortcut doesn't call ScreenGauge (WPC-323).
+            if !settings_window::is_recording() {
+                on_call(hwnd, Input::GlobalShortcut);
+            }
             LRESULT(0)
         }
         frozen_screen::EFFECTS_READY => {
@@ -200,7 +203,7 @@ extern "system" fn window_proc(
             // Settings draws with the factories released next, so it closes before them.
             settings_window::close();
             graphics::release();
-            if let Err(e) = global_shortcut::unregister(hwnd) {
+            if let Err(e) = global_shortcut::unregister() {
                 log::failure("exit: unregistering the global shortcut", &e);
             }
             if let Err(e) = tray::remove(hwnd) {
