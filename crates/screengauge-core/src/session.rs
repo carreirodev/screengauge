@@ -302,6 +302,13 @@ impl Session {
             // and so does any change of monitors Windows reports, so nothing is measured with the wrong arrangement
             // (v1 spec WPC-296, Closing the tools).
             Input::OtherProgramInFront | Input::MonitorsChanged => self.close(),
+            // The gear closes the tools, and Settings opens once the screen is back and the file written: Settings is a
+            // window, never a tool, so the last tool stays the one that was active (v1 spec WPC-296, Settings).
+            Input::Toolbar(ToolbarButton::Settings) => {
+                let mut effects = self.close();
+                effects.push(Effect::OpenSettings);
+                effects
+            }
             // Only the global shortcut closes the tools: calling ScreenGauge another way while they are open changes
             // nothing (v1 spec WPC-296, "abrir pelo menu Iniciar com a toolbar na tela não muda nada"), and the photo
             // isn't taken again.

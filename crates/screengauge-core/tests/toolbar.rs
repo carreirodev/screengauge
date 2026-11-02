@@ -1,6 +1,6 @@
 //! Layer 1 tests of the toolbar and of switching tools (v1 spec WPC-296, Toolbar and Trocar de ferramenta; ticket
-//! WPC-310): the toolbar the scene shows, keys 1 to 4 and the tools' buttons, H, V and C, the close button, the buttons
-//! that do nothing yet, the last tool remembered, and what a switch keeps, on frozen screens drawn here, without a
+//! WPC-310): the toolbar the scene shows, keys 1 to 4 and the tools' buttons, H, V and C, the close button, the gear
+//! that opens Settings, the last tool remembered, and what a switch keeps, on frozen screens drawn here, without a
 //! screen. They look only at the scene the session would draw and at the effects it returns.
 //!
 //! Inspect and Snip can be made active, and then their button is lit and nothing is measured (the owner's choice in
@@ -304,12 +304,35 @@ fn a_toolbar_button_clicked_as_the_second_click_of_the_calling_double_click_does
 }
 
 #[test]
-fn the_gear_does_nothing_yet() {
+fn the_gear_closes_the_tools_and_then_opens_settings() {
     let mut session = open(Tool::Dimensions, DimensionsMode::Horizontal, BETWEEN_CARDS);
     session.handle(event(BETWEEN_CARDS, 1000, Input::Press));
-    let before = format!("{:?}", session.scene());
+    assert_eq!(session.scene().pinned.len(), 1);
+    // The screen comes back first, then Settings opens over the programs (v1 spec WPC-296, Settings: "abri-la fecha as
+    // ferramentas"). Nothing remembered changed, so nothing is written.
+    assert_eq!(
+        session.handle(press(ToolbarButton::Settings)),
+        [Effect::Close, Effect::OpenSettings]
+    );
+    assert_eq!(session.scene().pinned, []);
+    // Closed: the session takes nothing more, a second gear included.
     assert_eq!(session.handle(press(ToolbarButton::Settings)), []);
-    assert_eq!(format!("{:?}", session.scene()), before);
+    assert_eq!(session.handle(key(BETWEEN_CARDS, Key::Digit1)), []);
+}
+
+#[test]
+fn the_gear_keeps_what_the_session_changed_before_settings_opens() {
+    let mut session = open(Tool::Dimensions, DimensionsMode::Horizontal, BETWEEN_CARDS);
+    session.handle(key(BETWEEN_CARDS, Key::Digit3));
+    let effects = session.handle(press(ToolbarButton::Settings));
+    assert_eq!(effects.first(), Some(&Effect::Close));
+    assert_eq!(
+        saved(&effects).map(|kept| kept.last_tool),
+        Some(Tool::Inspect)
+    );
+    // Settings is a window, not a tool: Inspect stays the last tool, and Settings opens once the file is written.
+    assert_eq!(effects.last(), Some(&Effect::OpenSettings));
+    assert_eq!(effects.len(), 3);
 }
 
 fn pin_count(session: &Session) -> usize {

@@ -356,7 +356,8 @@ pub enum Effect {
     StepAside,
     /// Bring the frozen screen and Save As back in front, over every program, as they were before they stepped aside.
     ComeBack,
-    /// Open the Settings window.
+    /// Open the Settings window, at the center of the current monitor, or bring it to the front as it is when it is
+    /// open already. It comes after [`Effect::Close`]: the gear closes the tools first.
     OpenSettings,
     /// Put the mouse cursor at this point, in physical pixels of the virtual screen, as the arrow keys do. The session
     /// has already measured there; the move Windows then reports changes nothing more.
