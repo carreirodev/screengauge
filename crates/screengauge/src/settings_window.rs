@@ -1,12 +1,17 @@
 //! Settings: the one window, apart from the tools, where the user changes ScreenGauge's options (v1 spec WPC-296,
 //! Settings). It opens at the center of the current monitor, shows on the taskbar and in Alt+Tab while it is open, and
 //! opening it again brings the same window to the front. Its title bar is Windows' own, dark in the dark theme; below
-//! it, ScreenGauge draws one page that the user can't resize: the blocks' cards, and the footer with the version and
-//! the link to the project's page. Its X closes only the window, and ScreenGauge keeps running.
+//! it, ScreenGauge draws one page that the user can't resize: the blocks' cards with their rows, and the footer with
+//! the version and the link to the project's page. Its X closes only the window, and ScreenGauge keeps running.
+//!
+//! A click on a control changes the option at once, in the settings file too, with no Save or Cancel (WPC-320). Like
+//! the link, a control acts only when the left button comes up on the same one it went down on, as the toolbar's
+//! buttons do (WPC-310).
 //!
 //! Only the resident thread touches it. Its state lives here rather than in the window, since there is one window at
 //! most, and nothing holds a borrow of it across a call that may send the window a message.
 
+mod controls;
 mod layout;
 mod paint;
 
@@ -34,23 +39,30 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{
     AdjustWindowRectExForDpi, GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
+};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetCursorPos, HTCLIENT,
     IDC_ARROW, IDC_HAND, IsIconic, LoadCursorW, LoadIconW, RegisterClassExW, SW_RESTORE, SW_SHOW,
     SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetCursor, SetForegroundWindow,
     SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CAPTURECHANGED, WM_DESTROY,
-    WM_DPICHANGED, WM_ERASEBKGND, WM_GETDPISCALEDSIZE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_PAINT,
-    WM_SETCURSOR, WNDCLASSEXW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
+    WM_DPICHANGED, WM_ERASEBKGND, WM_GETDPISCALEDSIZE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_PAINT, WM_SETCURSOR, WNDCLASSEXW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
 };
 use windows::core::{BOOL, Error, HSTRING, PCWSTR, w};
 
 use crate::theme::Mode;
 use crate::win32::{low_word, signed_words, struct_size};
-use crate::{com, event, graphics, log, tray};
+use crate::{com, event, graphics, log, settings_file, tray};
+use controls::{Control, Pointer};
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.Settings");
+
+/// The message TrackMouseEvent sends when the cursor leaves the window. The windows crate has it only among the common
+/// controls' features, which ScreenGauge doesn't otherwise need.
+const WM_MOUSELEAVE: u32 = 0x02A3;
 
 /// The title Windows shows in the title bar, on the taskbar and in Alt+Tab.
 const TITLE: PCWSTR = w!("ScreenGauge Settings");
@@ -73,10 +85,21 @@ thread_local! {
     static MODE: Cell<Mode> = const { Cell::new(Mode::Light) };
     /// Made at the first paint, and again after the scale changed or the graphics device was lost.
     static TARGET: RefCell<Option<ID2D1HwndRenderTarget>> = const { RefCell::new(None) };
-    /// Where the last paint put the "Project page" link, in the window's client pixels.
-    static LINK: Cell<Option<RECT>> = const { Cell::new(None) };
-    /// Whether the left button went down on the link and is still held: the link acts only when it comes up on it too.
-    static PRESSED_ON_LINK: Cell<bool> = const { Cell::new(false) };
+    /// Where the last paint put what a click acts on, in the window's client pixels.
+    static DRAWN: RefCell<Option<paint::Drawn>> = const { RefCell::new(None) };
+    /// What the left button went down on and still holds: it acts only when the button comes up on it too.
+    static PRESSED: Cell<Option<Hit>> = const { Cell::new(None) };
+    /// The control the cursor is on, which the − and + show by brightening their sign.
+    static OVER: Cell<Option<Control>> = const { Cell::new(None) };
+    /// Whether Windows has been asked to say when the cursor leaves the window, so the brightened sign goes back.
+    static TRACKING_LEAVE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// What a click in the page can act on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Hit {
+    Link,
+    Control(Control),
 }
 
 /// Registered once at startup.
@@ -336,7 +359,9 @@ extern "system" fn window_proc(
             paint(hwnd);
             LRESULT(0)
         }
-        WM_SETCURSOR if low_word(lparam) == HTCLIENT && on_link(cursor_in(hwnd)) => {
+        WM_SETCURSOR
+            if low_word(lparam) == HTCLIENT && hit_at(cursor_in(hwnd)) == Some(Hit::Link) =>
+        {
             // SAFETY: a system cursor, shared.
             match unsafe { LoadCursorW(None, IDC_HAND) } {
                 // SAFETY: a valid cursor.
@@ -348,35 +373,53 @@ extern "system" fn window_proc(
             };
             LRESULT(1)
         }
+        WM_MOUSEMOVE => {
+            track_leave(hwnd);
+            point_at(hwnd, control_at(Some(client_point(lparam))));
+            LRESULT(0)
+        }
+        WM_MOUSELEAVE => {
+            TRACKING_LEAVE.set(false);
+            point_at(hwnd, None);
+            LRESULT(0)
+        }
         WM_LBUTTONDOWN => {
-            if on_link(Some(client_point(lparam))) {
-                PRESSED_ON_LINK.set(true);
+            if let Some(hit) = hit_at(Some(client_point(lparam))) {
+                PRESSED.set(Some(hit));
                 // SAFETY: our own window; the release comes here wherever the mouse is.
                 unsafe { SetCapture(hwnd) };
+                // A held − or + looks pressed.
+                invalidate(hwnd);
             }
             LRESULT(0)
         }
         WM_LBUTTONUP => {
-            if PRESSED_ON_LINK.replace(false) {
-                // SAFETY: ends the capture taken above.
+            if let Some(pressed) = PRESSED.take() {
+                // SAFETY: ends the capture taken above. Its WM_CAPTURECHANGED finds nothing held any more.
                 if let Err(e) = unsafe { ReleaseCapture() } {
                     log::failure("Settings: letting the mouse go", &e);
                 }
-                if on_link(Some(client_point(lparam))) {
-                    open_project_page(hwnd);
+                if hit_at(Some(client_point(lparam))) == Some(pressed) {
+                    act(hwnd, pressed);
                 }
+                invalidate(hwnd);
             }
             LRESULT(0)
         }
         WM_CAPTURECHANGED => {
-            PRESSED_ON_LINK.set(false);
+            // Another window took the mouse while the button was held: nothing acts.
+            if PRESSED.take().is_some() {
+                invalidate(hwnd);
+            }
             LRESULT(0)
         }
         WM_DESTROY => {
             WINDOW.set(None);
             drop(TARGET.take());
-            LINK.set(None);
-            PRESSED_ON_LINK.set(false);
+            DRAWN.set(None);
+            PRESSED.set(None);
+            OVER.set(None);
+            TRACKING_LEAVE.set(false);
             LRESULT(0)
         }
         _ => default(hwnd, message, wparam, lparam),
@@ -416,12 +459,84 @@ fn cursor_in(hwnd: HWND) -> Option<POINT> {
     Some(point)
 }
 
-fn on_link(point: Option<POINT>) -> bool {
-    match (point, LINK.get()) {
-        (Some(point), Some(link)) => {
-            (link.left..link.right).contains(&point.x) && (link.top..link.bottom).contains(&point.y)
+fn contains(rect: &RECT, point: POINT) -> bool {
+    (rect.left..rect.right).contains(&point.x) && (rect.top..rect.bottom).contains(&point.y)
+}
+
+/// What a click at `point` acts on, as the last paint drew it.
+fn hit_at(point: Option<POINT>) -> Option<Hit> {
+    let point = point?;
+    DRAWN.with_borrow(|drawn| {
+        let drawn = drawn.as_ref()?;
+        if contains(&drawn.link, point) {
+            return Some(Hit::Link);
         }
-        _ => false,
+        drawn
+            .controls
+            .iter()
+            .find(|(_, place)| contains(place, point))
+            .map(|&(control, _)| Hit::Control(control))
+    })
+}
+
+fn control_at(point: Option<POINT>) -> Option<Control> {
+    match hit_at(point)? {
+        Hit::Control(control) => Some(control),
+        Hit::Link => None,
+    }
+}
+
+/// Notes that the cursor is on `over`, and draws the page again when that changed.
+fn point_at(hwnd: HWND, over: Option<Control>) {
+    if OVER.replace(over) != over {
+        invalidate(hwnd);
+    }
+}
+
+/// Asks Windows for WM_MOUSELEAVE when the cursor leaves the window, once each time it comes in.
+fn track_leave(hwnd: HWND) {
+    if TRACKING_LEAVE.get() {
+        return;
+    }
+    let mut track = TRACKMOUSEEVENT {
+        cbSize: const { struct_size::<TRACKMOUSEEVENT>() },
+        dwFlags: TME_LEAVE,
+        hwndTrack: hwnd,
+        dwHoverTime: 0,
+    };
+    // SAFETY: our own window; the struct is fully set and outlives the call.
+    match unsafe { TrackMouseEvent(&mut track) } {
+        Ok(()) => TRACKING_LEAVE.set(true),
+        // The sign may stay bright after the cursor leaves; the next move over the window asks again.
+        Err(e) => log::failure("Settings: following the cursor out of the window", &e),
+    }
+}
+
+/// Does what a click on `hit` does.
+fn act(hwnd: HWND, hit: Hit) {
+    match hit {
+        Hit::Link => open_project_page(hwnd),
+        Hit::Control(control) => {
+            let saved = settings_file::update(|stored| {
+                let change = controls::change(control, &stored.options);
+                stored.options.apply(change)
+            });
+            // The change holds in this run even when the file couldn't be saved.
+            if let Err(e) = saved {
+                log::failure("Settings: saving a change", &e);
+            }
+        }
+    }
+}
+
+/// Asks for a paint with the render target kept, as after a click or a move that changes what the page shows.
+fn invalidate(hwnd: HWND) {
+    // SAFETY: our own window.
+    if !unsafe { InvalidateRect(Some(hwnd), None, false) }.as_bool() {
+        log::failure(
+            "Settings: drawing it again",
+            &"InvalidateRect returned FALSE",
+        );
     }
 }
 
@@ -486,9 +601,28 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
     // SAFETY: our own window.
     let dpi = unsafe { GetDpiForWindow(hwnd) };
     let fonts = graphics::fonts()?;
+    let factory = graphics::factory()?;
+    let options = settings_file::current()
+        .map_err(|e| Error::new(E_FAIL, e.to_string()))?
+        .options;
+    let pointer = Pointer {
+        over: OVER.get(),
+        held: match PRESSED.get() {
+            Some(Hit::Control(control)) => Some(control),
+            Some(Hit::Link) | None => None,
+        },
+    };
+    let surface = paint::Surface {
+        target: &target,
+        factory: &factory,
+        fonts: &fonts,
+        mode: MODE.get(),
+        dpi,
+        width: size.width,
+    };
     // SAFETY: drawing calls on a live render target, between BeginDraw and EndDraw.
     unsafe { target.BeginDraw() };
-    let drawn = paint::draw(&target, &fonts, MODE.get(), dpi, size.width);
+    let drawn = paint::draw(&surface, &options, pointer);
     // SAFETY: ends the BeginDraw above.
     match unsafe { target.EndDraw(None, None) } {
         Ok(()) => TARGET.set(Some(target)),
@@ -505,7 +639,7 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
             return Err(e);
         }
     }
-    LINK.set(Some(drawn?));
+    DRAWN.set(Some(drawn?));
     Ok(())
 }
 

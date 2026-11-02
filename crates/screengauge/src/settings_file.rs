@@ -1,7 +1,11 @@
 //! The settings file on disk (v1 spec WPC-296, Settings file and remembered state): opened when ScreenGauge starts,
 //! created with the defaults the first time so there is a file to edit, and replaced in one step whenever it is saved.
 //! What the file holds and how its text reads belongs to the core (`screengauge_core::settings`).
+//!
+//! What the file holds is kept here once, with the file to save it to: the tools read it at every call, Settings reads
+//! and changes it, and the remembered state is saved into it, so no part ever saves a copy that undoes another's change.
 
+use std::cell::RefCell;
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -14,6 +18,53 @@ use windows::Win32::UI::Shell::{FOLDERID_LocalAppData, KF_FLAG_DEFAULT, SHGetKno
 
 use crate::log;
 use crate::notification::{self, Notification};
+
+thread_local! {
+    /// What the settings file holds, and the file to save it to. Set once, as the process starts, on the resident
+    /// thread, the only one that reads or changes it.
+    static KEPT: RefCell<Option<Kept>> = const { RefCell::new(None) };
+}
+
+/// The settings file as ScreenGauge read it at startup, kept up to date as it saves.
+struct Kept {
+    /// `None` when the file couldn't be opened: ScreenGauge then runs with the defaults and saves nothing.
+    file: Option<SettingsFile>,
+    stored: Stored,
+}
+
+/// Keeps what the settings file held at startup, and the file to save it to, for the rest of the run.
+pub fn keep(file: Option<SettingsFile>, stored: Stored) {
+    KEPT.set(Some(Kept { file, stored }));
+}
+
+/// What the settings file holds now, Settings' changes and the remembered state included.
+pub fn current() -> io::Result<Stored> {
+    KEPT.with_borrow(|kept| {
+        kept.as_ref()
+            .map(|kept| kept.stored.clone())
+            .ok_or_else(not_kept)
+    })
+}
+
+/// Changes what the settings file holds with `change`, which says whether it changed anything, and then saves the file
+/// when there is one. The change is kept even when the save fails, so it holds until ScreenGauge exits. Returns whether
+/// anything changed.
+pub fn update(change: impl FnOnce(&mut Stored) -> bool) -> io::Result<bool> {
+    KEPT.with_borrow_mut(|kept| {
+        let kept = kept.as_mut().ok_or_else(not_kept)?;
+        if !change(&mut kept.stored) {
+            return Ok(false);
+        }
+        if let Some(file) = &kept.file {
+            file.save(&kept.stored)?;
+        }
+        Ok(true)
+    })
+}
+
+fn not_kept() -> io::Error {
+    io::Error::other("the settings file wasn't read at startup")
+}
 
 const FILE_NAME: &str = "settings.ini";
 /// What a save writes before it replaces the file.
@@ -210,7 +261,7 @@ mod tests {
     use std::fs::OpenOptions;
     use std::os::windows::fs::OpenOptionsExt;
 
-    use screengauge_core::settings::{self as core, Theme, Tool};
+    use screengauge_core::settings::{self as core, Change, ColorFormat, Theme, Tool};
 
     use super::*;
     use crate::test_folder::{TestFolder, make_read_only};
@@ -380,6 +431,85 @@ mod tests {
         );
         assert!(folder.file("settings.ini").is_dir());
         assert_eq!(folder.names(), ["settings.ini"]);
+    }
+
+    /// What the file in `folder` holds, read back from the disk.
+    fn on_disk(folder: &TestFolder) -> Stored {
+        let bytes = fs::read(folder.file("settings.ini")).expect("the file is there");
+        core::read(&bytes).expect("the file reads").stored
+    }
+
+    #[test]
+    fn a_change_from_settings_is_kept_and_saved_at_once() {
+        let folder = TestFolder::new("kept-change");
+        let (file, stored, _) = open(&folder);
+        keep(Some(file), stored);
+
+        let changed = update(|stored| stored.options.apply(Change::ColorFormat(ColorFormat::Hex)));
+        assert!(changed.expect("the change is saved"));
+        // The next call of the tools reads what is kept, and the file holds it too.
+        assert_eq!(
+            current().expect("kept").options.color_format,
+            ColorFormat::Hex
+        );
+        assert_eq!(on_disk(&folder).options.color_format, ColorFormat::Hex);
+    }
+
+    #[test]
+    fn saving_the_remembered_state_keeps_an_option_changed_since_the_tools_opened() {
+        let folder = TestFolder::new("remembered-after-change");
+        let (file, stored, _) = open(&folder);
+        keep(Some(file), stored);
+        // The tools open with what is kept now, and Settings changes an option afterwards.
+        let mut remembered = current().expect("kept").remembered;
+        update(|stored| stored.options.apply(Change::DefaultToleranceUp)).expect("saved");
+        // The tools close and save what they remember.
+        remembered.last_tool = Tool::Snip;
+        update(|stored| {
+            stored.remembered = remembered.clone();
+            true
+        })
+        .expect("saved");
+        let read = on_disk(&folder);
+        assert_eq!(read.remembered.last_tool, Tool::Snip);
+        assert_eq!(
+            read.options.default_tolerance,
+            core::Tolerance::default().up()
+        );
+    }
+
+    #[test]
+    fn a_change_that_changes_nothing_writes_nothing() {
+        let folder = TestFolder::new("no-change");
+        let (file, stored, _) = open(&folder);
+        keep(Some(file), stored);
+        // Read-only, the file can't be saved: a save would fail.
+        make_read_only(&folder.file("settings.ini"));
+        let changed = update(|stored| stored.options.apply(Change::ColorFormat(ColorFormat::Both)));
+        assert!(!changed.expect("nothing to save"));
+    }
+
+    #[test]
+    fn a_change_holds_for_the_run_even_when_the_file_can_t_be_saved() {
+        let folder = TestFolder::new("read-only-change");
+        let (file, stored, _) = open(&folder);
+        keep(Some(file), stored);
+        make_read_only(&folder.file("settings.ini"));
+        let saved = update(|stored| stored.options.apply(Change::AlsoShowLogicalPixels(false)));
+        assert!(saved.is_err(), "{saved:?}");
+        assert!(!current().expect("kept").options.also_show_logical_pixels);
+        assert!(on_disk(&folder).options.also_show_logical_pixels);
+    }
+
+    #[test]
+    fn without_a_file_a_change_holds_for_the_run() {
+        keep(None, Stored::default());
+        let changed = update(|stored| stored.options.apply(Change::DefaultToleranceDown));
+        assert!(changed.expect("nothing to save to"));
+        assert_eq!(
+            current().expect("kept").options.default_tolerance,
+            core::Tolerance::default().down()
+        );
     }
 
     #[test]

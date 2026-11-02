@@ -24,8 +24,8 @@ pub const fn stop(at: f32, color: Color) -> Stop {
     Stop { at, color }
 }
 
-/// A `box-shadow` with no sideways offset, which none of the toolbar's or Settings' has: it falls `y` down, blurs by `blur` and is
-/// `spread` bigger than its box on every side (smaller, should it be negative).
+/// A `box-shadow` with no sideways offset, which none of the toolbar's or Settings' has: it falls `y` down, blurs by
+/// `blur` and is `spread` bigger than its box on every side (smaller, should it be negative).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shadow {
     pub y: i32,

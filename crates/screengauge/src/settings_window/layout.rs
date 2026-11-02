@@ -15,7 +15,8 @@
 //! | the footer (`.sfoot`) | 36.26 | 36 |
 //!
 //! The page measured 556.56 tall; in whole pixels it is 558. The window's height is fixed at that: the user doesn't
-//! change it, and the blocks' rows, which the tickets after WPC-319 draw, go inside these cards.
+//! change it, and the blocks' rows go inside these cards: Measurements' and Inspect's from WPC-320, the others with their
+//! own tickets.
 
 /// The page's width.
 pub const WIDTH: u32 = 560;
@@ -117,6 +118,114 @@ pub struct Page {
     pub height: u32,
 }
 
+/// One option's row: its label on the left, its note under the label when it has one, and its control on the right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Row {
+    DefaultTolerance,
+    AlsoShowLogicalPixels,
+    ColorFormat,
+}
+
+impl Row {
+    pub fn label(self) -> &'static str {
+        match self {
+            Row::DefaultTolerance => "Default tolerance",
+            Row::AlsoShowLogicalPixels => "Also show logical pixels",
+            Row::ColorFormat => "Color format",
+        }
+    }
+
+    pub fn note(self) -> Option<&'static str> {
+        match self {
+            Row::DefaultTolerance => Some("The mouse wheel adjusts it while measuring."),
+            Row::AlsoShowLogicalPixels => Some("When the display scale isn't 100%."),
+            Row::ColorFormat => None,
+        }
+    }
+
+    /// The block it is in, and its place among the block's rows, counted from 0.
+    fn slot(self) -> (Block, u32) {
+        match self {
+            Row::DefaultTolerance => (Block::Measurements, 0),
+            Row::AlsoShowLogicalPixels => (Block::Measurements, 1),
+            Row::ColorFormat => (Block::Inspect, 0),
+        }
+    }
+}
+
+/// The rows ScreenGauge draws, top to bottom. General's and Snip's come with their own tickets (WPC-321 to WPC-326),
+/// into the room their cards already have.
+pub const ROWS: [Row; 3] = [
+    Row::DefaultTolerance,
+    Row::AlsoShowLogicalPixels,
+    Row::ColorFormat,
+];
+
+/// The card's border, and the room left and right of a row's label and control inside it (`.srow`'s padding).
+pub const CARD_BORDER: u32 = 1;
+pub const ROW_PADDING: u32 = 12;
+
+/// A row's label (`#settings`' `font: 13px/1.3`) and note (`.note`: 11.5 tall on the same line-height, 1 below the
+/// label): their sizes, their lines, and the room between them.
+pub const LABEL_TEXT: f32 = 13.0;
+pub const LABEL_LINE: f32 = 13.0 * 1.3;
+pub const NOTE_TEXT: f32 = 11.5;
+pub const NOTE_LINE: f32 = 11.5 * 1.3;
+pub const NOTE_GAP: f32 = 1.0;
+
+impl Block {
+    /// Its place in `BLOCKS`, and so on the page.
+    fn index(self) -> usize {
+        match self {
+            Block::General => 0,
+            Block::Measurements => 1,
+            Block::Inspect => 2,
+            Block::Snip => 3,
+        }
+    }
+
+    /// How many rows the spec gives the block's card: they share its height, a 1-pixel line between two.
+    fn rows(self) -> u32 {
+        match self {
+            Block::General => 3,
+            Block::Measurements => 2,
+            Block::Inspect => 1,
+            // The Snip's card has its own shape (the folder's line and its note), which WPC-322 lays out.
+            Block::Snip => 2,
+        }
+    }
+}
+
+/// A row in its card: from below the line above it, or the card's border, to the line or the border below it, and
+/// whether a line runs above it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlacedRow {
+    pub row: Row,
+    pub span: Span,
+    pub line_above: bool,
+}
+
+/// Where `row` is on the page. A card's rows share the room inside its border, the first ones a pixel taller when it
+/// doesn't divide evenly.
+pub fn place_row(row: Row) -> PlacedRow {
+    let (block, index) = row.slot();
+    let placed = page().blocks[block.index()];
+    let count = block.rows();
+    let inside = placed.card.bottom - placed.card.top - 2 * CARD_BORDER;
+    let room = inside - (count - 1);
+    let (each, extra) = (room / count, room % count);
+    let height = |i: u32| each + u32::from(i < extra);
+    let top = placed.card.top + CARD_BORDER + (0..index).map(|i| height(i) + 1).sum::<u32>();
+    PlacedRow {
+        row,
+        span: Span {
+            top,
+            bottom: top + height(index),
+        },
+        line_above: index > 0,
+    }
+}
+
 /// The page, laid out.
 pub fn page() -> Page {
     let mut top = PADDING;
@@ -198,6 +307,65 @@ mod tests {
                 placed.block
             );
         }
+    }
+
+    #[test]
+    fn every_block_s_index_is_its_place_in_the_list() {
+        for (index, block) in BLOCKS.iter().enumerate() {
+            assert_eq!(block.index(), index, "{block:?}");
+        }
+    }
+
+    #[test]
+    fn measurements_two_rows_share_its_card_with_a_line_between_them() {
+        let card = page().blocks[1].card;
+        let tolerance = place_row(Row::DefaultTolerance);
+        let logical = place_row(Row::AlsoShowLogicalPixels);
+        // Inside the card's border, one below the other, a pixel apart for the line, filling the card.
+        assert_eq!(tolerance.span.top, card.top + 1);
+        assert_eq!(logical.span.top, tolerance.span.bottom + 1);
+        assert_eq!(logical.span.bottom, card.bottom - 1);
+        assert!(!tolerance.line_above && logical.line_above);
+        // The prototype's rows with a note are 42.84 and 43.51 tall, its line included in the second.
+        let heights = [
+            tolerance.span.bottom - tolerance.span.top,
+            logical.span.bottom - logical.span.top,
+        ];
+        assert_eq!(heights, [43, 42]);
+    }
+
+    #[test]
+    fn inspect_s_one_row_fills_its_card() {
+        let card = page().blocks[2].card;
+        let color = place_row(Row::ColorFormat);
+        assert_eq!(
+            color.span,
+            Span {
+                top: card.top + 1,
+                bottom: card.bottom - 1
+            }
+        );
+        assert!(!color.line_above);
+    }
+
+    #[test]
+    fn the_rows_have_the_spec_s_labels_and_notes() {
+        let texts: Vec<(&str, Option<&str>)> =
+            ROWS.iter().map(|row| (row.label(), row.note())).collect();
+        assert_eq!(
+            texts,
+            [
+                (
+                    "Default tolerance",
+                    Some("The mouse wheel adjusts it while measuring.")
+                ),
+                (
+                    "Also show logical pixels",
+                    Some("When the display scale isn't 100%.")
+                ),
+                ("Color format", None),
+            ]
+        );
     }
 
     #[test]

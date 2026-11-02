@@ -25,7 +25,7 @@ use windows::core::{Error, PCWSTR, w};
 
 use crate::frozen_screen::{self, FrozenScreen};
 use crate::notification::{self, Notification};
-use crate::settings_file::SettingsFile;
+use crate::settings_file::{self, SettingsFile};
 use crate::win32::{low_word, struct_size};
 use crate::{
     capture, clipboard, event, global_shortcut, graphics, log, png, save_as, settings_window,
@@ -50,22 +50,13 @@ thread_local! {
     /// Opening and closing set it and take it out, never while it is borrowed, because they show and destroy windows;
     /// what runs while it is borrowed dispatches no message.
     static FROZEN_SCREEN: RefCell<Option<FrozenScreen>> = const { RefCell::new(None) };
-    /// What the settings file holds, and the file to save it to. Set once, as the process starts.
-    static SETTINGS_FILE: RefCell<Option<LoadedSettingsFile>> = const { RefCell::new(None) };
-}
-
-/// The settings file as ScreenGauge read it at startup, kept up to date as it saves.
-struct LoadedSettingsFile {
-    /// `None` when the file couldn't be opened: ScreenGauge then runs with the defaults and saves nothing.
-    file: Option<SettingsFile>,
-    stored: Stored,
 }
 
 /// Calls ScreenGauge right away, since opening it is a call, then runs until the user exits from the tray icon, with
 /// what the settings file holds and the file to save it to.
 pub fn run(file: Option<SettingsFile>, stored: Stored) -> windows::core::Result<()> {
     let shortcut = stored.options.global_shortcut;
-    SETTINGS_FILE.set(Some(LoadedSettingsFile { file, stored }));
+    settings_file::keep(file, stored);
     TASKBAR_CREATED.store(register_message(w!("TaskbarCreated"))?, Ordering::Relaxed);
     CALL.store(register_message(CALL_NAME)?, Ordering::Relaxed);
 
@@ -260,9 +251,7 @@ fn open(
     let Stored {
         options,
         remembered,
-    } = SETTINGS_FILE
-        .with_borrow(|loaded| loaded.as_ref().map(|loaded| loaded.stored.clone()))
-        .ok_or_else(|| Error::new(E_FAIL, "the settings file wasn't read at startup"))?;
+    } = settings_file::current().map_err(|e| Error::new(E_FAIL, e.to_string()))?;
     let mode = theme::mode(options.theme);
     let session = Session::open(Opening {
         frozen_screen,
@@ -360,12 +349,9 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
 
 /// Opens Settings, or brings it to the front, in the palette of the theme the settings file holds.
 fn open_settings() {
-    let theme = SETTINGS_FILE.with_borrow(|loaded| {
-        loaded
-            .as_ref()
-            .map(|loaded| loaded.stored.options.theme)
-            .ok_or_else(|| Error::new(E_FAIL, "the settings file wasn't read at startup"))
-    });
+    let theme = settings_file::current()
+        .map(|stored| stored.options.theme)
+        .map_err(|e| Error::new(E_FAIL, e.to_string()));
     let opened = theme.and_then(|theme| settings_window::open(theme::mode(theme)));
     if let Err(e) = opened {
         log::failure("Settings: opening it", &e);
@@ -426,23 +412,17 @@ fn close(resident: HWND) {
     notification::tools_closed(resident);
 }
 
-/// Keeps `remembered` for the next call, and in the settings file when there is one.
+/// Keeps `remembered` for the next call, and in the settings file when there is one. Only the remembered state is
+/// replaced: an option changed in Settings since the tools opened stays as it was changed.
 fn save_remembered(remembered: Remembered) {
-    SETTINGS_FILE.with_borrow_mut(|loaded| {
-        let Some(loaded) = loaded else {
-            log::failure(
-                "settings: saving the remembered state",
-                &"the settings file wasn't read at startup",
-            );
-            return;
-        };
-        loaded.stored.remembered = remembered;
-        if let Some(file) = &loaded.file
-            && let Err(e) = file.save(&loaded.stored)
-        {
-            log::failure("settings: saving the remembered state", &e);
-        }
+    let saved = settings_file::update(|stored| {
+        let changed = stored.remembered != remembered;
+        stored.remembered = remembered;
+        changed
     });
+    if let Err(e) = saved {
+        log::failure("settings: saving the remembered state", &e);
+    }
 }
 
 /// Posts the call to this copy's own resident window, which handles it once the message being handled is answered.

@@ -1,8 +1,8 @@
-//! CSS box shadows with a blur, as rounded rectangles laid over each other (the toolbar's, WPC-310, and Settings'). Direct2D's render
-//! targets have no blur of their own, so a shadow is drawn the way the notice's is: the shape grown by a little more
-//! each time, every layer faint, so that where the layers overlap their opacities add up to the strength a gaussian blur
-//! would leave there. This module works the opacities out; what to fill with them is in `relief`. It needs no
-//! Windows, so it is tested without a graphics card.
+//! CSS box shadows with a blur, as rounded rectangles laid over each other (the toolbar's, WPC-310, and Settings').
+//! Direct2D's render targets have no blur of their own, so a shadow is drawn the way the notice's is: the shape grown
+//! by a little more each time, every layer faint, so that where the layers overlap their opacities add up to the
+//! strength a gaussian blur would leave there. This module works the opacities out; what to fill with them is in
+//! `relief`. It needs no Windows, so it is tested without a graphics card.
 //!
 //! What is approximated, honestly: the blur is taken as along a straight edge, or across the short side of a box, and
 //! applied by distance from the shape's outline, so a corner comes out a little too dark and the end of a long box a

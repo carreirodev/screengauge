@@ -442,3 +442,74 @@ fn each_magnification_enlarges_a_pixel_to_its_number_of_pixels_a_side() {
     .map(Magnification::factor);
     assert_eq!(factors, [2, 4, 8, 16, 32]);
 }
+
+/// What Settings' controls do to the options (WPC-320): each click changes one option, and says whether it changed.
+mod changes {
+    use screengauge_core::settings::{Change, ColorFormat, Options, Tolerance};
+
+    fn tolerance(value: u8) -> Tolerance {
+        Tolerance::new(value).expect("within the limits")
+    }
+
+    #[test]
+    fn minus_and_plus_step_the_default_tolerance_as_one_notch_of_the_wheel_does() {
+        let mut options = Options::default();
+        assert_eq!(options.default_tolerance, tolerance(2));
+        assert!(options.apply(Change::DefaultToleranceUp));
+        assert_eq!(options.default_tolerance, tolerance(2).up());
+        assert!(options.apply(Change::DefaultToleranceDown));
+        assert!(options.apply(Change::DefaultToleranceDown));
+        assert_eq!(options.default_tolerance, tolerance(2).down());
+    }
+
+    #[test]
+    fn minus_at_the_lowest_and_plus_at_the_highest_tolerance_change_nothing() {
+        let mut options = Options {
+            default_tolerance: Tolerance::MIN,
+            ..Options::default()
+        };
+        assert!(!options.apply(Change::DefaultToleranceDown));
+        assert_eq!(options.default_tolerance, Tolerance::MIN);
+
+        options.default_tolerance = Tolerance::MAX;
+        assert!(!options.apply(Change::DefaultToleranceUp));
+        assert_eq!(options.default_tolerance, Tolerance::MAX);
+    }
+
+    #[test]
+    fn the_switch_turns_logical_pixels_off_and_on_again() {
+        let mut options = Options::default();
+        assert!(options.also_show_logical_pixels, "on by default");
+        assert!(options.apply(Change::AlsoShowLogicalPixels(false)));
+        assert!(!options.also_show_logical_pixels);
+        assert!(!options.apply(Change::AlsoShowLogicalPixels(false)));
+        assert!(options.apply(Change::AlsoShowLogicalPixels(true)));
+        assert!(options.also_show_logical_pixels);
+    }
+
+    #[test]
+    fn a_color_format_is_chosen_and_choosing_it_again_changes_nothing() {
+        let mut options = Options::default();
+        assert_eq!(options.color_format, ColorFormat::Both);
+        assert!(options.apply(Change::ColorFormat(ColorFormat::Hex)));
+        assert_eq!(options.color_format, ColorFormat::Hex);
+        assert!(!options.apply(Change::ColorFormat(ColorFormat::Hex)));
+        assert!(options.apply(Change::ColorFormat(ColorFormat::Rgb)));
+        assert_eq!(options.color_format, ColorFormat::Rgb);
+    }
+
+    #[test]
+    fn a_change_touches_only_its_own_option() {
+        let mut options = Options::default();
+        options.apply(Change::ColorFormat(ColorFormat::Rgb));
+        options.apply(Change::AlsoShowLogicalPixels(false));
+        options.apply(Change::DefaultToleranceUp);
+        let wanted = Options {
+            default_tolerance: tolerance(2).up(),
+            also_show_logical_pixels: false,
+            color_format: ColorFormat::Rgb,
+            ..Options::default()
+        };
+        assert_eq!(options, wanted);
+    }
+}

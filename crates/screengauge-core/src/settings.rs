@@ -47,6 +47,33 @@ impl Default for Options {
     }
 }
 
+/// One change the user makes in Settings. Each takes effect, and is saved, at once, with no Save or Cancel (v1 spec
+/// WPC-296, Settings): the next call opens with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Change {
+    /// "Default tolerance"'s − and +: the same step as a notch of the mouse wheel, stopping at the limits.
+    DefaultToleranceDown,
+    DefaultToleranceUp,
+    /// "Also show logical pixels" turned on or off.
+    AlsoShowLogicalPixels(bool),
+    ColorFormat(ColorFormat),
+}
+
+impl Options {
+    /// Applies `change`. False when it left the options as they were, as − does at the lowest tolerance or a click on
+    /// the format already chosen, so there is nothing to save.
+    pub fn apply(&mut self, change: Change) -> bool {
+        let before = self.clone();
+        match change {
+            Change::DefaultToleranceDown => self.default_tolerance = self.default_tolerance.down(),
+            Change::DefaultToleranceUp => self.default_tolerance = self.default_tolerance.up(),
+            Change::AlsoShowLogicalPixels(on) => self.also_show_logical_pixels = on,
+            Change::ColorFormat(format) => self.color_format = format,
+        }
+        *self != before
+    }
+}
+
 /// What ScreenGauge remembers between calls without showing it in Settings.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Remembered {
