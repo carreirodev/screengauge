@@ -29,16 +29,9 @@ use screengauge_core::settings::{Folder, Options};
 use windows::Win32::Foundation::{
     D2DERR_RECREATE_TARGET, E_FAIL, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
 };
-use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_SIZE_U, D2D1_ALPHA_MODE_IGNORE, D2D1_PIXEL_FORMAT,
-};
-use windows::Win32::Graphics::Direct2D::{
-    D2D1_FEATURE_LEVEL_DEFAULT, D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_PRESENT_OPTIONS_NONE,
-    D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE,
-    ID2D1HwndRenderTarget,
-};
+use windows::Win32::Graphics::Direct2D::Common::D2D_SIZE_U;
+use windows::Win32::Graphics::Direct2D::ID2D1HwndRenderTarget;
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
-use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, EndPaint, GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO,
     MonitorFromPoint, MonitorFromWindow, PAINTSTRUCT, ScreenToClient,
@@ -69,7 +62,9 @@ use crate::win32::{low_word, signed_words, struct_size};
 use crate::{
     com, event, folder_picker, graphics, keyboard_hook, log, resident, settings_file, tray,
 };
+pub use controls::dpi_scale;
 use controls::{Control, Pointer};
+pub use paint::{background, palette, write};
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.Settings");
 
@@ -861,7 +856,7 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
     }
     let target = match TARGET.take() {
         Some(target) => target,
-        None => render_target(hwnd, size)?,
+        None => graphics::window_target(hwnd, size)?,
     };
     // SAFETY: our own window.
     let dpi = unsafe { GetDpiForWindow(hwnd) };
@@ -911,28 +906,6 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
     }
     DRAWN.set(Some(drawn?));
     Ok(())
-}
-
-/// A render target of `size` for the window, at 96 DPI so one Direct2D unit is one physical pixel at any scale.
-fn render_target(hwnd: HWND, size: D2D_SIZE_U) -> windows::core::Result<ID2D1HwndRenderTarget> {
-    let target_properties = D2D1_RENDER_TARGET_PROPERTIES {
-        r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
-        pixelFormat: D2D1_PIXEL_FORMAT {
-            format: DXGI_FORMAT_B8G8R8A8_UNORM,
-            alphaMode: D2D1_ALPHA_MODE_IGNORE,
-        },
-        dpiX: 96.0,
-        dpiY: 96.0,
-        usage: D2D1_RENDER_TARGET_USAGE_NONE,
-        minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
-    };
-    let window_properties = D2D1_HWND_RENDER_TARGET_PROPERTIES {
-        hwnd,
-        pixelSize: size,
-        presentOptions: D2D1_PRESENT_OPTIONS_NONE,
-    };
-    // SAFETY: both property structs outlive the call.
-    unsafe { graphics::factory()?.CreateHwndRenderTarget(&target_properties, &window_properties) }
 }
 
 #[cfg(test)]

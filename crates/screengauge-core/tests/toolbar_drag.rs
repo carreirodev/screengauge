@@ -387,3 +387,20 @@ fn once_let_go_the_toolbar_stays_and_the_tool_measures_where_the_cursor_goes() {
     let live = session.scene().live.expect("Dimensions measures");
     assert_eq!((live.monitor, live.label.physical.as_str()), (1, "100"));
 }
+
+#[test]
+fn exiting_from_the_tray_icons_menu_keeps_the_toolbars_new_place_for_the_next_run() {
+    let mut session = open(IN_CARD);
+    handle(&mut session, grip(), Input::Move);
+    handle(&mut session, grip(), Input::Press);
+    let far = by(grip(), -5000, 5000);
+    handle(&mut session, far, Input::Move);
+    handle(&mut session, far, Input::Release);
+    assert_eq!(
+        handle(&mut session, far, Input::Exit),
+        [
+            Effect::Close,
+            Effect::SaveRemembered(remembered(place(0.0, 1.0)))
+        ]
+    );
+}

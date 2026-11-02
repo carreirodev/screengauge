@@ -28,9 +28,12 @@ mod settings_window;
 mod single_instance;
 mod snip_file;
 #[cfg(test)]
+mod test_bitmap;
+#[cfg(test)]
 mod test_folder;
 mod theme;
 mod tray;
+mod tray_menu;
 mod win32;
 
 use std::process::ExitCode;

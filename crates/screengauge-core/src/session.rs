@@ -281,6 +281,11 @@ impl Session {
             _ => event.held.alt,
         };
         self.follow_alt(alt);
+        // Exiting closes the tools in every state, so it comes before Save As's, which keeps them open otherwise.
+        if event.input == Input::Exit {
+            self.saving = None;
+            return self.close();
+        }
         if self.saving.is_some() {
             return self.while_saving(event);
         }

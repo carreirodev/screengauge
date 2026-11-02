@@ -504,7 +504,7 @@ pub fn to_i32(pixels: u32) -> windows::core::Result<i32> {
 }
 
 /// The window's gradient, from its top to its bottom. Colors blend in sRGB, as CSS does.
-fn background(
+pub fn background(
     target: &ID2D1RenderTarget,
     palette: &Palette,
     width: f32,

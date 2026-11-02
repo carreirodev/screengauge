@@ -605,3 +605,44 @@ fn monitors_changing_with_save_as_open_then_cancelled_close_the_tools() {
     session.handle(event(at(960, 540), 3000, Input::MonitorsChanged));
     assert_eq!(did(save_as_closed(&mut session, None)), [Did::Close]);
 }
+
+#[test]
+fn exiting_with_save_as_aside_closes_the_tools_and_keeps_the_folder_this_call_wrote_to() {
+    let mut session = open(SnipDestination::File, DefaultFolder::Off(None));
+    snip(&mut session);
+    save_as_closed(&mut session, Some(r"E:\Work\button.png"));
+    written(&mut session, true);
+    // Save As again, then another program in front: the tray icon is in reach, and its menu's Exit is chosen.
+    snip(&mut session);
+    session.handle(event(at(960, 540), 6000, Input::OtherProgramInFront));
+    assert_eq!(
+        did(session.handle(event(at(960, 540), 7000, Input::Exit))),
+        [Did::Close, Did::Remember(Some(folder(r"E:\Work")))]
+    );
+    // Save As, cancelled as ScreenGauge exits, finds the tools closed.
+    assert_eq!(did(save_as_closed(&mut session, None)), []);
+}
+
+#[test]
+fn exiting_while_the_default_folder_is_written_closes_the_tools() {
+    let mut session = open(
+        SnipDestination::File,
+        DefaultFolder::On(folder(r"D:\Snips")),
+    );
+    snip(&mut session);
+    assert_eq!(
+        did(session.handle(event(at(960, 540), 3000, Input::Exit))),
+        [Did::Close]
+    );
+    assert_eq!(did(written(&mut session, true)), []);
+}
+
+#[test]
+fn exiting_after_the_tools_closed_does_nothing() {
+    let mut session = open(SnipDestination::File, DefaultFolder::Off(None));
+    session.handle(event(at(960, 540), 3000, Input::KeyDown(Key::Esc)));
+    assert_eq!(
+        did(session.handle(event(at(960, 540), 4000, Input::Exit))),
+        []
+    );
+}

@@ -67,6 +67,9 @@ pub enum Input {
     Called,
     /// Windows asked the tools to close, as with Alt+F4.
     CloseAsked,
+    /// ScreenGauge is exiting, as when the user chose Exit in the tray icon's menu: the tools close whatever they are
+    /// doing, with Save As open too, whose image is lost, and what this call changed is kept as any closing keeps it.
+    Exit,
     /// Another program came to the front, as with Alt+Tab or the Windows key. ScreenGauge's own windows, such as Save
     /// As, never count.
     OtherProgramInFront,

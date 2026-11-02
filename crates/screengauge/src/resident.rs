@@ -12,7 +12,7 @@ use screengauge_core::session::{Effect, Image, Input, Opening, SaveTo, Session};
 use screengauge_core::settings::{Folder, Remembered, Stored};
 use windows::Win32::Foundation::{
     E_FAIL, ERROR_HOTKEY_ALREADY_REGISTERED, ERROR_SUCCESS, HINSTANCE, HWND, LPARAM, LRESULT,
-    SetLastError, WPARAM,
+    POINT, SetLastError, WPARAM,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime;
@@ -31,7 +31,7 @@ use crate::settings_file::{self, SettingsFile};
 use crate::win32::{low_word, struct_size};
 use crate::{
     capture, clipboard, event, folder_picker, global_shortcut, graphics, log, png, save_as,
-    settings_window, snip_file, theme, tray,
+    settings_window, snip_file, theme, tray, tray_menu,
 };
 
 /// The resident window's class, which a copy opened again looks for to call the running copy.
@@ -88,6 +88,7 @@ pub fn run(
     frozen_screen::register_class(instance)?;
     save_as::register_class(instance)?;
     settings_window::register_class(instance)?;
+    tray_menu::register_class(instance)?;
     // SAFETY: the class was just registered in this module. The window is never shown.
     let hwnd = unsafe {
         CreateWindowExW(
@@ -164,12 +165,23 @@ extern "system" fn window_proc(
             if tray::is_call(lparam) {
                 post_call(hwnd);
             }
-            // Provisional exit, until the tray icon's menu exists (WPC-325).
+            // A right click, or the menu key while the keyboard is on the icon, opens its menu (WPC-325). Explorer
+            // waits for the answer, but the menu is modeless: it opens and the answer goes at once.
             if low_word(lparam) == WM_CONTEXTMENU {
-                // SAFETY: our own window, on the thread that created it.
-                if let Err(e) = unsafe { DestroyWindow(hwnd) } {
-                    log::failure("exit: DestroyWindow", &e);
+                open_tray_menu(hwnd, tray_menu::anchor_of(wparam));
+            }
+            LRESULT(0)
+        }
+        tray_menu::CHOSEN => {
+            match tray_menu::chosen(wparam) {
+                Some(tray_menu::Item::Settings) => open_settings(),
+                Some(tray_menu::Item::Exit) => {
+                    // SAFETY: our own window, on the thread that created it.
+                    if let Err(e) = unsafe { DestroyWindow(hwnd) } {
+                        log::failure("exit: DestroyWindow", &e);
+                    }
                 }
+                None => log::failure("tray menu: an item it doesn't have", &wparam.0),
             }
             LRESULT(0)
         }
@@ -227,9 +239,10 @@ extern "system" fn window_proc(
             save_as::cancel();
             // Settings' folder window runs its own message loop too.
             folder_picker::cancel();
-            close();
-            // Settings draws with the factories released next, so it closes before them.
+            close_for_exit(hwnd);
+            // Settings and the menu draw with the factories released next, so they close before them.
             settings_window::close();
+            tray_menu::close();
             graphics::release();
             if let Err(e) = global_shortcut::unregister() {
                 log::failure("exit: unregistering the global shortcut", &e);
@@ -262,6 +275,8 @@ extern "system" fn window_proc(
 /// A call opens the tools, or, when they are open, goes to the session core as `input`: the global shortcut closes
 /// them, and the tray icon or opening ScreenGauge again (`Input::Called`) leaves them as they are.
 fn on_call(resident: HWND, input: Input) {
+    // Whatever called, the tray icon's menu goes, and before the photo, so it is never in it.
+    tray_menu::close_before_photo();
     // Read before the photo, which takes about 120 ms: the double-click began with the call.
     let second_click_until = second_click_until(&input);
     let told = FROZEN_SCREEN.with_borrow(|open| {
@@ -420,6 +435,16 @@ pub fn follow_theme() {
     });
 }
 
+/// Opens the tray icon's menu for a right click at `anchor`, in the palette of the theme the settings file holds.
+fn open_tray_menu(resident: HWND, anchor: POINT) {
+    let opened = settings_file::current()
+        .map_err(|e| Error::new(E_FAIL, e.to_string()))
+        .and_then(|stored| tray_menu::open(resident, anchor, theme::mode(stored.options.theme)));
+    if let Err(e) = opened {
+        log::failure("tray menu: opening it", &e);
+    }
+}
+
 /// Opens Settings, or brings it to the front, in the palette of the theme the settings file holds.
 fn open_settings() {
     let theme = settings_file::current()
@@ -497,6 +522,16 @@ fn open_save_as(folder: Option<&Folder>, file_name: &str) -> Input {
             log::failure("Save As: opening it", &e);
             Input::SaveAsFailed
         }
+    }
+}
+
+/// ScreenGauge exits: open tools close through the session, so what this call changed is kept as closing them any
+/// other way keeps it, also with Save As open (WPC-325). With no tools open there is nothing to close.
+fn close_for_exit(resident: HWND) {
+    tell(resident, Input::Exit);
+    // The session closes them, unless it had closed already and left its windows to this.
+    if FROZEN_SCREEN.with_borrow(Option::is_some) {
+        close();
     }
 }
 

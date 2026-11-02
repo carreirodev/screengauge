@@ -4,11 +4,15 @@
 
 use std::cell::RefCell;
 
-use windows::Win32::Foundation::E_FAIL;
-use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
+use windows::Win32::Foundation::{E_FAIL, HWND};
+use windows::Win32::Graphics::Direct2D::Common::{
+    D2D_SIZE_U, D2D1_ALPHA_MODE_IGNORE, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
+};
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1CreateFactory, ID2D1Factory, ID2D1RenderTarget,
-    ID2D1SolidColorBrush,
+    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
+    D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_PRESENT_OPTIONS_NONE, D2D1_RENDER_TARGET_PROPERTIES,
+    D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1CreateFactory,
+    ID2D1Factory, ID2D1HwndRenderTarget, ID2D1RenderTarget, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_METRICS, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE,
@@ -16,6 +20,7 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory,
     IDWriteFactory, IDWriteFontFamily, IDWriteTextFormat,
 };
+use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::core::{BOOL, Error, PCWSTR, w};
 
 /// ScreenGauge's one font, as the prototype's CSS names it.
@@ -50,6 +55,29 @@ pub fn factory() -> windows::core::Result<ID2D1Factory> {
 pub fn release() {
     drop(FACTORY.with_borrow_mut(Option::take));
     drop(FONTS.with_borrow_mut(Option::take));
+}
+
+/// A render target of `size` for the opaque window `hwnd`, Settings or the tray icon's menu, at 96 DPI so one
+/// Direct2D unit is one physical pixel at any scale.
+pub fn window_target(hwnd: HWND, size: D2D_SIZE_U) -> windows::core::Result<ID2D1HwndRenderTarget> {
+    let target_properties = D2D1_RENDER_TARGET_PROPERTIES {
+        r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
+        pixelFormat: D2D1_PIXEL_FORMAT {
+            format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            alphaMode: D2D1_ALPHA_MODE_IGNORE,
+        },
+        dpiX: 96.0,
+        dpiY: 96.0,
+        usage: D2D1_RENDER_TARGET_USAGE_NONE,
+        minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
+    };
+    let window_properties = D2D1_HWND_RENDER_TARGET_PROPERTIES {
+        hwnd,
+        pixelSize: size,
+        presentOptions: D2D1_PRESENT_OPTIONS_NONE,
+    };
+    // SAFETY: both property structs outlive the call.
+    unsafe { factory()?.CreateHwndRenderTarget(&target_properties, &window_properties) }
 }
 
 /// DirectWrite's factory and what ScreenGauge needs to know about its font.
@@ -167,6 +195,18 @@ pub const fn color(r: u8, g: u8, b: u8, alpha: f32) -> Color {
         rgb: [r, g, b],
         alpha,
     }
+}
+
+/// `color` laid at its opacity on the opaque `under`, as the screen shows it.
+pub fn over(color: Color, under: [u8; 3]) -> [u8; 3] {
+    let mut mixed = [0; 3];
+    for ((out, top), bottom) in mixed.iter_mut().zip(color.rgb).zip(under) {
+        let value = f32::from(bottom) + (f32::from(top) - f32::from(bottom)) * color.alpha;
+        // A channel mixed from two channels stays between them, inside a byte, so the cast keeps the whole value.
+        // TODO: mix in integers, so no float comes back to `u8` here.
+        *out = value.round().clamp(0.0, 255.0) as u8;
+    }
+    mixed
 }
 
 /// `rgb` at `alpha`, as Direct2D takes a color.
