@@ -13,7 +13,7 @@ thread_local! {
 }
 
 /// Starts COM on this thread in a single-threaded apartment, once; later calls do nothing. Single-threaded because this
-/// is the thread of ScreenGauge's windows: Windows' Save As window, which the Snip opens with WPC-318, needs that
+/// is the thread of ScreenGauge's windows: Windows' Save As window, which the Snip opens, needs that
 /// apartment, and a thread can't change apartments once COM is started on it. COM then stays started until the thread
 /// ends, which for the windows' thread is when ScreenGauge exits, so no COM object made on it outlives COM.
 pub fn ensure_started() -> windows::core::Result<()> {

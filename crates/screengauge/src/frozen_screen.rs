@@ -49,12 +49,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos,
-    GetWindowLongPtrW, HTCLIENT, IDC_ARROW, IDC_CROSS, KillTimer, LoadCursorW, PostMessageW,
-    RegisterClassExW, SW_SHOWNA, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
-    ShowWindow, USER_TIMER_MAXIMUM, USER_TIMER_MINIMUM, WM_APP, WM_CAPTURECHANGED, WM_CLOSE,
-    WM_DISPLAYCHANGE, WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SYSKEYDOWN,
-    WM_SYSKEYUP, WM_TIMER, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    GetWindowLongPtrW, HTCLIENT, HWND_TOPMOST, IDC_ARROW, IDC_CROSS, KillTimer, LoadCursorW,
+    PostMessageW, RegisterClassExW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    USER_TIMER_MAXIMUM, USER_TIMER_MINIMUM, WM_APP, WM_CAPTURECHANGED, WM_CLOSE, WM_DISPLAYCHANGE,
+    WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    WM_TIMER, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{Error, PCWSTR, w};
 
@@ -316,6 +317,39 @@ impl FrozenScreen {
         } {
             Ok(()) => self.holds_alt_esc = true,
             Err(e) => log::failure("frozen screen: holding Alt+Esc", &e),
+        }
+    }
+
+    /// Hides the windows, so the program in front and the ones behind it show, while Save As waits behind it (the
+    /// owner's choice in WPC-318). The session and its photos stay as they were.
+    pub fn step_aside(&self) {
+        for &window in &self.windows {
+            // SAFETY: our own window. ShowWindow returns whether it was visible before, not an error.
+            let _ = unsafe { ShowWindow(window, SW_HIDE) };
+        }
+    }
+
+    /// Shows the windows again over every program, as they were before they stepped aside. Save As comes back over
+    /// them afterwards.
+    pub fn come_back(&self) {
+        for &window in &self.windows {
+            // SAFETY: our own window. ShowWindow returns whether it was visible before, not an error.
+            let _ = unsafe { ShowWindow(window, SW_SHOWNA) };
+            // Hiding kept them topmost; this puts them over whatever came to the front meanwhile.
+            // SAFETY: our own window, on its thread.
+            if let Err(e) = unsafe {
+                SetWindowPos(
+                    window,
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                )
+            } {
+                log::failure("frozen screen: coming back", &e);
+            }
         }
     }
 }

@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use super::{Image, Photo, Point, Rect, ToolbarButton};
+use super::{FileNames, Image, Photo, Point, Rect, ToolbarButton};
 use crate::settings::{DimensionsMode, Folder, Magnification, Remembered, Tolerance, Tool};
 
 /// What the Windows layer draws while the tools are open.
@@ -207,6 +207,14 @@ pub enum Message {
     /// The same for Snip: a drawn rectangle held nothing but the reference color, so no image was taken and the
     /// clipboard stays as it was (v1 spec WPC-296, Snip). It tells of Alt as Bounds' does, in Snip's words.
     NoContentFoundToSnip,
+    /// The Snip's image was written to a file, with Destination at File.
+    Saved,
+    /// The Snip's image went to the clipboard and was written to a file, with Destination at Both.
+    CopiedAndSaved,
+    /// The Snip's file couldn't be written, and no file was left behind, with Destination at File.
+    CouldntSave,
+    /// The same with Destination at Both, where the image went to the clipboard all the same.
+    CouldntSaveButCopied,
 }
 
 impl Message {
@@ -216,13 +224,20 @@ impl Message {
             Message::Copied => "Copied",
             Message::NoContentFound => "No content found · Hold Alt to measure the rectangle",
             Message::NoContentFoundToSnip => "No content found · Hold Alt to snip the rectangle",
+            Message::Saved => "Saved",
+            Message::CopiedAndSaved => "Copied and saved",
+            Message::CouldntSave => "Couldn't save.",
+            Message::CouldntSaveButCopied => "Couldn't save. The image was copied.",
         }
     }
 
     pub fn sign(self) -> Sign {
         match self {
-            Message::Copied => Sign::Ok,
-            Message::NoContentFound | Message::NoContentFoundToSnip => Sign::Alert,
+            Message::Copied | Message::Saved | Message::CopiedAndSaved => Sign::Ok,
+            Message::NoContentFound
+            | Message::NoContentFoundToSnip
+            | Message::CouldntSave
+            | Message::CouldntSaveButCopied => Sign::Alert,
         }
     }
 }
@@ -307,6 +322,16 @@ impl Span {
     }
 }
 
+/// Where the Snip's PNG file goes (v1 spec WPC-296, Snip).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SaveTo {
+    /// A new file in the default folder, under the first of `names` no file there has yet: an earlier file is never
+    /// replaced. A folder that no longer exists is never made again: the file then isn't written.
+    DefaultFolder { folder: Folder, names: FileNames },
+    /// Exactly this path, chosen in Save As, replacing the file there, which Windows has already asked about.
+    Chosen(PathBuf),
+}
+
 /// Something the Windows layer does for the session, in the order the session returns them.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
@@ -314,14 +339,23 @@ pub enum Effect {
     CopyText(String),
     /// Put this image on the clipboard.
     CopyImage(Image),
-    /// Write this image as a PNG file at `path`.
-    WritePng { path: PathBuf, image: Image },
-    /// Open the Save As window in `folder` (`None` is Pictures), suggesting `file_name`. Its closing comes back as
+    /// Write this image as a PNG file, where `to` says, and hand the session [`Input::Saved`](super::Input::Saved), or
+    /// [`Input::NotSaved`](super::Input::NotSaved) when no file could be written, leaving none behind.
+    WritePng { to: SaveTo, image: Image },
+    /// Open the Save As window, over the frozen screen, in `folder` (`None` is Pictures, and so is a folder that no
+    /// longer exists), suggesting `file_name` and taking PNG files alone. Its closing comes back as
     /// [`Input::SaveAsClosed`](super::Input::SaveAsClosed).
     OpenSaveAs {
         folder: Option<Folder>,
         file_name: String,
     },
+    /// Another program came to the front while Save As is open: the frozen screen and Save As go behind it, as any
+    /// program's windows would, and wait as they are, with nothing lost (the owner's choice in WPC-318). The button
+    /// Save As has on the taskbar and in Alt+Tab brings them back, which comes as
+    /// [`Input::BackInFront`](super::Input::BackInFront).
+    StepAside,
+    /// Bring the frozen screen and Save As back in front, over every program, as they were before they stepped aside.
+    ComeBack,
     /// Open the Settings window.
     OpenSettings,
     /// Put the mouse cursor at this point, in physical pixels of the virtual screen, as the arrow keys do. The session

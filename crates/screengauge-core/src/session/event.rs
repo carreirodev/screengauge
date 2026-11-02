@@ -73,8 +73,18 @@ pub enum Input {
     /// Windows said the monitors changed: one connected or disconnected, or a scale, resolution, arrangement or HDR
     /// change.
     MonitorsChanged,
-    /// The Save As window closed, with the path the user chose, or `None` when it was cancelled.
+    /// The Save As window closed, with the path the user chose, or `None` when it was cancelled. The event's cursor is
+    /// where the cursor is as it closed.
     SaveAsClosed(Option<PathBuf>),
+    /// Windows couldn't open the Save As window asked for with [`Effect::OpenSaveAs`](super::Effect::OpenSaveAs).
+    SaveAsFailed,
+    /// The user went back to ScreenGauge after the frozen screen and Save As stepped aside
+    /// ([`Effect::StepAside`](super::Effect::StepAside)), by Save As's button on the taskbar or in Alt+Tab.
+    BackInFront,
+    /// The Snip's PNG file asked for with [`Effect::WritePng`](super::Effect::WritePng) was written.
+    Saved,
+    /// It couldn't be written, and no file was left behind.
+    NotSaved,
     /// The moment the session asked to be woken at ([`Effect::WakeAt`](super::Effect::WakeAt)) has come. Windows' timers
     /// may run a little early or late, so the session goes by the event's uptime, not by this coming.
     Wake,

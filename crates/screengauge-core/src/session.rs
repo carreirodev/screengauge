@@ -13,6 +13,7 @@ mod frozen_screen;
 mod magnified_view;
 mod output;
 mod pixels;
+mod snip_file;
 pub mod toolbar;
 mod units;
 
@@ -20,14 +21,17 @@ pub use event::{Event, Held, Input, Key, LocalTime, ToolbarButton};
 pub use frozen_screen::{Colors, Image, Photo, Point, Rect, Scale};
 pub use output::{
     ColorText, Coordinate, Cursor, DrawnRectangle, Effect, Label, MagnifiedView, Measurement,
-    Message, Notice, PixelColor, Scene, Sign, SnipArea, Span, ToleranceIndicator, Toolbar,
+    Message, Notice, PixelColor, SaveTo, Scene, Sign, SnipArea, Span, ToleranceIndicator, Toolbar,
 };
+pub use snip_file::{FileNames, png_path};
 
 use std::fmt;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::settings::{
-    ColorFormat, DimensionsMode, Magnification, Options, Remembered, Tolerance, Tool, ToolbarPlace,
+    ColorFormat, DefaultFolder, DimensionsMode, Folder, Magnification, Options, Remembered,
+    SnipDestination, Tolerance, Tool, ToolbarPlace,
 };
 
 /// How long a notice stays on screen: a little over a second, the approved prototype's 1.3 s (v1 spec WPC-296, Como as
@@ -103,6 +107,13 @@ pub struct Session {
     also_show_logical_pixels: bool,
     /// "Color format" in Settings: how Inspect shows and copies the color.
     color_format: ColorFormat,
+    /// "Destination" in Settings: where Snip's image goes.
+    snip_destination: SnipDestination,
+    /// "Save to default folder" in Settings, and the folder.
+    default_folder: DefaultFolder,
+    /// Snip's image on its way to a file, from the release until the file is written or Save As is cancelled. `None`
+    /// the rest of the time.
+    saving: Option<Saving>,
     /// The remembered state as the tools opened, and as they will leave it: the Windows layer keeps it only when the
     /// two differ.
     remembered_at_opening: Remembered,
@@ -152,6 +163,28 @@ struct Grab {
     place_at_press: ToolbarPlace,
 }
 
+/// Snip's image on its way to a file (v1 spec WPC-296, Snip).
+#[derive(Debug)]
+struct Saving {
+    /// Whether the image went to the clipboard too, with Destination at Both, which the notice then says.
+    copied: bool,
+    /// The monitor the image was taken on, where the notice goes should the cursor be on none.
+    monitor: usize,
+    /// Whether the monitors changed meanwhile: the tools then close once the file is written or Save As is cancelled,
+    /// never with Save As open over them, and without a notice.
+    close_after: bool,
+    stage: Stage,
+}
+
+#[derive(Debug)]
+enum Stage {
+    /// Save As is open, choosing where `image` goes: it is already taken. `aside` while another program is in front.
+    SaveAs { image: Image, aside: bool },
+    /// The file is being written. `folder` is the folder Save As chose, which the next Save As opens in once the file
+    /// is written there.
+    Writing { folder: Option<Folder> },
+}
+
 /// A notice, with the moment it goes: when Windows has been running `until`.
 #[derive(Debug)]
 struct TimedNotice {
@@ -194,6 +227,9 @@ impl Session {
             tolerance: options.default_tolerance,
             also_show_logical_pixels: options.also_show_logical_pixels,
             color_format: options.color_format,
+            snip_destination: options.snip_destination,
+            default_folder: options.default_folder,
+            saving: None,
             remembered_at_opening: remembered.clone(),
             remembered,
             live: None,
@@ -245,6 +281,9 @@ impl Session {
             _ => event.held.alt,
         };
         self.follow_alt(alt);
+        if self.saving.is_some() {
+            return self.while_saving(event);
+        }
         match event.input {
             // The second click of the double-click that called ScreenGauge does nothing, on the toolbar as on the tool
             // (WPC-308): it would act on a button the user never aimed at.
@@ -294,7 +333,7 @@ impl Session {
                 Some(toolbar::Hit::Button(_)) => Vec::new(),
                 None => self.press(event.held, event.uptime),
             },
-            Input::Release => self.release(event.held, event.uptime),
+            Input::Release => self.release(event.held, event.time, event.uptime),
             Input::KeyDown(Key::Backspace | Key::Delete) => self.unpin(),
             Input::Wheel(delta) => self.turn_wheel(delta, event.cursor, event.uptime),
             // What was due has gone above. A timer may also come a little early: what was due then stays, and the
@@ -370,10 +409,10 @@ impl Session {
 
     /// What the button coming up does: it lets go of the dragged toolbar, or ends the drag Bounds or Snip was drawing,
     /// or, after Esc cancelled that drag, does nothing.
-    fn release(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
+    fn release(&mut self, held: Held, time: LocalTime, uptime: Duration) -> Vec<Effect> {
         self.held_after_cancel = false;
         match self.drag.take() {
-            Some(drag) => self.finish_drag(drag, held, uptime),
+            Some(drag) => self.finish_drag(drag, held, time, uptime),
             None => self.let_go(),
         }
     }
@@ -394,10 +433,16 @@ impl Session {
     /// notice "No content found" says so. A drag that never went past the click limit was a click or a tremble, and does
     /// nothing at all, with or without Alt, and without a notice.
     ///
-    /// Snip instead takes the image of what its preview showed and copies it, pinning nothing, and Shift changes nothing
-    /// (v1 spec WPC-296, Snip); with nothing but the reference color there is no image, and the notice says so in Snip's
-    /// words.
-    fn finish_drag(&mut self, drag: bounds::Drag, held: Held, uptime: Duration) -> Vec<Effect> {
+    /// Snip instead takes the image of what its preview showed, at `time`, and sends it where Destination says, pinning
+    /// nothing, and Shift changes nothing (v1 spec WPC-296, Snip); with nothing but the reference color there is no image,
+    /// and the notice says so in Snip's words.
+    fn finish_drag(
+        &mut self,
+        drag: bounds::Drag,
+        held: Held,
+        time: LocalTime,
+        uptime: Duration,
+    ) -> Vec<Effect> {
         let measured = self.live.take();
         let snipped = self.snip_area.take();
         self.measure();
@@ -405,7 +450,7 @@ impl Session {
             return Vec::new();
         }
         let nothing_found = match (self.remembered.last_tool, measured, snipped) {
-            (Tool::Snip, _, Some(area)) => return self.copy_image(&area, uptime),
+            (Tool::Snip, _, Some(area)) => return self.take_image(&area, time, uptime),
             (Tool::Snip, _, None) => Message::NoContentFoundToSnip,
             (_, Some(measurement), _) => return self.pin_and_copy(measurement, held.shift, uptime),
             (_, None, _) => Message::NoContentFound,
@@ -416,10 +461,12 @@ impl Session {
             .collect()
     }
 
-    /// Copies the image of `area`, from the frozen screen and never from the screen as it is now, and shows "Copied"
-    /// where the cursor is; each image takes the place of the last on the clipboard (v1 spec WPC-296, Snip).
-    // TODO(WPC-318): follow Destination, writing the file or opening Save As; until then every destination copies.
-    fn copy_image(&mut self, area: &SnipArea, uptime: Duration) -> Vec<Effect> {
+    /// Takes the image of `area`, from the frozen screen and never from the screen as it is now, at `time`, and sends it
+    /// where Destination says (v1 spec WPC-296, Snip). The clipboard, with Clipboard or Both, gets it at once, each image
+    /// in the place of the last. The file, with File or Both, goes to the default folder under the automatic name when
+    /// "Save to default folder" is on, with no window, and otherwise wherever Save As, opened in the folder it last saved
+    /// to, says. The notice waits for the file: "Copied" alone shows at once.
+    fn take_image(&mut self, area: &SnipArea, time: LocalTime, uptime: Duration) -> Vec<Effect> {
         let Some(image) = self
             .frozen_screen
             .get(area.monitor)
@@ -428,9 +475,197 @@ impl Session {
             // Can't happen: the area lies on the monitor the drag began on, one of the frozen screen's.
             return Vec::new();
         };
-        let mut effects = vec![Effect::CopyImage(image)];
-        effects.extend(self.show(Message::Copied, self.notice_monitor(area.monitor), uptime));
+        let copied = match self.snip_destination {
+            SnipDestination::Clipboard => {
+                let mut effects = vec![Effect::CopyImage(image)];
+                effects.extend(self.show(
+                    Message::Copied,
+                    self.notice_monitor(area.monitor),
+                    uptime,
+                ));
+                return effects;
+            }
+            SnipDestination::File => false,
+            SnipDestination::Both => true,
+        };
+        let mut effects = Vec::new();
+        if copied {
+            effects.push(Effect::CopyImage(image.clone()));
+        }
+        let names = FileNames::at(time);
+        let (stage, effect) = match &self.default_folder {
+            DefaultFolder::On(folder) => (
+                Stage::Writing { folder: None },
+                Effect::WritePng {
+                    to: SaveTo::DefaultFolder {
+                        folder: folder.clone(),
+                        names,
+                    },
+                    image,
+                },
+            ),
+            DefaultFolder::Off(_) => (
+                Stage::SaveAs {
+                    image,
+                    aside: false,
+                },
+                Effect::OpenSaveAs {
+                    folder: self.remembered.last_save_as_folder.clone(),
+                    file_name: names.first(),
+                },
+            ),
+        };
+        self.saving = Some(Saving {
+            copied,
+            monitor: area.monitor,
+            close_after: false,
+            stage,
+        });
+        effects.push(effect);
         effects
+    }
+
+    /// What `event` does while Snip's image is on its way to a file (v1 spec WPC-296, Snip). With Save As open, nothing
+    /// the user does over the frozen screen counts, so no other drag starts, and Esc is Save As's alone. Another program
+    /// coming to the front sends the frozen screen and Save As behind it, to wait, and Save As's button brings them back
+    /// (the owner's choice in WPC-318); so does the global shortcut, which never closes the tools while Save As is open,
+    /// as that would lose the image. A change of monitors closes the tools once the file is done with.
+    fn while_saving(&mut self, event: Event) -> Vec<Effect> {
+        match event.input {
+            Input::SaveAsClosed(chosen) => self.save_as_closed(chosen, event.cursor, event.uptime),
+            Input::SaveAsFailed => self.save_as_failed(event.uptime),
+            Input::Saved => self.written(true, event.uptime),
+            Input::NotSaved => self.written(false, event.uptime),
+            Input::OtherProgramInFront => self.step_aside(true),
+            Input::BackInFront | Input::GlobalShortcut => self.step_aside(false),
+            Input::MonitorsChanged => {
+                if let Some(saving) = self.saving.as_mut() {
+                    saving.close_after = true;
+                }
+                Vec::new()
+            }
+            Input::Wake => self.wake().into_iter().collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Sends the frozen screen and Save As behind the program in front when `aside`, or brings them back otherwise; a
+    /// step they have already taken does nothing again, and so does either while the file is being written.
+    fn step_aside(&mut self, aside: bool) -> Vec<Effect> {
+        let Some(Saving {
+            stage: Stage::SaveAs { aside: now, .. },
+            ..
+        }) = self.saving.as_mut()
+        else {
+            return Vec::new();
+        };
+        if *now == aside {
+            return Vec::new();
+        }
+        *now = aside;
+        vec![if aside {
+            Effect::StepAside
+        } else {
+            Effect::ComeBack
+        }]
+    }
+
+    /// Save As closed with the cursor at `cursor`: the image goes to `chosen`, always as a `.png`, or, cancelled, goes
+    /// nowhere, no file is made, and only a copy already made shows "Copied".
+    fn save_as_closed(
+        &mut self,
+        chosen: Option<PathBuf>,
+        cursor: Point,
+        uptime: Duration,
+    ) -> Vec<Effect> {
+        let Some(Saving {
+            copied,
+            monitor,
+            close_after,
+            stage: Stage::SaveAs { image, aside },
+        }) = self.saving.take()
+        else {
+            return Vec::new();
+        };
+        let mut effects = Vec::new();
+        // Can't happen: Save As is answered in front. Should it be, the frozen screen comes back before anything else.
+        if aside {
+            effects.push(Effect::ComeBack);
+        }
+        self.move_cursor(cursor);
+        match chosen {
+            Some(chosen) => {
+                let path = png_path(&chosen);
+                let folder = path.parent().and_then(Folder::new);
+                self.saving = Some(Saving {
+                    copied,
+                    monitor,
+                    close_after,
+                    stage: Stage::Writing { folder },
+                });
+                effects.push(Effect::WritePng {
+                    to: SaveTo::Chosen(path),
+                    image,
+                });
+            }
+            None if close_after => effects.extend(self.close()),
+            None if copied => {
+                effects.extend(self.show(Message::Copied, self.notice_monitor(monitor), uptime));
+            }
+            None => {}
+        }
+        effects
+    }
+
+    /// The file was written, or, when not `saved`, couldn't be, and none was left: the notice says which, and that the
+    /// image went to the clipboard anyway with Destination at Both. A folder Save As chose is the one it opens in next,
+    /// once a file was written there. The options stay as they were, and the tools stay open.
+    fn written(&mut self, saved: bool, uptime: Duration) -> Vec<Effect> {
+        let Some(Saving {
+            copied,
+            monitor,
+            close_after,
+            stage: Stage::Writing { folder },
+        }) = self.saving.take()
+        else {
+            return Vec::new();
+        };
+        if saved && let Some(folder) = folder {
+            self.remembered.last_save_as_folder = Some(folder);
+        }
+        if close_after {
+            return self.close();
+        }
+        self.show(
+            file_notice(saved, copied),
+            self.notice_monitor(monitor),
+            uptime,
+        )
+        .into_iter()
+        .collect()
+    }
+
+    /// Windows couldn't open Save As: no file is written, as when one couldn't be, and the notice says so.
+    fn save_as_failed(&mut self, uptime: Duration) -> Vec<Effect> {
+        let Some(Saving {
+            copied,
+            monitor,
+            close_after,
+            stage: Stage::SaveAs { .. },
+        }) = self.saving.take()
+        else {
+            return Vec::new();
+        };
+        if close_after {
+            return self.close();
+        }
+        self.show(
+            file_notice(false, copied),
+            self.notice_monitor(monitor),
+            uptime,
+        )
+        .into_iter()
+        .collect()
     }
 
     /// Pins what Dimensions measures, as the user sees it at the click, and copies it, its logical pixels with Shift
@@ -872,6 +1107,17 @@ impl Session {
                 },
             },
         }
+    }
+}
+
+/// What the notice says once the Snip's file was `saved`, or couldn't be, with the image `copied` to the clipboard too
+/// or not (v1 spec WPC-296, Snip).
+fn file_notice(saved: bool, copied: bool) -> Message {
+    match (saved, copied) {
+        (true, false) => Message::Saved,
+        (true, true) => Message::CopiedAndSaved,
+        (false, false) => Message::CouldntSave,
+        (false, true) => Message::CouldntSaveButCopied,
     }
 }
 

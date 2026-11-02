@@ -209,71 +209,17 @@ impl SettingsFile {
 mod tests {
     use std::fs::OpenOptions;
     use std::os::windows::fs::OpenOptionsExt;
-    use std::path::Path;
 
     use screengauge_core::settings::{self as core, Theme, Tool};
 
     use super::*;
+    use crate::test_folder::{TestFolder, make_read_only};
 
-    /// A folder of its own per test, which doesn't exist yet and is removed when the test ends.
-    struct TestFolder(PathBuf);
-
-    impl TestFolder {
-        fn new(test: &str) -> TestFolder {
-            let path = std::env::temp_dir()
-                .join(format!("ScreenGauge.Test.{}.{test}", std::process::id()));
-            remove(&path);
-            TestFolder(path)
-        }
-
-        /// The folder already there, holding a settings file with `bytes`.
-        fn with_settings(test: &str, bytes: &[u8]) -> TestFolder {
-            let folder = TestFolder::new(test);
-            fs::create_dir_all(&folder.0).expect("the folder is created");
-            fs::write(folder.file("settings.ini"), bytes).expect("the settings file is written");
-            folder
-        }
-
-        fn file(&self, name: &str) -> PathBuf {
-            self.0.join(name)
-        }
-
-        fn names(&self) -> Vec<String> {
-            let mut names: Vec<String> = fs::read_dir(&self.0)
-                .expect("the folder exists")
-                .map(|entry| {
-                    entry
-                        .expect("a folder entry")
-                        .file_name()
-                        .into_string()
-                        .expect("a Unicode name")
-                })
-                .collect();
-            names.sort();
-            names
-        }
-    }
-
-    impl Drop for TestFolder {
-        fn drop(&mut self) {
-            remove(&self.0);
-        }
-    }
-
-    /// A folder left in %TEMP% harms nothing, so a failure is only reported.
-    fn remove(path: &Path) {
-        match fs::remove_dir_all(path) {
-            Err(e) if e.kind() != io::ErrorKind::NotFound => {
-                eprintln!("couldn't remove {}: {e}", path.display());
-            }
-            _ => {}
-        }
-    }
-
-    fn make_read_only(path: &Path) {
-        let mut permissions = fs::metadata(path).expect("the file exists").permissions();
-        permissions.set_readonly(true);
-        fs::set_permissions(path, permissions).expect("the file is made read-only");
+    /// The folder already there, holding a settings file with `bytes`.
+    fn with_settings(test: &str, bytes: &[u8]) -> TestFolder {
+        let folder = TestFolder::made(test);
+        fs::write(folder.file("settings.ini"), bytes).expect("the settings file is written");
+        folder
     }
 
     fn open(folder: &TestFolder) -> (SettingsFile, Stored, Opened) {
@@ -337,7 +283,7 @@ mod tests {
     #[test]
     fn a_damaged_file_is_kept_and_the_defaults_take_its_place() {
         let damaged = b"last_tool = Snip\nwarned_about_other_copy = true\nnot a setting\n";
-        let folder = TestFolder::with_settings("damaged", damaged);
+        let folder = with_settings("damaged", damaged);
 
         let (_, stored, opened) = open(&folder);
         let Opened::Damaged { damage, copy } = opened else {
@@ -359,7 +305,7 @@ mod tests {
 
     #[test]
     fn a_read_only_damaged_file_is_kept_and_replaced_too() {
-        let folder = TestFolder::with_settings("damaged-read-only", &[0xFF, 0x01]);
+        let folder = with_settings("damaged-read-only", &[0xFF, 0x01]);
         make_read_only(&folder.file("settings.ini"));
 
         let (_, _, opened) = open(&folder);
@@ -373,7 +319,7 @@ mod tests {
 
     #[test]
     fn a_second_damaged_file_keeps_the_first_copy() {
-        let folder = TestFolder::with_settings("damaged-twice", &[0xFF, 0x01]);
+        let folder = with_settings("damaged-twice", &[0xFF, 0x01]);
         open(&folder);
         fs::write(folder.file("settings.ini"), [0xFF, 0x02])
             .expect("the second damaged file is written");
@@ -395,7 +341,7 @@ mod tests {
 
     #[test]
     fn a_damaged_file_that_cant_be_moved_is_left_as_it_was_and_still_reported() {
-        let folder = TestFolder::with_settings("damaged-locked", &[0xFF, 0x01]);
+        let folder = with_settings("damaged-locked", &[0xFF, 0x01]);
         // Another program holds the file open for reading only (FILE_SHARE_READ), so it can't be moved.
         let _held = OpenOptions::new()
             .read(true)

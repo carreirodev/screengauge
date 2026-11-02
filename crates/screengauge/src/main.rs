@@ -18,8 +18,12 @@ mod log;
 mod notification;
 mod png;
 mod resident;
+mod save_as;
 mod settings_file;
 mod single_instance;
+mod snip_file;
+#[cfg(test)]
+mod test_folder;
 mod theme;
 mod tray;
 mod win32;

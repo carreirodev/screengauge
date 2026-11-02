@@ -7,7 +7,8 @@ use std::cell::RefCell;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use screengauge_core::session::{Effect, Input, Opening, Point, Session};
+use screengauge_core::session::{Effect, Image, Input, Opening, Point, SaveTo, Session};
+use screengauge_core::settings::Folder;
 use screengauge_core::settings::{Remembered, Stored};
 use windows::Win32::Foundation::{
     E_FAIL, ERROR_SUCCESS, HINSTANCE, HWND, LPARAM, LRESULT, POINT, SetLastError, WPARAM,
@@ -27,7 +28,9 @@ use crate::frozen_screen::{self, FrozenScreen};
 use crate::notification::{self, Notification};
 use crate::settings_file::SettingsFile;
 use crate::win32::{low_word, struct_size};
-use crate::{capture, clipboard, event, global_shortcut, log, theme, tray};
+use crate::{
+    capture, clipboard, event, global_shortcut, log, png, save_as, snip_file, theme, tray,
+};
 
 /// The resident window's class, which a copy opened again looks for to call the running copy.
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.Resident");
@@ -80,6 +83,7 @@ pub fn run(file: Option<SettingsFile>, stored: Stored) -> windows::core::Result<
         return Err(Error::from_thread());
     }
     frozen_screen::register_class(instance)?;
+    save_as::register_class(instance)?;
     // SAFETY: the class was just registered in this module. The window is never shown.
     let hwnd = unsafe {
         CreateWindowExW(
@@ -163,6 +167,10 @@ extern "system" fn window_proc(
                     .unwrap_or_default()
             });
             carry_out(hwnd, effects);
+            LRESULT(0)
+        }
+        save_as::BACK_IN_FRONT => {
+            tell(hwnd, Input::BackInFront);
             LRESULT(0)
         }
         notification::SHOW_WAITING => {
@@ -333,13 +341,71 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
                 });
                 continue;
             }
-            // No rule asks for these yet: the tools that do bring them (Snip's file with WPC-318, the gear with WPC-319).
-            // The log never shows their content, which may hold a path.
-            Effect::WritePng { .. } => "writing a PNG file",
-            Effect::OpenSaveAs { .. } => "opening Save As",
+            Effect::WritePng { to, image } => {
+                let written = write_png(&to, &image);
+                tell(resident, written);
+                continue;
+            }
+            Effect::OpenSaveAs { folder, file_name } => {
+                let closed = open_save_as(resident, folder.as_ref(), &file_name);
+                tell(resident, closed);
+                continue;
+            }
+            Effect::StepAside => {
+                save_as::step_aside();
+                FROZEN_SCREEN.with_borrow(|open| open.as_ref().map(FrozenScreen::step_aside));
+                continue;
+            }
+            Effect::ComeBack => {
+                FROZEN_SCREEN.with_borrow(|open| open.as_ref().map(FrozenScreen::come_back));
+                save_as::come_back();
+                continue;
+            }
+            // No rule asks for this yet: the gear brings it with WPC-319.
             Effect::OpenSettings => "opening Settings",
         };
         log::failure("session", &format!("{not_built} isn't built yet"));
+    }
+}
+
+/// Hands the session `input`, which the Windows layer made itself, and carries out what it returns. With the tools
+/// closed meanwhile, there is no session to tell, and nothing to do.
+fn tell(resident: HWND, input: Input) {
+    let told = FROZEN_SCREEN
+        .with_borrow(|open| open.as_ref().map(|frozen| frozen.handle(event::now(input))));
+    if let Some(effects) = told {
+        carry_out(resident, effects);
+    }
+}
+
+/// Writes the Snip's `image` as a PNG file where `to` says. The log never shows the path, which holds the Windows user
+/// name.
+fn write_png(to: &SaveTo, image: &Image) -> Input {
+    let written = png::encode(image)
+        .map_err(|e| e.to_string())
+        .and_then(|bytes| snip_file::write(to, &bytes).map_err(|e| e.to_string()));
+    match written {
+        Ok(_) => Input::Saved,
+        Err(e) => {
+            log::failure("Snip: writing the file", &e);
+            Input::NotSaved
+        }
+    }
+}
+
+/// Opens Save As in `folder`, suggesting `file_name`, and waits until it closes. Its own message loop runs meanwhile,
+/// which is why it is called here, outside every borrow of the frozen screen.
+fn open_save_as(resident: HWND, folder: Option<&Folder>, file_name: &str) -> Input {
+    let cursor = cursor_now().unwrap_or_else(|e| {
+        log::failure("Save As: finding the cursor", &e);
+        event::message_cursor()
+    });
+    match save_as::choose(resident, cursor, folder, file_name) {
+        Ok(chosen) => Input::SaveAsClosed(chosen),
+        Err(e) => {
+            log::failure("Save As: opening it", &e);
+            Input::SaveAsFailed
+        }
     }
 }
 

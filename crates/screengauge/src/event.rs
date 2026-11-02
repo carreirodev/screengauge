@@ -4,14 +4,15 @@
 use std::time::Duration;
 
 use screengauge_core::session::{Event, Held, Input, Key, LocalTime, Point};
-use windows::Win32::Foundation::{SYSTEMTIME, WPARAM};
+use windows::Win32::Foundation::{POINT, SYSTEMTIME, WPARAM};
 use windows::Win32::System::SystemInformation::{GetLocalTime, GetTickCount64};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, VIRTUAL_KEY, VK_1, VK_2, VK_3, VK_4, VK_BACK, VK_C, VK_CONTROL, VK_DELETE,
     VK_DOWN, VK_ESCAPE, VK_H, VK_LEFT, VK_MENU, VK_RIGHT, VK_SHIFT, VK_UP, VK_V,
 };
-use windows::Win32::UI::WindowsAndMessaging::GetMessagePos;
+use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetMessagePos};
 
+use crate::log;
 use crate::win32::signed_words;
 
 /// `input`, as part of the message this thread is handling: the cursor's place when Windows sent it, the modifier keys
@@ -26,6 +27,25 @@ pub fn of_message(input: Input) -> Event {
         uptime: uptime(),
         input,
     }
+}
+
+/// `input`, as something the Windows layer did for the session, such as closing Save As or writing a file: the cursor
+/// where it is now, since a window's own message loop may have run meanwhile, and the rest as [`of_message`] reads it.
+pub fn now(input: Input) -> Event {
+    let mut event = of_message(input);
+    let mut cursor = POINT::default();
+    // SAFETY: fills a local.
+    match unsafe { GetCursorPos(&mut cursor) } {
+        Ok(()) => {
+            event.cursor = Point {
+                x: cursor.x,
+                y: cursor.y,
+            };
+        }
+        // The last message's place, then: a notice may show a little off.
+        Err(e) => log::failure("event: finding the cursor", &e),
+    }
+    event
 }
 
 /// Where the cursor was when Windows sent the message this thread is handling, in physical pixels of the virtual
