@@ -50,21 +50,19 @@ const EVERY_NOTIFICATION: [Notification; 3] = [
 ];
 
 impl Notification {
-    /// Its text as it shows now, which names the global shortcut the settings file holds.
+    /// Its text as it shows now: the busy shortcut's names the global shortcut the settings file holds.
     fn text(self) -> windows::core::Result<String> {
-        let stored = settings_file::current().map_err(|e| Error::new(E_FAIL, e.to_string()))?;
-        Ok(self.text_with(stored.options.global_shortcut))
-    }
-
-    /// Its text with `shortcut` the global shortcut, which only the busy shortcut's names.
-    fn text_with(self, shortcut: Shortcut) -> String {
-        match self {
+        Ok(match self {
             Notification::CaptureFailed => "Couldn't capture the screen. Try again.".to_owned(),
             Notification::SettingsReset => {
                 "Your settings were damaged and have been reset. A copy was kept.".to_owned()
             }
-            Notification::ShortcutBusy => shortcut_busy_text(shortcut),
-        }
+            Notification::ShortcutBusy => {
+                let stored =
+                    settings_file::current().map_err(|e| Error::new(E_FAIL, e.to_string()))?;
+                shortcut_busy_text(stored.options.global_shortcut)
+            }
+        })
     }
 
     /// What names it to Windows, as its tag, and in its click's arguments.
@@ -413,6 +411,12 @@ impl State {
                     decide(shown, Seen::InCorner);
                 }
                 let clicked = Notification::of_launch(&event.launch);
+                // Settings, which the click opens, says the shortcut is busy: one waiting, as when Windows started
+                // ScreenGauge for the click and the startup found it busy again, would say it twice.
+                if clicked == Some(Notification::ShortcutBusy) {
+                    self.waiting
+                        .retain(|waiting| *waiting != Notification::ShortcutBusy);
+                }
                 match clicked {
                     Some(notification) => {
                         log::note(&format!("notification: {notification:?} clicked"))
@@ -527,17 +531,14 @@ mod tests {
 
     #[test]
     fn the_texts_are_the_specs() {
+        // The busy shortcut's names the shortcut of the moment: see the_busy_shortcut_names_the_shortcut_of_the_moment.
         assert_eq!(
-            Notification::CaptureFailed.text_with(Shortcut::default()),
+            Notification::CaptureFailed.text().expect("a fixed text"),
             "Couldn't capture the screen. Try again."
         );
         assert_eq!(
-            Notification::SettingsReset.text_with(Shortcut::default()),
+            Notification::SettingsReset.text().expect("a fixed text"),
             "Your settings were damaged and have been reset. A copy was kept."
-        );
-        assert_eq!(
-            Notification::ShortcutBusy.text_with(Shortcut::default()),
-            shortcut_busy_text(Shortcut::default())
         );
     }
 
@@ -869,6 +870,19 @@ mod tests {
             what: What::Clicked,
         });
         assert_eq!(clicked, Some(Notification::ShortcutBusy));
+    }
+
+    #[test]
+    fn a_click_on_the_busy_shortcut_drops_the_one_waiting() {
+        // ScreenGauge was closed, and Windows started it for the click: the startup found the shortcut still busy and
+        // queued the notification again, but Settings, which the click opens, already says so.
+        let mut state = state();
+        state.waiting = vec![Notification::ShortcutBusy, Notification::SettingsReset];
+        state.on_event(Event {
+            launch: "shortcut-busy:999.1".to_string(),
+            what: What::Clicked,
+        });
+        assert_eq!(state.waiting, [Notification::SettingsReset]);
     }
 
     #[test]

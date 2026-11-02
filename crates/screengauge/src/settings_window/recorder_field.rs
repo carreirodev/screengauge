@@ -40,18 +40,23 @@ pub fn message(refusal: Refusal) -> &'static str {
 }
 
 /// What the row says under its label, and whether the amber band shows across it, with `refusal` the recorder's,
-/// should it have one, and `busy` the global shortcut Windows refused at startup, while it has no other (WPC-324). As in
-/// the prototype (`settings.js`, `shortcutBusy && !rec`), the field resting says the shortcut is busy, on the band, even
-/// after a combination tried was refused; while it records, the band goes, and only the recorder's refusals show.
+/// should it have one, and `busy` the global shortcut Windows refused at startup, while it has no other (WPC-324). While
+/// the shortcut is busy, the field resting shows the band, as the prototype does (`settings.js`, `shortcutBusy && !rec`),
+/// and says so, unless a combination tried was refused: the refusal says the try wasn't taken (the owner's call in
+/// WPC-324; the prototype went back to the busy message). While it records, the band goes, and only the recorder's
+/// refusals show.
 pub fn said_under_label(
     refusal: Option<Refusal>,
     recording: bool,
     busy: Option<Shortcut>,
 ) -> Option<(Text, bool)> {
-    match busy {
-        Some(shortcut) if !recording => Some((Text::ShortcutBusy(shortcut), true)),
-        _ => refusal.map(|refusal| (Text::Fixed(message(refusal)), false)),
-    }
+    let band = busy.is_some() && !recording;
+    let text = match (refusal, busy) {
+        (Some(refusal), _) => Text::Fixed(message(refusal)),
+        (None, Some(shortcut)) if band => Text::ShortcutBusy(shortcut),
+        (None, _) => return None,
+    };
+    Some((text, band))
 }
 
 // Every size below is in logical pixels.
@@ -420,13 +425,21 @@ mod tests {
     #[test]
     fn resting_while_the_shortcut_is_busy_the_row_says_so_on_the_band() {
         let busy = Some(Shortcut::default());
-        let said = Some((Text::ShortcutBusy(Shortcut::default()), true));
-        assert_eq!(said_under_label(None, false, busy), said);
-        // A combination tried and refused stops recording: the field shows the busy one again, and says so again, as
-        // the prototype does.
+        assert_eq!(
+            said_under_label(None, false, busy),
+            Some((Text::ShortcutBusy(Shortcut::default()), true))
+        );
+    }
+
+    #[test]
+    fn a_combination_tried_while_the_shortcut_is_busy_and_refused_says_so_on_the_band() {
+        // Win + Shift + X is busy; the user tries Ctrl + Shift + S, which another program holds too. Recording stops and
+        // the field shows Win + Shift + X again: the row tells the try wasn't taken, and the band stays (the owner's call
+        // in WPC-324).
+        let busy = Some(Shortcut::default());
         assert_eq!(
             said_under_label(Some(Refusal::AlreadyUsed), false, busy),
-            said
+            Some((Text::Fixed("Already used by another program"), true))
         );
     }
 

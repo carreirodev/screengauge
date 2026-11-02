@@ -59,6 +59,7 @@ const LINE: f32 = layout::NOTE_LINE;
 /// What a message says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Text {
+    /// The same words whatever the settings, as the recorder's refusals.
     Fixed(&'static str),
     /// Windows refused this global shortcut at startup, and still has no other (WPC-324).
     ShortcutBusy(Shortcut),
