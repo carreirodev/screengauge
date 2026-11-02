@@ -88,11 +88,11 @@ impl Drop for Watch {
 }
 
 /// What a window coming to the front tells the frozen screen: [`OTHER_PROGRAM_IN_FRONT`] for another program, and for
-/// the windows apart from the tools (`settings`: Settings, the windows it owns, and the tray icon's menu), which count
+/// the windows apart from the tools (`apart`: Settings, the windows it owns, and the tray icon's menu), which count
 /// as one; [`OWN_WINDOW_IN_FRONT`] for one of ScreenGauge's
 /// other windows, such as Save As.
-fn message_for(this_process: bool, settings: bool) -> u32 {
-    if this_process && !settings {
+fn message_for(this_process: bool, apart: bool) -> u32 {
+    if this_process && !apart {
         OWN_WINDOW_IN_FRONT
     } else {
         OTHER_PROGRAM_IN_FRONT

@@ -1,6 +1,7 @@
-//! The tray icon's menu, which a right click on the icon opens: "Settings" and "Exit" (v1 spec WPC-296, Menu do clique
-//! direito no tray icon). ScreenGauge draws it itself, in its theme and at the scale of the monitor it opens on (derived
-//! rule 1, by ADR 0001); Windows only rounds its corners, draws its 1-pixel border and its shadow.
+//! The tray icon's menu, which a right click on the icon opens: "Settings" and "Exit" (v1 spec WPC-296, the tray icon's
+//! right-click menu). ScreenGauge draws it itself, in its theme and at the scale of the monitor it opens on (the spec's
+//! derived rule 1, which follows from ADR 0001); Windows only rounds its corners, draws its 1-pixel border and its
+//! shadow.
 //!
 //! It closes with Esc, with a click anywhere else, which takes the front from it, and once an item is chosen. Like
 //! Settings' controls, an item acts only when the left button comes up on the one it went down on; the arrow keys light
@@ -70,6 +71,9 @@ thread_local! {
     static PRESSED: Cell<Option<Item>> = const { Cell::new(None) };
     /// Whether Windows has been asked to say when the cursor leaves the menu.
     static TRACKING_LEAVE: Cell<bool> = const { Cell::new(false) };
+    /// Whether the menu has closed since the last photo. It may close on the press of a left click on the tray icon,
+    /// before the release calls ScreenGauge, and the screen may not be drawn without it yet (`close_before_photo`).
+    static GONE_SINCE_PHOTO: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Registered once at startup. Its shadow is the one Windows gives its own menus.
@@ -227,15 +231,19 @@ pub fn close() {
 }
 
 /// Closes the menu before ScreenGauge photographs the screen, and waits for the screen to be drawn without it, so it is
-/// never in the photo. Nothing, and no wait, when it is closed.
+/// never in the photo: when it is open, and when it closed since the last photo, as on the press of the left click that
+/// calls. Otherwise nothing, and no wait.
 pub fn close_before_photo() {
-    let Some(hwnd) = WINDOW.get() else {
+    if let Some(hwnd) = WINDOW.get() {
+        // Hidden first: destroyed, it is gone from the screen once Windows composes the next frame, which DwmFlush
+        // waits for.
+        // SAFETY: our own window. The result says whether it was visible before.
+        let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
+        close();
+    }
+    if !GONE_SINCE_PHOTO.replace(false) {
         return;
-    };
-    // Hidden first: destroyed, it is gone from the screen once Windows composes the next frame, which DwmFlush waits for.
-    // SAFETY: our own window. The result says whether it was visible before.
-    let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
-    close();
+    }
     // SAFETY: no arguments.
     if let Err(e) = unsafe { DwmFlush() } {
         log::failure("tray menu: waiting for the screen without it", &e);
@@ -348,6 +356,7 @@ extern "system" fn window_proc(
         WM_DESTROY => {
             if WINDOW.get() == Some(hwnd) {
                 WINDOW.set(None);
+                GONE_SINCE_PHOTO.set(true);
                 drop(TARGET.take());
                 LIT.set(None);
                 PRESSED.set(None);
@@ -463,6 +472,9 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
         Ok(()) => TARGET.set(Some(target)),
         // The graphics device was lost, as after a driver update: the next paint makes the target again.
         Err(e) if e.code() == D2DERR_RECREATE_TARGET => {
+            if let Err(inside) = drawn {
+                log::failure("tray menu: drawing it", &inside);
+            }
             // SAFETY: our own window.
             if !unsafe { InvalidateRect(Some(hwnd), None, false) }.as_bool() {
                 return Err(Error::new(E_FAIL, "InvalidateRect returned FALSE"));
