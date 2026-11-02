@@ -5,8 +5,9 @@
 //! another program (WPC-318). Settings is the exception: it is a window of its own, apart from the tools, so coming to
 //! the front by Alt+Tab or its taskbar button it closes them as another program would, rather than taking the keyboard
 //! behind the frozen screen, where Esc would no longer reach the tools (WPC-319). The windows Settings owns, Windows'
-//! folder window (WPC-322), are part of Settings: they tell nobody, so the frozen screen and Save As, stepped aside
-//! while Settings is used, stay behind it instead of coming back over the folder window.
+//! folder window (WPC-322), count as Settings: with Save As waiting, the frozen screen and Save As are already aside
+//! when the folder window opens, so it never brings them back over itself, and with the tools called over it, it
+//! closes them as Settings does, for the same reason.
 
 use std::cell::Cell;
 
@@ -86,15 +87,13 @@ impl Drop for Watch {
 }
 
 /// What a window coming to the front tells the frozen screen: [`OTHER_PROGRAM_IN_FRONT`] for another program, and for
-/// Settings itself; [`OWN_WINDOW_IN_FRONT`] for one of ScreenGauge's other windows, such as Save As; nothing for a
-/// window Settings owns, which is part of it.
-fn message_for(this_process: bool, is_settings: bool, owned_by_settings: bool) -> Option<u32> {
-    if !this_process || is_settings {
-        Some(OTHER_PROGRAM_IN_FRONT)
-    } else if owned_by_settings {
-        None
+/// Settings and the windows it owns (`settings`), which count as one; [`OWN_WINDOW_IN_FRONT`] for one of ScreenGauge's
+/// other windows, such as Save As.
+fn message_for(this_process: bool, settings: bool) -> u32 {
+    if this_process && !settings {
+        OWN_WINDOW_IN_FRONT
     } else {
-        Some(OWN_WINDOW_IN_FRONT)
+        OTHER_PROGRAM_IN_FRONT
     }
 }
 
@@ -127,13 +126,10 @@ extern "system" fn on_foreground(
     unsafe { GetWindowThreadProcessId(front, Some(&mut process)) };
     // SAFETY: no arguments.
     let this_process = process == unsafe { GetCurrentProcessId() };
-    let Some(message) = message_for(
+    let message = message_for(
         this_process,
-        settings_window::is(front),
-        settings_window::owns(front),
-    ) else {
-        return;
-    };
+        settings_window::is(front) || settings_window::owns(front),
+    );
     // SAFETY: a window of this thread; should it be closed already, PostMessageW fails and says so. The message
     // carries nothing.
     let posted = unsafe { PostMessageW(Some(window), message, WPARAM(0), LPARAM(0)) };
@@ -148,33 +144,18 @@ mod tests {
 
     #[test]
     fn another_program_in_front_counts_as_one() {
-        assert_eq!(
-            message_for(false, false, false),
-            Some(OTHER_PROGRAM_IN_FRONT)
-        );
+        assert_eq!(message_for(false, false), OTHER_PROGRAM_IN_FRONT);
     }
 
     #[test]
-    fn settings_in_front_counts_as_another_program() {
-        assert_eq!(message_for(true, true, false), Some(OTHER_PROGRAM_IN_FRONT));
+    fn settings_and_the_windows_it_owns_count_as_another_program() {
+        // The folder window opened from Settings: with the tools called over it, the keyboard going to it behind them
+        // would leave Esc closing it instead of the tools (WPC-319's reason for Settings).
+        assert_eq!(message_for(true, true), OTHER_PROGRAM_IN_FRONT);
     }
 
     #[test]
     fn save_as_and_the_other_windows_of_screengauge_are_its_own() {
-        assert_eq!(message_for(true, false, false), Some(OWN_WINDOW_IN_FRONT));
-    }
-
-    #[test]
-    fn a_window_settings_owns_tells_nobody() {
-        assert_eq!(message_for(true, false, true), None);
-    }
-
-    #[test]
-    fn a_window_of_another_program_is_another_program_whoever_owns_it() {
-        // Ownership is only read for ScreenGauge's own windows, but a program's window never counts as Settings'.
-        assert_eq!(
-            message_for(false, false, true),
-            Some(OTHER_PROGRAM_IN_FRONT)
-        );
+        assert_eq!(message_for(true, false), OWN_WINDOW_IN_FRONT);
     }
 }

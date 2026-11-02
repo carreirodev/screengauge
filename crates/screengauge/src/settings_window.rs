@@ -248,7 +248,8 @@ pub fn is(hwnd: HWND) -> bool {
     WINDOW.get() == Some(hwnd)
 }
 
-/// Whether `hwnd` is owned by the Settings window, directly or through a window that is: Windows' folder window is.
+/// Whether `hwnd` is owned by the Settings window, directly or through a window that is: Windows' folder window is. It
+/// counts as Settings for the window in front (`foreground`).
 pub fn owns(hwnd: HWND) -> bool {
     let Some(settings) = WINDOW.get() else {
         return false;
