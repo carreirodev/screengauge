@@ -5,6 +5,9 @@
 //!   Windows app's icon", read 2026-10-31): `AppList` for Square44x44Logo, with a picture at each target size in three
 //!   variants (plain, `altform-unplated` for the dark theme, `altform-lightunplated` for the light theme), all three
 //!   required even when, as here, they are the same; `MedTile` for Square150x150Logo; `StoreLogo` for the package logo.
+//! - `notification/`: the app icon in the header of ScreenGauge's Windows notifications, which ScreenGauge.exe embeds and
+//!   registers with Windows at each start. Windows draws it at the small icon size and scales a PNG of any other size,
+//!   so there is one per size, the hand-drawn tray sizes included (WPC-347).
 //! - `store/StoreIcon.png`: the Store icon, 300 × 300, uploaded in Partner Center for the Store page.
 
 use std::collections::BTreeMap;
@@ -27,10 +30,15 @@ pub const THEME_VARIANTS: [&str; 3] = ["", "_altform-unplated", "_altform-lightu
 /// The display scales, in percent, of the scaled package images.
 pub const SCALES: [u32; 5] = [100, 125, 150, 200, 400];
 
+/// The sizes of the notification header icon: the small icon size at 100%, 125%, 150%, 175%, 200%, 225%, 250% and
+/// 300% scale.
+pub const NOTIFICATION_SIZES: [u32; 8] = [16, 20, 24, 28, 32, 36, 40, 48];
+
 pub const ICO_FILE: &str = "ScreenGauge.ico";
 pub const STORE_ICON_FILE: &str = "store/StoreIcon.png";
 pub const STORE_ICON_SIZE: u32 = 300;
 pub const PACKAGE_DIR: &str = "package";
+pub const NOTIFICATION_DIR: &str = "notification";
 
 /// What a package image shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,6 +90,19 @@ pub fn package_files() -> BTreeMap<String, Picture> {
     files
 }
 
+/// Every notification header icon, by its path under `assets/`.
+pub fn notification_files() -> BTreeMap<String, Picture> {
+    NOTIFICATION_SIZES
+        .iter()
+        .map(|&size| {
+            (
+                format!("{NOTIFICATION_DIR}/NotificationIcon-{size}.png"),
+                Picture::AppIcon(size),
+            )
+        })
+        .collect()
+}
+
 /// A base size at a display scale, rounded half up as Microsoft's table rounds it (150 at 125% is 188).
 fn scaled(base: u32, percent: u32) -> u32 {
     (base * percent + 50) / 100
@@ -126,25 +147,37 @@ pub fn ico_file(drawn: &mut BTreeMap<u32, Image>) -> Result<Vec<u8>, String> {
     ico::write(&images).map_err(|e| format!("writing {ICO_FILE}: {e}"))
 }
 
-/// Writes every icon file under `root` (the repository's `assets/`), and removes package images no longer made.
+/// Writes every icon file under `root` (the repository's `assets/`), and removes package and notification images no
+/// longer made.
 pub fn write_all(root: &Path) -> Result<(), String> {
     let mut drawn = BTreeMap::new();
     write(root, ICO_FILE, &ico_file(&mut drawn)?)?;
-    let files = package_files();
-    for (path, picture) in &files {
-        let image = make(*picture, &mut drawn)?;
+    write_folder(root, PACKAGE_DIR, &package_files(), &mut drawn)?;
+    write_folder(root, NOTIFICATION_DIR, &notification_files(), &mut drawn)?;
+    let store = store_icon()?;
+    write(root, STORE_ICON_FILE, &encode(STORE_ICON_FILE, &store)?)
+}
+
+/// Writes `files`, all in `folder` under `root`, and removes any other file there.
+fn write_folder(
+    root: &Path,
+    folder: &str,
+    files: &BTreeMap<String, Picture>,
+    drawn: &mut BTreeMap<u32, Image>,
+) -> Result<(), String> {
+    for (path, picture) in files {
+        let image = make(*picture, drawn)?;
         write(root, path, &encode(path, &image)?)?;
     }
-    let package = root.join(PACKAGE_DIR);
-    for entry in fs::read_dir(&package).map_err(|e| format!("{}: {e}", package.display()))? {
-        let entry = entry.map_err(|e| format!("{}: {e}", package.display()))?;
-        let name = format!("{PACKAGE_DIR}/{}", entry.file_name().to_string_lossy());
+    let dir = root.join(folder);
+    for entry in fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+        let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
+        let name = format!("{folder}/{}", entry.file_name().to_string_lossy());
         if !files.contains_key(&name) {
             fs::remove_file(entry.path()).map_err(|e| format!("removing {name}: {e}"))?;
         }
     }
-    let store = store_icon()?;
-    write(root, STORE_ICON_FILE, &encode(STORE_ICON_FILE, &store)?)
+    Ok(())
 }
 
 fn encode(path: &str, image: &Image) -> Result<Vec<u8>, String> {
@@ -180,6 +213,14 @@ mod tests {
             }
         }
         assert_eq!(files.len(), TARGET_SIZES.len() * 3 + SCALES.len() * 3);
+    }
+
+    #[test]
+    fn every_tray_size_has_a_notification_icon() {
+        // At those scales the notification header is the same size as the tray icon.
+        for size in pixel_art::SIZES {
+            assert!(NOTIFICATION_SIZES.contains(&size), "{size}");
+        }
     }
 
     #[test]

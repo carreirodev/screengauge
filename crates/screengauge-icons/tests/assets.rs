@@ -1,6 +1,6 @@
 //! The icon files in `assets/` are what this crate draws, and they hold what WPC-304 asks for: the .ico's sizes, the
-//! tray sizes drawn by hand, Microsoft's 3:1 contrast rule on both themes, every package image at its size, and the
-//! Store icon at 300 × 300. After a change to the drawing, `cargo run -p screengauge-icons` writes the files again.
+//! tray sizes drawn by hand, Microsoft's 3:1 contrast rule on both themes, every package image at its size, the
+//! notification header icons (WPC-347), and the Store icon at 300 × 300. After a change to the drawing, `cargo run -p screengauge-icons` writes the files again.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -117,19 +117,41 @@ fn half_of_every_size_has_3_to_1_contrast_on_both_themes() {
 
 #[test]
 fn the_package_holds_exactly_its_images_each_at_its_size_and_as_drawn() {
-    let expected = assets::package_files();
-    let folder = root().join(assets::PACKAGE_DIR);
-    let present: BTreeSet<String> = std::fs::read_dir(&folder)
-        .unwrap_or_else(|e| panic!("{}: {e}", folder.display()))
+    assert_folder_holds(assets::PACKAGE_DIR, assets::package_files());
+}
+
+#[test]
+fn the_notification_folder_holds_exactly_its_icons_each_at_its_size_and_as_drawn() {
+    assert_folder_holds(assets::NOTIFICATION_DIR, assets::notification_files());
+}
+
+#[test]
+fn the_notification_icons_at_the_tray_sizes_are_exactly_the_hand_drawn_pictures() {
+    // Windows shows them pixel for pixel at those sizes, so no rounding is allowed.
+    for size in pixel_art::SIZES {
+        let path = format!("{}/NotificationIcon-{size}.png", assets::NOTIFICATION_DIR);
+        let committed = png::decode(&read(&path)).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let drawn = pixel_art::hand_tuned(size)
+            .expect("drawn by hand")
+            .expect("valid");
+        assert_eq!(committed, drawn, "{path}");
+    }
+}
+
+/// Panics unless `folder` holds exactly the `expected` files, each at its size and as drawn.
+fn assert_folder_holds(folder: &str, expected: BTreeMap<String, Picture>) {
+    let dir = root().join(folder);
+    let present: BTreeSet<String> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
         .map(|entry| {
             let name = entry.expect("a folder entry").file_name();
-            format!("{}/{}", assets::PACKAGE_DIR, name.to_string_lossy())
+            format!("{folder}/{}", name.to_string_lossy())
         })
         .collect();
     assert_eq!(
         present,
         expected.keys().cloned().collect::<BTreeSet<_>>(),
-        "the package folder"
+        "the {folder} folder"
     );
     let mut drawn = BTreeMap::new();
     for (path, picture) in expected {

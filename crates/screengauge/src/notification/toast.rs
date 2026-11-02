@@ -34,38 +34,41 @@ pub const CLSID: GUID = GUID::from_u128(0x3beb9695_da23_4599_b10c_7cd6cd96e50c);
 /// Every notification's group, which taking one out of the notification center names along with its tag.
 const GROUP: &str = "ScreenGauge";
 
-/// The app icon the header shows, unplated (no background of its own), at each size it is drawn for. Windows draws it
-/// at the small icon size, as the tray icon: given that size, it shows the drawing pixel for pixel (174 of 174 pixels
-/// at 150% scale, measured in WPC-347), and scales any other (20 of 223 for the 48-pixel drawing). 28 pixels, at 175%,
-/// has no drawing of its own and takes the 32-pixel one.
-const ICONS: [(i32, &[u8]); 7] = [
+/// The app icon the header shows, at each size Windows draws it: the small icon size, as the tray icon, from 100% to
+/// 300% scale (`assets/notification`, from the icon generator). Given that size, Windows shows the drawing pixel for
+/// pixel (174 of 174 pixels at 150% scale, measured in WPC-347), and scales any other (20 of 223 for a 48-pixel PNG).
+const ICONS: [(i32, &[u8]); 8] = [
     (
         16,
-        include_bytes!("../../../../assets/package/AppList.targetsize-16_altform-unplated.png"),
+        include_bytes!("../../../../assets/notification/NotificationIcon-16.png"),
     ),
     (
         20,
-        include_bytes!("../../../../assets/package/AppList.targetsize-20_altform-unplated.png"),
+        include_bytes!("../../../../assets/notification/NotificationIcon-20.png"),
     ),
     (
         24,
-        include_bytes!("../../../../assets/package/AppList.targetsize-24_altform-unplated.png"),
+        include_bytes!("../../../../assets/notification/NotificationIcon-24.png"),
+    ),
+    (
+        28,
+        include_bytes!("../../../../assets/notification/NotificationIcon-28.png"),
     ),
     (
         32,
-        include_bytes!("../../../../assets/package/AppList.targetsize-32_altform-unplated.png"),
+        include_bytes!("../../../../assets/notification/NotificationIcon-32.png"),
     ),
     (
         36,
-        include_bytes!("../../../../assets/package/AppList.targetsize-36_altform-unplated.png"),
+        include_bytes!("../../../../assets/notification/NotificationIcon-36.png"),
     ),
     (
         40,
-        include_bytes!("../../../../assets/package/AppList.targetsize-40_altform-unplated.png"),
+        include_bytes!("../../../../assets/notification/NotificationIcon-40.png"),
     ),
     (
         48,
-        include_bytes!("../../../../assets/package/AppList.targetsize-48_altform-unplated.png"),
+        include_bytes!("../../../../assets/notification/NotificationIcon-48.png"),
     ),
 ];
 
