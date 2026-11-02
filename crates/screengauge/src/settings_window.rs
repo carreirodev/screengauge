@@ -21,6 +21,7 @@ mod recorder;
 mod recorder_field;
 mod row_message;
 mod snip_card;
+mod startup_row;
 
 use std::cell::{Cell, RefCell};
 
@@ -154,6 +155,7 @@ pub fn open(mode: Mode) -> windows::core::Result<()> {
     }
     let (work, dpi) = monitor_at(event::cursor_now()?)?;
     recorder::opening();
+    startup_row::opening();
     let size = window_size(dpi)?;
     let corner = centered(work, size);
     // SAFETY: no module name, so this is the handle of ScreenGauge.exe itself.
@@ -249,6 +251,19 @@ pub fn close() {
     }
 }
 
+/// The tray menu turned "Start with Windows" on or off: Settings' switch follows, should it be open.
+pub fn follow_start_with_windows() {
+    if let Some(hwnd) = WINDOW.get() {
+        startup_row::follow(hwnd);
+    }
+}
+
+/// The tray menu's "Start with Windows" was clicked while Windows has it turned off: Settings, which opens next or is
+/// open, shows the amber message under its row (the owner's choice in WPC-326).
+pub fn say_start_with_windows_turned_off() {
+    startup_row::say_turned_off_in_windows(WINDOW.get());
+}
+
 /// Whether the global shortcut's field records: the global shortcut then doesn't call ScreenGauge.
 pub fn is_recording() -> bool {
     recorder::is_recording()
@@ -329,11 +344,27 @@ fn monitor_at(cursor: screengauge_core::session::Point) -> windows::core::Result
 /// The window's whole size at `dpi`, title bar and frame included, for the page's 560 logical pixels wide and its height
 /// inside, taller while a message shows under a row's label.
 fn window_size(dpi: u32) -> windows::core::Result<SIZE> {
-    window_size_with(dpi, recorder::grown())
+    window_size_with(dpi, &grown())
+}
+
+/// The messages under rows' labels, while they show: the global shortcut's and "Start with Windows"'.
+fn messages() -> Vec<row_message::Message> {
+    recorder::message()
+        .into_iter()
+        .chain(startup_row::message())
+        .collect()
+}
+
+/// How much each message grows its row.
+fn grown() -> Vec<layout::Grown> {
+    recorder::grown()
+        .into_iter()
+        .chain(startup_row::grown())
+        .collect()
 }
 
 /// The window's whole size at `dpi` for the page grown as `grown` says.
-fn window_size_with(dpi: u32, grown: Option<layout::Grown>) -> windows::core::Result<SIZE> {
+fn window_size_with(dpi: u32, grown: &[layout::Grown]) -> windows::core::Result<SIZE> {
     let too_large = || Error::new(E_FAIL, "the page is too large for a window");
     let mut rect = RECT {
         left: 0,
@@ -561,6 +592,9 @@ extern "system" fn window_proc(
         WM_ACTIVATE => {
             if low_word(LPARAM(wparam.0.cast_signed())) == WA_INACTIVE {
                 recorder::cancel(hwnd, false);
+            } else {
+                // Back from Task Manager or Windows' Settings, "Start with Windows" may have changed there.
+                startup_row::reread(hwnd);
             }
             default(hwnd, message, wparam, lparam)
         }
@@ -592,6 +626,7 @@ extern "system" fn window_proc(
         WM_DESTROY => {
             // The keyboard goes back to Windows at once.
             recorder::close();
+            startup_row::close();
             WINDOW.set(None);
             drop(TARGET.take());
             DRAWN.set(None);
@@ -696,6 +731,7 @@ fn act(hwnd: HWND, hit: Hit) {
         Hit::Link => open_project_page(hwnd),
         Hit::Control(Control::ShortcutField) => recorder::click_field(hwnd),
         Hit::Control(Control::ShortcutReset) => recorder::click_reset(hwnd),
+        Hit::Control(Control::StartWithWindows) => startup_row::click(hwnd),
         Hit::Control(control) => {
             // Read first and nothing held: the folder window below runs a message loop, in which this window is drawn
             // from the options and the file is saved again.
@@ -867,8 +903,9 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
         .options;
     let shown = paint::Shown {
         recorder: recorder::view(options.global_shortcut),
-        message: recorder::message(),
-        grown: recorder::grown(),
+        start_with_windows: startup_row::is_on(),
+        messages: messages(),
+        grown: grown(),
     };
     let pointer = Pointer {
         over: OVER.get(),
@@ -967,7 +1004,7 @@ mod tests {
         // Full HD at 150%: 672 logical pixels of work area, the window centered there at its usual height.
         let dpi = 144;
         let work = full_hd_work_area(dpi);
-        let corner = centered(work, window_size_with(dpi, None).expect("a size"));
+        let corner = centered(work, window_size_with(dpi, &[]).expect("a size"));
         // The widest field there is, and the longest message: it wraps on the most lines.
         let widest = Shortcut::new(
             Modifiers {
@@ -990,7 +1027,7 @@ mod tests {
                 .expect("the room"),
         };
         let grown = message.growth(&fonts).expect("the growth");
-        let size = window_size_with(dpi, Some(grown)).expect("a size");
+        let size = window_size_with(dpi, &[grown]).expect("a size");
         assert!(
             corner.y + size.cy > work.bottom,
             "the grown window would reach under the taskbar: {size:?} at {corner:?}, {grown:?}"

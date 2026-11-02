@@ -27,6 +27,7 @@ mod settings_file;
 mod settings_window;
 mod single_instance;
 mod snip_file;
+mod start_with_windows;
 #[cfg(test)]
 mod test_bitmap;
 #[cfg(test)]
@@ -52,28 +53,48 @@ fn main() -> ExitCode {
 }
 
 fn run() -> windows::core::Result<()> {
-    let for_a_click = started_for_a_click(std::env::args());
+    let started_by = started_by(std::env::args());
     let _instance = match single_instance::claim(single_instance::NAME)? {
         Instance::First(guard) => guard,
         // Windows started this process for a click on a notification, but a copy runs that isn't the class's, as the
         // other of the Store and installer copies would be (WPC-339): this one exits without calling it, which would
         // open its tools.
-        Instance::AlreadyRunning if for_a_click => return Ok(()),
+        Instance::AlreadyRunning if started_by == StartedBy::Click => return Ok(()),
+        // Started at sign-in with a copy already running: the other of the Store and installer copies, both set to start
+        // with Windows, or this one opened from the Start menu before Windows got to it. This one exits in silence, as
+        // calling the running copy would open its tools (v1 spec WPC-296, one copy only).
+        Instance::AlreadyRunning if started_by == StartedBy::SignIn => return Ok(()),
         // Opening ScreenGauge while a copy runs calls that copy, and this one exits.
         Instance::AlreadyRunning => return resident::call_running_copy(),
     };
     // Only the copy that runs touches the settings file. The global shortcut, the options and the remembered state the
     // tools open with come from it, and the remembered state goes back to it; Settings will save to it too.
     let (file, stored) = settings_file::open_at_startup();
-    resident::run(file, stored, for_a_click)
+    resident::run(file, stored, started_by)
 }
 
-/// Whether COM started this process to take a notification's click, with ScreenGauge closed: COM adds -Embedding to the
-/// command line registered for the activator, which is the `.exe`'s path alone (WPC-347, scenario s7).
-fn started_for_a_click(mut args: impl Iterator<Item = String>) -> bool {
-    args.nth(1).is_some_and(|arg| {
-        arg.eq_ignore_ascii_case("-Embedding") || arg.eq_ignore_ascii_case("/Embedding")
-    })
+/// Who started this process, from its first argument.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartedBy {
+    /// The user opened ScreenGauge, from the Start menu or the `.exe`: opening it is a call.
+    User,
+    /// COM, to take a notification's click with ScreenGauge closed: COM adds -Embedding to the command line registered
+    /// for the activator, which is the `.exe`'s path alone (WPC-347, scenario s7).
+    Click,
+    /// Windows, at sign-in, from the `Run` value "Start with Windows" writes (WPC-326): ScreenGauge starts hidden.
+    SignIn,
+}
+
+fn started_by(mut args: impl Iterator<Item = String>) -> StartedBy {
+    match args.nth(1) {
+        Some(arg)
+            if arg.eq_ignore_ascii_case("-Embedding") || arg.eq_ignore_ascii_case("/Embedding") =>
+        {
+            StartedBy::Click
+        }
+        Some(arg) if arg == start_with_windows::SIGN_IN => StartedBy::SignIn,
+        _ => StartedBy::User,
+    }
 }
 
 #[cfg(test)]
@@ -89,22 +110,30 @@ mod tests {
 
     #[test]
     fn com_starts_it_for_a_click() {
-        assert!(started_for_a_click(args(&[
-            "ScreenGauge.exe",
-            "-Embedding"
-        ])));
-        assert!(started_for_a_click(args(&[
-            "ScreenGauge.exe",
-            "/embedding"
-        ])));
+        for arg in ["-Embedding", "/embedding"] {
+            assert_eq!(
+                started_by(args(&["ScreenGauge.exe", arg])),
+                StartedBy::Click
+            );
+        }
+    }
+
+    #[test]
+    fn windows_starts_it_at_sign_in_with_the_run_value_s_flag() {
+        assert_eq!(
+            started_by(args(&["ScreenGauge.exe", "--sign-in"])),
+            StartedBy::SignIn
+        );
     }
 
     #[test]
     fn the_user_opens_it_otherwise() {
-        assert!(!started_for_a_click(args(&["ScreenGauge.exe"])));
-        assert!(!started_for_a_click(args(&[
-            "ScreenGauge.exe",
-            "Embedding"
-        ])));
+        for line in [
+            &["ScreenGauge.exe"][..],
+            &["ScreenGauge.exe", "Embedding"],
+            &["ScreenGauge.exe", "--sign-in-later"],
+        ] {
+            assert_eq!(started_by(args(line)), StartedBy::User, "{line:?}");
+        }
     }
 }

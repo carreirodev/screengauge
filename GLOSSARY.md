@@ -77,8 +77,12 @@ ScreenGauge's icon in the Windows notification area, next to the clock; clicking
 _Avoid_: taskbar icon, system tray icon
 
 **Tray menu**:
-The small menu a right click on the tray icon opens, drawn by ScreenGauge in its theme, with Settings and Exit.
+The small menu a right click on the tray icon opens, drawn by ScreenGauge in its theme, with Settings, Start with Windows and Exit.
 _Avoid_: context menu, tray flyout, popup menu
+
+**Start with Windows**:
+The option that has Windows start ScreenGauge, hidden and with its tools closed, when the user signs in; the user may also turn it off in Windows itself, in Task Manager or in Settings > Apps > Startup, and ScreenGauge then shows it off and never turns it back on there.
+_Avoid_: autostart, run at startup, launch at login, startup task (the Store copy's mechanism behind it)
 
 **Hidden icons panel**:
 The Windows panel that opens from the arrow next to the clock and holds the notification-area icons not shown directly on the taskbar; the tray icon may sit there or on the taskbar itself.

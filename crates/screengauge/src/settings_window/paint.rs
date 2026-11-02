@@ -123,13 +123,15 @@ pub struct Surface<'a> {
     pub width: u32,
 }
 
-/// What Settings shows apart from the options: the global shortcut recorder's field, and the message under a row's
-/// label with how much it grows the page, while one shows.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// What Settings shows apart from the options: the global shortcut recorder's field, whether "Start with Windows" is on
+/// as Windows says, and the messages under rows' labels with how much each grows its row, while they show.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Shown {
     pub recorder: View,
-    pub message: Option<Message>,
-    pub grown: Option<Grown>,
+    /// Whether "Start with Windows"' switch shows on (`StartWithWindows::is_on`).
+    pub start_with_windows: bool,
+    pub messages: Vec<Message>,
+    pub grown: Vec<Grown>,
 }
 
 /// Draws Settings on `on`, with `options` as they are now, the controls reacting to `pointer`, and what `shown` says,
@@ -143,7 +145,7 @@ pub fn draw(
     let palette = palette(on.mode);
     // The page grows while a message shows under a row's label, and the blocks below move down with it. The Snip's
     // card is shorter without its note, and the window as tall as the page with it.
-    let page = snip_card::fitted(layout::page(shown.grown), snip_card::note_shown(options));
+    let page = snip_card::fitted(layout::page(&shown.grown), snip_card::note_shown(options));
     let height = px(scaled(page.height, on.dpi));
     let width = px(on.width);
     background(on.target, palette, width, height)?;
@@ -207,10 +209,14 @@ impl<'a> Rows<'a> {
         let measure = measurer(self.on.fonts, self.scale);
         let mut laid = Vec::new();
         for row in layout::ROWS {
-            let placed = layout::place_row(row, shown.grown);
+            let placed = layout::place_row(row, &shown.grown);
             let top = to_i32(scaled(placed.span.top, dpi))?;
             let bottom = to_i32(scaled(placed.span.bottom, dpi))?;
-            let message = shown.message.filter(|message| message.row == row);
+            let message = shown
+                .messages
+                .iter()
+                .find(|message| message.row == row)
+                .copied();
             if let Some(message) = message
                 && message.band
             {
@@ -248,6 +254,14 @@ impl<'a> Rows<'a> {
                     });
                     Laid::Shortcut(field)
                 }
+                Row::StartWithWindows => controls::switch(
+                    canvas,
+                    Control::StartWithWindows,
+                    shown.start_with_windows,
+                    right,
+                    top,
+                    bottom,
+                ),
                 Row::Theme => {
                     let mut choices = Vec::new();
                     for (theme, word) in THEMES {
@@ -801,6 +815,7 @@ mod tests {
 
     use super::*;
     use crate::settings_window::row_message::Text;
+    use crate::settings_window::startup_row;
 
     mod snip;
 
@@ -849,8 +864,9 @@ mod tests {
                 held: screengauge_core::settings::Modifiers::default(),
                 opacity: 1.0,
             },
-            message: None,
-            grown: None,
+            start_with_windows: false,
+            messages: Vec::new(),
+            grown: Vec::new(),
         }
     }
 
@@ -868,7 +884,7 @@ mod tests {
         shown: &Shown,
     ) -> Picture {
         let width = scaled(layout::WIDTH, dpi);
-        let height = scaled(layout::page(shown.grown).height, dpi);
+        let height = scaled(layout::page(&shown.grown).height, dpi);
         let _com = Com::start();
         {
             // SAFETY: COM is started for this thread.
@@ -1043,9 +1059,9 @@ mod tests {
             ] {
                 let place = page.place_of(control);
                 let row = match control {
-                    Control::LogicalPixels => layout::place_row(Row::AlsoShowLogicalPixels, None),
-                    Control::ColorFormat(_) => layout::place_row(Row::ColorFormat, None),
-                    _ => layout::place_row(Row::DefaultTolerance, None),
+                    Control::LogicalPixels => layout::place_row(Row::AlsoShowLogicalPixels, &[]),
+                    Control::ColorFormat(_) => layout::place_row(Row::ColorFormat, &[]),
+                    _ => layout::place_row(Row::DefaultTolerance, &[]),
                 };
                 let above = place.top - i32::try_from(row.span.top).expect("small");
                 let below = i32::try_from(row.span.bottom).expect("small") - place.bottom;
@@ -1203,7 +1219,7 @@ mod tests {
         assert_eq!(dark.right + 3, 531);
         let width = dark.right + 3 - (automatic.left - 3);
         assert!((180..=184).contains(&width), "{width}");
-        let row = layout::place_row(Row::Theme, None);
+        let row = layout::place_row(Row::Theme, &[]);
         assert!(automatic.top > i32::try_from(row.span.top).expect("small"));
         assert!(automatic.bottom < i32::try_from(row.span.bottom).expect("small"));
     }
@@ -1292,11 +1308,11 @@ mod tests {
         let dpi = 144;
         for mode in [Mode::Dark, Mode::Light] {
             let page = drawn(mode, dpi);
-            let row = layout::place_row(Row::AlsoShowLogicalPixels, None);
+            let row = layout::place_row(Row::AlsoShowLogicalPixels, &[]);
             let line = whole_px(row.span.top, dpi) - 1;
             let x = whole_px(200, dpi);
             assert_ne!(page.at(x, line), page.at(x, line - 2), "{mode:?}");
-            let color = layout::place_row(Row::ColorFormat, None);
+            let color = layout::place_row(Row::ColorFormat, &[]);
             let middle = whole_px((color.span.top + color.span.bottom) / 2, dpi);
             assert!(
                 // Only the background's gradient changes from one pixel row to the next, by a level at most.
@@ -1318,7 +1334,7 @@ mod tests {
         let dpi = 144;
         for mode in [Mode::Dark, Mode::Light] {
             let page = drawn(mode, dpi);
-            let row = layout::place_row(Row::DefaultTolerance, None);
+            let row = layout::place_row(Row::DefaultTolerance, &[]);
             let (top, bottom) = (whole_px(row.span.top, dpi), whole_px(row.span.bottom, dpi));
             let middle = (top + bottom) / 2;
             let left = whole_px(29, dpi);
@@ -1350,8 +1366,8 @@ mod tests {
             band,
             width,
         };
-        shown.grown = Some(message.growth(&fonts).expect("the row's growth"));
-        shown.message = Some(message);
+        shown.grown = vec![message.growth(&fonts).expect("the row's growth")];
+        shown.messages = vec![message];
         shown
     }
 
@@ -1377,7 +1393,7 @@ mod tests {
             assert!(width_of_rect(field) >= 156, "{mode:?}: {field:?}");
             // Reset's word is a few dozen pixels: "Reset" at 600 12px and 11 either side.
             assert!((50..=62).contains(&width_of_rect(reset)), "{reset:?}");
-            let row = layout::place_row(Row::GlobalShortcut, None);
+            let row = layout::place_row(Row::GlobalShortcut, &[]);
             let above = field.top - i32::try_from(row.span.top).expect("small");
             let below = i32::try_from(row.span.bottom).expect("small") - field.bottom;
             assert!((above - below).abs() <= 1, "{above} above, {below} below");
@@ -1467,12 +1483,12 @@ mod tests {
     fn a_message_shows_in_amber_under_the_label_inside_its_grown_row_at_every_scale() {
         let options = Options::default();
         let shown = showing_message(&options, Text::Fixed(CTRL_ALT), false, false);
-        let grown = shown.grown.expect("grown");
+        let grown = shown.grown[0];
         assert!(grown.by > 20, "three lines or so: {grown:?}");
         for mode in [Mode::Dark, Mode::Light] {
             for dpi in [96, 120, 144, 168] {
                 let page = drawn_showing(mode, dpi, &options, Pointer::default(), &shown);
-                let row = layout::place_row(Row::GlobalShortcut, shown.grown);
+                let row = layout::place_row(Row::GlobalShortcut, &shown.grown);
                 let (top, bottom) = (whole_px(row.span.top, dpi), whole_px(row.span.bottom, dpi));
                 let field = page.place_of(Control::ShortcutField);
                 let left = whole_px(layout::SIDE + layout::CARD_BORDER, dpi);
@@ -1499,7 +1515,7 @@ mod tests {
                 );
                 // The rows below moved down with it: the theme's choice is as far below the row as ever.
                 let theme = page.place_of(Control::Theme(Theme::Automatic));
-                let theme_row = layout::place_row(Row::Theme, shown.grown);
+                let theme_row = layout::place_row(Row::Theme, &shown.grown);
                 assert!(
                     theme.top > whole_px(theme_row.span.top, dpi),
                     "{mode:?} {dpi}"
@@ -1516,7 +1532,7 @@ mod tests {
     fn the_snip_s_card_and_the_footer_move_down_with_a_message_in_general() {
         let options = Options::default();
         let shown = showing_message(&options, Text::Fixed(CTRL_ALT), false, false);
-        let by = shown.grown.expect("grown").by;
+        let by = shown.grown[0].by;
         for dpi in [96, 144] {
             let still = drawn(Mode::Dark, dpi);
             let grown = drawn_showing(Mode::Dark, dpi, &options, Pointer::default(), &shown);
@@ -1542,7 +1558,7 @@ mod tests {
             );
             // The Snip's card is drawn where it moved: its top border is a card's color, not the background's.
             let card =
-                snip_card::fitted(layout::page(shown.grown), snip_card::note_shown(&options))
+                snip_card::fitted(layout::page(&shown.grown), snip_card::note_shown(&options))
                     .blocks[3]
                     .card;
             let y = whole_px(card.top + 4, dpi);
@@ -1564,10 +1580,10 @@ mod tests {
             false,
         );
         let fonts = Fonts::new().expect("the fonts");
-        let message = shown.message.expect("a message");
+        let message = shown.messages[0];
         assert_eq!(message.lines(&fonts).expect("lines"), 1);
         // 5 + 16.9 + 2 + 14.95 + 5 = 43.85: 44, against the row's 42.
-        assert_eq!(shown.grown.expect("grown").by, 2);
+        assert_eq!(shown.grown[0].by, 2);
     }
 
     #[test]
@@ -1603,7 +1619,7 @@ mod tests {
                 Pointer::default(),
                 &showing_message(&options, busy(&options), true, false),
             );
-            let row = layout::place_row(Row::GlobalShortcut, banded_grown(&options));
+            let row = layout::place_row(Row::GlobalShortcut, &banded_grown(&options));
             let middle = whole_px((row.span.top + row.span.bottom) / 2, dpi);
             let inner_left = whole_px(layout::SIDE, dpi) + whole_px(1, dpi).max(1);
             // The bar: 3 logical pixels of --warn against the card's border.
@@ -1635,7 +1651,123 @@ mod tests {
         Text::ShortcutBusy(options.global_shortcut)
     }
 
-    fn banded_grown(options: &Options) -> Option<layout::Grown> {
+    /// `shown` with "Start with Windows" turned off in Windows and its message showing, as after a click on its switch.
+    fn showing_turned_off(mut shown: Shown) -> Shown {
+        let fonts = Fonts::new().expect("the fonts");
+        let message = startup_row::turned_off_message();
+        shown.start_with_windows = false;
+        shown
+            .grown
+            .push(message.growth(&fonts).expect("the row's growth"));
+        shown.messages.push(message);
+        shown
+    }
+
+    #[test]
+    fn start_with_windows_is_a_switch_at_the_right_of_general_s_middle_row_off_by_default() {
+        for mode in [Mode::Dark, Mode::Light] {
+            let options = Options::default();
+            let off = drawn(mode, 96);
+            let on = drawn_showing(
+                mode,
+                96,
+                &options,
+                Pointer::default(),
+                &Shown {
+                    start_with_windows: true,
+                    ..resting(&options)
+                },
+            );
+            let track = off.place_of(Control::StartWithWindows);
+            // The prototype's `.tgl`: 42 by 24, ending at 531 as every control, centered in its row.
+            assert_eq!(
+                (track.right, width_of_rect(track), height_of_rect(track)),
+                (531, 42, 24)
+            );
+            let row = layout::place_row(Row::StartWithWindows, &[]);
+            let above = track.top - i32::try_from(row.span.top).expect("small");
+            let below = i32::try_from(row.span.bottom).expect("small") - track.bottom;
+            assert!((above - below).abs() <= 1, "{above} above, {below} below");
+            assert!(
+                cyan(&off, track).abs() < 25.0,
+                "{mode:?}: {}",
+                cyan(&off, track)
+            );
+            assert!(cyan(&on, track) > 60.0, "{mode:?}: {}", cyan(&on, track));
+        }
+    }
+
+    #[test]
+    fn turned_off_in_windows_the_amber_message_shows_under_its_label_with_the_switch_off() {
+        let options = Options::default();
+        let shown = showing_turned_off(resting(&options));
+        for mode in [Mode::Dark, Mode::Light] {
+            for dpi in [96, 120, 144, 168] {
+                let page = drawn_showing(mode, dpi, &options, Pointer::default(), &shown);
+                let row = layout::place_row(Row::StartWithWindows, &shown.grown);
+                let (top, bottom) = (whole_px(row.span.top, dpi), whole_px(row.span.bottom, dpi));
+                let track = page.place_of(Control::StartWithWindows);
+                let left = whole_px(layout::SIDE + layout::CARD_BORDER, dpi);
+                let amber_rows: Vec<i32> = (top..bottom)
+                    .filter(|&y| (left..track.left).any(|x| amber(page.at(x, y))))
+                    .collect();
+                let (Some(&first), Some(&last)) = (amber_rows.first(), amber_rows.last()) else {
+                    panic!("{mode:?} {dpi}: no amber in the row");
+                };
+                assert!(
+                    first > top + whole_px(15, dpi),
+                    "{mode:?} {dpi}: {first} from {top}"
+                );
+                assert!(
+                    last < bottom - whole_px(3, dpi),
+                    "{mode:?} {dpi}: {last} to {bottom}"
+                );
+                // No band: the row's left edge stays the card's, and the switch stays off.
+                let middle = (top + bottom) / 2;
+                assert!(!amber(page.at(left + 1, middle)), "{mode:?} {dpi}: a band");
+                assert!(cyan(&page, track).abs() < 25.0, "{mode:?} {dpi}");
+                // Never against the switch.
+                assert!(
+                    (top..bottom).all(|y| (track.left - whole_px(6, dpi)..track.left)
+                        .all(|x| !amber(page.at(x, y)))),
+                    "{mode:?} {dpi}: amber against the switch"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_busy_shortcut_s_band_and_start_with_windows_message_show_together_each_in_its_row() {
+        let options = Options::default();
+        let shown = showing_turned_off(showing_message(&options, busy(&options), true, false));
+        assert_eq!(shown.grown.len(), 2);
+        let dpi = 144;
+        for mode in [Mode::Dark, Mode::Light] {
+            let page = drawn_showing(mode, dpi, &options, Pointer::default(), &shown);
+            let left = whole_px(layout::SIDE + layout::CARD_BORDER, dpi);
+            for row in [Row::GlobalShortcut, Row::StartWithWindows] {
+                let placed = layout::place_row(row, &shown.grown);
+                let (top, bottom) = (
+                    whole_px(placed.span.top, dpi),
+                    whole_px(placed.span.bottom, dpi),
+                );
+                let inked = (top + whole_px(15, dpi)..bottom).any(|y| {
+                    (left + whole_px(12, dpi)..whole_px(300, dpi)).any(|x| amber(page.at(x, y)))
+                });
+                assert!(inked, "{mode:?} {row:?}: no amber message");
+            }
+            // The rows below moved down by both: Theme's choice is still inside its row.
+            let theme = page.place_of(Control::Theme(Theme::Automatic));
+            let theme_row = layout::place_row(Row::Theme, &shown.grown);
+            assert!(theme.top > whole_px(theme_row.span.top, dpi), "{mode:?}");
+            assert!(
+                theme.bottom < whole_px(theme_row.span.bottom, dpi),
+                "{mode:?}"
+            );
+        }
+    }
+
+    fn banded_grown(options: &Options) -> Vec<layout::Grown> {
         showing_message(options, busy(options), true, false).grown
     }
 
@@ -1674,6 +1806,16 @@ mod tests {
                     "busy-band",
                     showing_message(&options, busy(&options), true, false),
                 ),
+                ("start-on", {
+                    let mut shown = resting(&options);
+                    shown.start_with_windows = true;
+                    shown
+                }),
+                ("start-turned-off", showing_turned_off(resting(&options))),
+                (
+                    "busy-and-start-turned-off",
+                    showing_turned_off(showing_message(&options, busy(&options), true, false)),
+                ),
             ] {
                 let page = drawn_showing(mode, 144, &options, Pointer::default(), &shown);
                 let width = u32::try_from(page.width).expect("small");
@@ -1694,7 +1836,7 @@ mod tests {
         for mode in [Mode::Dark, Mode::Light] {
             for dpi in DPIS {
                 let page = drawn(mode, dpi);
-                let bottom = whole_px(layout::page(None).height, dpi) - 1;
+                let bottom = whole_px(layout::page(&[]).height, dpi) - 1;
                 assert!(near(page.at(2, 0), palette(mode).top, 1), "{mode:?} {dpi}");
                 assert!(
                     near(page.at(2, bottom), palette(mode).bottom, 1),
@@ -1710,7 +1852,7 @@ mod tests {
             for dpi in DPIS {
                 let page = drawn(mode, dpi);
                 let link = page.link;
-                let footer = layout::page(None).footer;
+                let footer = layout::page(&[]).footer;
                 // It ends 16 logical pixels in from the right, inside the footer.
                 let right = whole_px(layout::WIDTH - layout::SIDE, dpi);
                 assert!(
@@ -1749,7 +1891,7 @@ mod tests {
         let dpi = 144;
         for mode in [Mode::Dark, Mode::Light] {
             let page = drawn(mode, dpi);
-            for placed in layout::page(None).blocks {
+            for placed in layout::page(&[]).blocks {
                 // Inside the card, past its border and corner and above its rows' labels, and beside it on the same row.
                 let y = whole_px(placed.card.top + 4, dpi);
                 let inside = page.at(whole_px(layout::SIDE + 30, dpi), y);
@@ -1761,7 +1903,7 @@ mod tests {
                 );
             }
             // The footer's 1-pixel line differs from the background just above it.
-            let line = whole_px(layout::page(None).footer.top, dpi);
+            let line = whole_px(layout::page(&[]).footer.top, dpi);
             assert_ne!(page.at(300, line), page.at(300, line - 1), "{mode:?}");
         }
     }

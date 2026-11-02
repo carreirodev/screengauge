@@ -1,5 +1,5 @@
-//! The tray icon's menu, which a right click on the icon opens: "Settings" and "Exit" (v1 spec WPC-296, the tray icon's
-//! right-click menu). ScreenGauge draws it itself, in its theme and at the scale of the monitor it opens on (the spec's
+//! The tray icon's menu, which a right click on the icon opens: "Settings", "Start with Windows", with a check mark while
+//! it is on, and "Exit" (v1 spec WPC-296, the tray icon's right-click menu; WPC-326). ScreenGauge draws it itself, in its theme and at the scale of the monitor it opens on (the spec's
 //! derived rule 1, which follows from ADR 0001); Windows only rounds its corners, draws its 1-pixel border and its
 //! shadow.
 //!
@@ -63,6 +63,8 @@ thread_local! {
     /// The window that hears of the item chosen.
     static RESIDENT: Cell<Option<HWND>> = const { Cell::new(None) };
     static MODE: Cell<Mode> = const { Cell::new(Mode::Light) };
+    /// Whether "Start with Windows" shows its check mark.
+    static CHECKED: Cell<bool> = const { Cell::new(false) };
     /// Made at the first paint, and again after the graphics device was lost.
     static TARGET: RefCell<Option<ID2D1HwndRenderTarget>> = const { RefCell::new(None) };
     /// The item tinted: the one under the mouse, or the one the arrow keys lit.
@@ -108,9 +110,10 @@ pub fn anchor_of(wparam: WPARAM) -> POINT {
     }
 }
 
-/// Opens the menu for a click at `anchor`, in `mode`'s palette, at the scale of the click's monitor, and gives it the
-/// front, so a click anywhere else closes it. A menu already open closes first. The item chosen goes to `resident`.
-pub fn open(resident: HWND, anchor: POINT, mode: Mode) -> windows::core::Result<()> {
+/// Opens the menu for a click at `anchor`, in `mode`'s palette, at the scale of the click's monitor, with "Start with
+/// Windows" `checked` or not, and gives it the front, so a click anywhere else closes it. A menu already open closes
+/// first. The item chosen goes to `resident`.
+pub fn open(resident: HWND, anchor: POINT, mode: Mode, checked: bool) -> windows::core::Result<()> {
     close();
     let (work, dpi) = monitor_at(anchor)?;
     let size = layout::size_at(dpi);
@@ -138,6 +141,7 @@ pub fn open(resident: HWND, anchor: POINT, mode: Mode) -> windows::core::Result<
     WINDOW.set(Some(hwnd));
     RESIDENT.set(Some(resident));
     MODE.set(mode);
+    CHECKED.set(checked);
     // SAFETY: our own window.
     let given = unsafe { GetDpiForWindow(hwnd) };
     if given != dpi {
@@ -466,7 +470,7 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
     let fonts = graphics::fonts()?;
     // SAFETY: drawing calls on a live render target, between BeginDraw and EndDraw.
     unsafe { target.BeginDraw() };
-    let drawn = paint::draw(&target, &fonts, MODE.get(), dpi, LIT.get());
+    let drawn = paint::draw(&target, &fonts, MODE.get(), dpi, LIT.get(), CHECKED.get());
     // SAFETY: ends the BeginDraw above.
     match unsafe { target.EndDraw(None, None) } {
         Ok(()) => TARGET.set(Some(target)),

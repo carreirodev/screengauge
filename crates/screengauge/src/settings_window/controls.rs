@@ -95,6 +95,7 @@ pub enum Control {
     /// The global shortcut recorder's field, and Reset beside it.
     ShortcutField,
     ShortcutReset,
+    StartWithWindows,
     Theme(Theme),
     ToleranceDown,
     ToleranceUp,
@@ -109,10 +110,10 @@ pub enum Control {
 /// for a click that changes nothing by itself: one that needs Windows' folder window first, and changes nothing until it
 /// answers ("Change…", and the switch turned on with no folder kept: `Options::choose_default_folder` then keeps the
 /// folder), and the global shortcut's field and Reset, as the recorder registers a combination with Windows first
-/// (`recorder`).
+/// (`recorder`), and "Start with Windows", which Windows holds (`startup_row`).
 pub fn change(control: Control, options: &Options) -> Option<Change> {
     Some(match control {
-        Control::ShortcutField | Control::ShortcutReset => return None,
+        Control::ShortcutField | Control::ShortcutReset | Control::StartWithWindows => return None,
         Control::Theme(theme) => Change::Theme(theme),
         Control::ToleranceDown => Change::DefaultToleranceDown,
         Control::ToleranceUp => Change::DefaultToleranceUp,
@@ -617,6 +618,11 @@ mod tests {
         let options = Options::default();
         assert_eq!(change(Control::ShortcutField, &options), None);
         assert_eq!(change(Control::ShortcutReset, &options), None);
+    }
+
+    #[test]
+    fn start_with_windows_changes_no_option_by_itself_as_windows_holds_it() {
+        assert_eq!(change(Control::StartWithWindows, &Options::default()), None);
     }
 
     #[test]

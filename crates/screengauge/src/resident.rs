@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use screengauge_core::session::{Effect, Image, Input, Opening, SaveTo, Session};
-use screengauge_core::settings::{Folder, Remembered, Stored};
+use screengauge_core::settings::{Folder, Remembered, StartWithWindows, Stored};
 use windows::Win32::Foundation::{
     E_FAIL, ERROR_HOTKEY_ALREADY_REGISTERED, ERROR_SUCCESS, HINSTANCE, HWND, LPARAM, LRESULT,
     POINT, SetLastError, WPARAM,
@@ -25,9 +25,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{Error, PCWSTR, w};
 
+use crate::StartedBy;
 use crate::frozen_screen::{self, FrozenScreen};
 use crate::notification::{self, Notification};
 use crate::settings_file::{self, SettingsFile};
+use crate::start_with_windows::{self, Clicked};
 use crate::win32::{low_word, struct_size};
 use crate::{
     capture, clipboard, event, folder_picker, global_shortcut, graphics, log, png, save_as,
@@ -59,13 +61,13 @@ thread_local! {
     static FROZEN_SCREEN: RefCell<Option<FrozenScreen>> = const { RefCell::new(None) };
 }
 
-/// Calls ScreenGauge right away, since opening it is a call, unless Windows started it for a notification's click
-/// (`for_a_click`), then runs until the user exits from the tray icon, with what the settings file holds and the file
-/// to save it to.
+/// Calls ScreenGauge right away when the user opened it, since opening it is a call, but not when Windows started it for
+/// a notification's click or at sign-in (`started_by`), then runs until the user exits from the tray icon, with what the
+/// settings file holds and the file to save it to.
 pub fn run(
     file: Option<SettingsFile>,
     stored: Stored,
-    for_a_click: bool,
+    started_by: StartedBy,
 ) -> windows::core::Result<()> {
     let shortcut = stored.options.global_shortcut;
     settings_file::keep(file, stored);
@@ -127,7 +129,8 @@ pub fn run(
             notification::wait(Notification::ShortcutBusy);
         }
     }
-    if !for_a_click {
+    // At sign-in ScreenGauge starts hidden, its tools closed until a call (WPC-326).
+    if started_by == StartedBy::User {
         post_call(hwnd);
     }
     // After the call, so a notification from startup, such as the damaged settings file, never lands in its photo;
@@ -175,6 +178,7 @@ extern "system" fn window_proc(
         tray_menu::CHOSEN => {
             match tray_menu::chosen(wparam) {
                 Some(tray_menu::Item::Settings) => open_settings(),
+                Some(tray_menu::Item::StartWithWindows) => click_start_with_windows(),
                 Some(tray_menu::Item::Exit) => {
                     // SAFETY: our own window, on the thread that created it.
                     if let Err(e) = unsafe { DestroyWindow(hwnd) } {
@@ -435,13 +439,38 @@ pub fn follow_theme() {
     });
 }
 
-/// Opens the tray icon's menu for a right click at `anchor`, in the palette of the theme the settings file holds.
+/// Opens the tray icon's menu for a right click at `anchor`, in the palette of the theme the settings file holds, with
+/// "Start with Windows" checked as Windows holds it.
 fn open_tray_menu(resident: HWND, anchor: POINT) {
+    // Unreadable, it shows unchecked, and a click reads it again, and says so should it fail too.
+    let checked = start_with_windows::state().map_or_else(
+        |e| {
+            log::failure("tray menu: reading Start with Windows", &e);
+            false
+        },
+        StartWithWindows::is_on,
+    );
     let opened = settings_file::current()
         .map_err(|e| Error::new(E_FAIL, e.to_string()))
-        .and_then(|stored| tray_menu::open(resident, anchor, theme::mode(stored.options.theme)));
+        .and_then(|stored| {
+            tray_menu::open(resident, anchor, theme::mode(stored.options.theme), checked)
+        });
     if let Err(e) = opened {
         log::failure("tray menu: opening it", &e);
+    }
+}
+
+/// The tray menu's "Start with Windows": turned to the other side, and Settings' switch follows should it be open. With
+/// it turned off in Windows, the menu has no room for the amber message: Settings opens with it (the owner's choice in
+/// WPC-326).
+fn click_start_with_windows() {
+    match start_with_windows::click() {
+        Ok(Clicked::Turned) => settings_window::follow_start_with_windows(),
+        Ok(Clicked::TurnedOffInWindows) => {
+            settings_window::say_start_with_windows_turned_off();
+            open_settings();
+        }
+        Err(e) => log::failure("tray menu: turning Start with Windows", &e),
     }
 }
 

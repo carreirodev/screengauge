@@ -2,27 +2,32 @@
 //! its pixels. Its looks come from Settings' (WPC-279's `#settings` tokens): the window's background, its rows' labels,
 //! and its cards' edge for the border Windows draws and for the row under the mouse or the arrow keys.
 
-use windows::Win32::Foundation::E_FAIL;
-use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
+use windows::Win32::Foundation::{E_FAIL, RECT};
+use windows::Win32::Graphics::Direct2D::Common::{
+    D2D_RECT_F, D2D1_FIGURE_BEGIN_HOLLOW, D2D1_FIGURE_END_OPEN,
+};
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_ROUNDED_RECT, ID2D1RenderTarget,
+    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND,
+    D2D1_ROUNDED_RECT, D2D1_STROKE_STYLE_PROPERTIES, ID2D1RenderTarget, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{DWRITE_FONT_WEIGHT_NORMAL, DWRITE_LINE_METRICS};
 use windows::core::Error;
 
 use super::layout::{self, Item};
 use crate::graphics::{Fonts, over, solid_brush};
-use crate::relief::{px, scaled};
+use crate::relief::{dot, px, scaled};
 use crate::settings_window::{background, dpi_scale, palette, write};
 use crate::theme::Mode;
 
-/// Draws the menu at `dpi` in `mode`'s palette, with `lit`'s row tinted.
+/// Draws the menu at `dpi` in `mode`'s palette, with `lit`'s row tinted, and the check mark of "Start with Windows" when
+/// it is `checked`.
 pub fn draw(
     target: &ID2D1RenderTarget,
     fonts: &Fonts,
     mode: Mode,
     dpi: u32,
     lit: Option<Item>,
+    checked: bool,
 ) -> windows::core::Result<()> {
     let colors = palette(mode);
     let size = layout::size_at(dpi);
@@ -76,6 +81,60 @@ pub fn draw(
         let left = px(row.left + scaled(layout::LABEL_INSET, dpi));
         write(target, &label, left, baseline - metrics.baseline, &ink);
     }
+    if checked {
+        check_mark(
+            target,
+            &ink,
+            layout::item_box(Item::StartWithWindows, dpi),
+            dpi,
+        )?;
+    }
+    Ok(())
+}
+
+/// The check mark in the column left of `row`'s label, centered in the row: a short stroke down to the right, then a
+/// long one up, in the labels' ink, with round ends.
+fn check_mark(
+    target: &ID2D1RenderTarget,
+    ink: &ID2D1SolidColorBrush,
+    row: RECT,
+    dpi: u32,
+) -> windows::core::Result<()> {
+    let scale = dpi_scale(dpi);
+    let center_x = px(row.left + scaled(layout::CHECK_CENTER, dpi));
+    let center_y = px(row.top + row.bottom) / 2.0;
+    let (half_width, half_height) = (
+        layout::CHECK_WIDTH * scale / 2.0,
+        layout::CHECK_HEIGHT * scale / 2.0,
+    );
+    // A point given from the middle, -1 to 1 across the mark's width and height.
+    let point = |x: f32, y: f32| dot(center_x + x * half_width, center_y + y * half_height).point;
+    // SAFETY: the target's own factory, alive while the target is.
+    let factory = unsafe { target.GetFactory() }?;
+    // SAFETY: no arguments.
+    let path = unsafe { factory.CreatePathGeometry() }?;
+    // SAFETY: no arguments.
+    let sink = unsafe { path.Open() }?;
+    // SAFETY: the points are plain values, and the figure is begun, extended and ended in order on the sink opened above
+    // and closed below.
+    unsafe {
+        sink.BeginFigure(point(-1.0, 0.1), D2D1_FIGURE_BEGIN_HOLLOW);
+        sink.AddLine(point(-0.3, 1.0));
+        sink.AddLine(point(1.0, -1.0));
+        sink.EndFigure(D2D1_FIGURE_END_OPEN);
+    }
+    // SAFETY: closes the sink opened above, once.
+    unsafe { sink.Close() }?;
+    let style = D2D1_STROKE_STYLE_PROPERTIES {
+        startCap: D2D1_CAP_STYLE_ROUND,
+        endCap: D2D1_CAP_STYLE_ROUND,
+        lineJoin: D2D1_LINE_JOIN_ROUND,
+        ..Default::default()
+    };
+    // SAFETY: plain values; no dashes.
+    let style = unsafe { factory.CreateStrokeStyle(&style, None) }?;
+    // SAFETY: a drawing call on a live render target, with arguments that outlive it.
+    unsafe { target.DrawGeometry(&path, ink, layout::CHECK_STROKE * scale, &style) };
     Ok(())
 }
 
@@ -95,12 +154,16 @@ mod tests {
     use crate::test_bitmap::{Picture, drawn, near};
 
     fn menu(mode: Mode, dpi: u32, lit: Option<Item>) -> Picture {
+        menu_checked(mode, dpi, lit, false)
+    }
+
+    fn menu_checked(mode: Mode, dpi: u32, lit: Option<Item>, checked: bool) -> Picture {
         let size = layout::size_at(dpi);
         let width = u32::try_from(size.cx).expect("a small menu");
         let height = u32::try_from(size.cy).expect("a small menu");
         drawn(width, height, |target, _| {
             let fonts = Fonts::new().expect("the fonts");
-            draw(target, &fonts, mode, dpi, lit).expect("the menu is drawn");
+            draw(target, &fonts, mode, dpi, lit, checked).expect("the menu is drawn");
         })
     }
 
@@ -205,6 +268,80 @@ mod tests {
         }
     }
 
+    /// The pixels of the check marks' column in `item`'s row, left of its label, that are near the labels' ink.
+    fn inked_in_check_column(picture: &Picture, mode: Mode, item: Item, dpi: u32) -> usize {
+        let row = layout::item_box(item, dpi);
+        let ink = palette(mode).ink.rgb;
+        let background = picture.at(row.left + 1, (row.top + row.bottom) / 2);
+        let far_from = |pixel: [u8; 3]| {
+            pixel
+                .iter()
+                .zip(background)
+                .map(|(&have, want)| u32::from(have.abs_diff(want)))
+                .sum::<u32>()
+        };
+        let column = row.left..row.left + scaled(layout::LABEL_INSET, dpi);
+        column
+            .flat_map(|x| (row.top..row.bottom).map(move |y| (x, y)))
+            .filter(|&(x, y)| far_from(picture.at(x, y)) > far_from(ink) / 2)
+            .count()
+    }
+
+    #[test]
+    fn start_with_windows_on_shows_a_check_mark_in_the_column_left_of_its_label() {
+        for mode in [Mode::Dark, Mode::Light] {
+            for dpi in DPIS {
+                let on = menu_checked(mode, dpi, None, true);
+                let off = menu(mode, dpi, None);
+                let marked = inked_in_check_column(&on, mode, Item::StartWithWindows, dpi);
+                // A mark 10 by 7 logical pixels drawn 1.5 thick: a few dozen pixels at 100%, more at 175%.
+                assert!(
+                    marked > scaled(12, dpi).try_into().expect("small"),
+                    "{mode:?} {dpi}: {marked}"
+                );
+                assert_eq!(
+                    inked_in_check_column(&off, mode, Item::StartWithWindows, dpi),
+                    0,
+                    "{mode:?} {dpi}"
+                );
+                // Only its own row has a mark.
+                for item in [Item::Settings, Item::Exit] {
+                    assert_eq!(
+                        inked_in_check_column(&on, mode, item, dpi),
+                        0,
+                        "{mode:?} {dpi} {item:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_check_mark_is_centered_in_its_column_and_its_row() {
+        let (mode, dpi) = (Mode::Dark, 168);
+        let on = menu_checked(mode, dpi, None, true);
+        let row = layout::item_box(Item::StartWithWindows, dpi);
+        let background = on.at(row.left + 1, (row.top + row.bottom) / 2);
+        let inked: Vec<(i32, i32)> = (row.left..row.left + scaled(layout::LABEL_INSET, dpi))
+            .flat_map(|x| (row.top..row.bottom).map(move |y| (x, y)))
+            .filter(|&(x, y)| on.at(x, y) != background)
+            .collect();
+        let xs = || inked.iter().map(|&(x, _)| x);
+        let ys = || inked.iter().map(|&(_, y)| y);
+        let (left, right) = (xs().min().expect("ink"), xs().max().expect("ink"));
+        let (top, bottom) = (ys().min().expect("ink"), ys().max().expect("ink"));
+        let center = row.left + scaled(layout::CHECK_CENTER, dpi);
+        assert!(
+            ((left + right) / 2 - center).abs() <= 2,
+            "{left}..{right} around {center}"
+        );
+        let middle = (row.top + row.bottom) / 2;
+        assert!(
+            ((top + bottom) / 2 - middle).abs() <= 2,
+            "{top}..{bottom} around {middle}"
+        );
+    }
+
     #[test]
     fn windows_draws_the_border_in_settings_edge_color_over_the_menus_top() {
         // --card-edge over --win-bg's top: white at 7% over #25272c, and rgb(70 60 45) at 13% over #f8f7f4.
@@ -221,8 +358,12 @@ mod tests {
         std::fs::create_dir_all(&folder).expect("the folder");
         for mode in [Mode::Dark, Mode::Light] {
             for dpi in [96, 120, 144, 168] {
-                for (name, lit) in [("rest", None), ("settings-lit", Some(Item::Settings))] {
-                    menu(mode, dpi, lit)
+                for (name, lit, checked) in [
+                    ("rest", None, false),
+                    ("settings-lit", Some(Item::Settings), false),
+                    ("start-checked-lit", Some(Item::StartWithWindows), true),
+                ] {
+                    menu_checked(mode, dpi, lit, checked)
                         .write_png(&folder.join(format!("{mode:?}-{dpi}-{name}.png")));
                 }
             }

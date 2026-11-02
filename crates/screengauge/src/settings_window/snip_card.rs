@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn the_card_with_its_note_is_the_145_pixels_the_page_reserves() {
-        let card = layout::page(None).blocks[3].card;
+        let card = layout::page(&[]).blocks[3].card;
         let parts = parts(card.top, true);
         assert_eq!(parts.bottom, card.bottom);
         // The note's line ends 8 above the card's border.
@@ -414,7 +414,7 @@ mod tests {
 
     #[test]
     fn fitting_the_page_shortens_only_the_snip_s_card_and_only_without_the_note() {
-        let page = layout::page(None);
+        let page = layout::page(&[]);
         assert_eq!(fitted(page.clone(), true), page);
         let shorter = fitted(page.clone(), false);
         assert_eq!(

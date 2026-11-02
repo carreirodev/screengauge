@@ -139,7 +139,7 @@ impl Message {
         if self.row.note().is_some() {
             needed += layout::NOTE_GAP + layout::NOTE_LINE;
         }
-        let span = layout::place_row(self.row, None).span;
+        let span = layout::place_row(self.row, &[]).span;
         // A row's height is a few hundred pixels, never below nothing.
         let needed = u32::try_from(super::controls::whole_up(needed)).unwrap_or(0);
         Ok(Grown {

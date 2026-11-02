@@ -6,12 +6,14 @@
 
 mod recorder;
 mod shortcut;
+mod start_with_windows;
 mod text;
 
 use std::path::Path;
 
 pub use recorder::{Pressed, Recorder, Refusal, Step, Tried, is_common};
 pub use shortcut::{Key, Modifiers, Shortcut, ShortcutError};
+pub use start_with_windows::{Click, StartWithWindows};
 pub use text::{Damaged, Loaded, Problem, Reset, read, write};
 
 /// Everything the settings file keeps.
@@ -25,6 +27,8 @@ pub struct Stored {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Options {
     pub global_shortcut: Shortcut,
+    /// What the user last chose for "Start with Windows" in ScreenGauge. Windows holds what happens at sign-in, and the
+    /// switch shows Windows' answer ([`StartWithWindows`]); this follows the clicks, and is never written to Windows.
     pub start_with_windows: bool,
     pub theme: Theme,
     pub default_tolerance: Tolerance,
@@ -55,6 +59,8 @@ impl Default for Options {
 pub enum Change {
     /// "Global shortcut": a combination the recorder took, or Reset's `Win + Shift + X`, once Windows has registered it.
     GlobalShortcut(Shortcut),
+    /// "Start with Windows" turned on or off, once Windows has it.
+    StartWithWindows(bool),
     /// "Theme": Automatic, Light or Dark.
     Theme(Theme),
     /// "Default tolerance"'s − and +: the same step as a notch of the mouse wheel, stopping at the limits.
@@ -77,6 +83,7 @@ impl Options {
         let before = self.clone();
         match change {
             Change::GlobalShortcut(shortcut) => self.global_shortcut = shortcut,
+            Change::StartWithWindows(on) => self.start_with_windows = on,
             Change::Theme(theme) => self.theme = theme,
             Change::DefaultToleranceDown => self.default_tolerance = self.default_tolerance.down(),
             Change::DefaultToleranceUp => self.default_tolerance = self.default_tolerance.up(),

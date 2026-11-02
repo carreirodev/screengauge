@@ -25,7 +25,7 @@ fn with(destination: SnipDestination, default_folder: DefaultFolder) -> Options 
 
 /// The Snip card's parts on the page for `options`, in logical pixels.
 fn parts(options: &Options) -> snip_card::Parts {
-    let top = snip_card::top_of(&layout::page(None)).expect("the Snip block");
+    let top = snip_card::top_of(&layout::page(&[])).expect("the Snip block");
     snip_card::parts(top, snip_card::note_shown(options))
 }
 
@@ -131,7 +131,7 @@ fn the_snip_s_controls_grow_with_the_scale_and_stay_inside_the_card() {
     let options = Options::default();
     for dpi in DPIS {
         let page = drawn_with(Mode::Dark, dpi, &options, Pointer::default());
-        let card = layout::page(None).blocks[3].card;
+        let card = layout::page(&[]).blocks[3].card;
         let (top, bottom) = (whole_px(card.top, dpi), whole_px(card.bottom, dpi));
         let right_edge = whole_px(layout::WIDTH - layout::SIDE - 1, dpi);
         let switch = page.place_of(Control::SaveToDefaultFolder);

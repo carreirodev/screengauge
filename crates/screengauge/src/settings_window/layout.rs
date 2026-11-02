@@ -16,10 +16,11 @@
 //!
 //! The page measured 556.56 tall; in whole pixels it is 558. The user doesn't change the window's height, and the
 //! blocks' rows go inside these cards: Measurements' and Inspect's from WPC-320, the Snip's from WPC-322, the global
-//! shortcut's from WPC-323, the others with their own tickets. The Snip's card is this tall with its note, as measured;
-//! without it the card is shorter (`snip_card::fitted`) and the window stays as it is. Only a message under a row's
-//! label makes the page taller, while it shows: the row grows to hold it, and its card, the blocks below and the window
-//! with it ([`Grown`], WPC-323).
+//! shortcut's from WPC-323, "Start with Windows"' from WPC-326. The Snip's card is this tall with its note, as
+//! measured; without it the card is shorter (`snip_card::fitted`) and the window stays as it is. Only a message under a
+//! row's label makes the page taller, while it shows: the row grows to hold it, and its card, the blocks below and the
+//! window with it ([`Grown`], WPC-323). Two rows may show one at the same time, as the global shortcut Windows refused
+//! at startup and "Start with Windows" turned off in Windows, and each grows by its own.
 
 /// The page's width.
 pub const WIDTH: u32 = 560;
@@ -125,6 +126,7 @@ pub struct Page {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Row {
     GlobalShortcut,
+    StartWithWindows,
     Theme,
     DefaultTolerance,
     AlsoShowLogicalPixels,
@@ -135,6 +137,7 @@ impl Row {
     pub fn label(self) -> &'static str {
         match self {
             Row::GlobalShortcut => "Global shortcut",
+            Row::StartWithWindows => "Start with Windows",
             Row::Theme => "Theme",
             Row::DefaultTolerance => "Default tolerance",
             Row::AlsoShowLogicalPixels => "Also show logical pixels",
@@ -146,7 +149,7 @@ impl Row {
         match self {
             Row::DefaultTolerance => Some("The mouse wheel adjusts it while measuring."),
             Row::AlsoShowLogicalPixels => Some("When the display scale isn't 100%."),
-            Row::GlobalShortcut | Row::Theme | Row::ColorFormat => None,
+            Row::GlobalShortcut | Row::StartWithWindows | Row::Theme | Row::ColorFormat => None,
         }
     }
 
@@ -154,8 +157,7 @@ impl Row {
     fn slot(self) -> (Block, u32) {
         match self {
             Row::GlobalShortcut => (Block::General, 0),
-            // The last of General's three: "Start with Windows"' row comes between with its own ticket (WPC-326), so it
-            // never moves.
+            Row::StartWithWindows => (Block::General, 1),
             Row::Theme => (Block::General, 2),
             Row::DefaultTolerance => (Block::Measurements, 0),
             Row::AlsoShowLogicalPixels => (Block::Measurements, 1),
@@ -164,10 +166,10 @@ impl Row {
     }
 }
 
-/// The rows ScreenGauge draws, top to bottom, except the Snip's, which `snip_card` places. General's "Start with
-/// Windows" comes with its own ticket (WPC-326), into the room its card already has.
-pub const ROWS: [Row; 5] = [
+/// The rows ScreenGauge draws, top to bottom, except the Snip's, which `snip_card` places.
+pub const ROWS: [Row; 6] = [
     Row::GlobalShortcut,
+    Row::StartWithWindows,
     Row::Theme,
     Row::DefaultTolerance,
     Row::AlsoShowLogicalPixels,
@@ -177,6 +179,9 @@ pub const ROWS: [Row; 5] = [
 /// The card's border, and the room left and right of a row's label and control inside it (`.srow`'s padding).
 pub const CARD_BORDER: u32 = 1;
 pub const ROW_PADDING: u32 = 12;
+
+/// The room between a row's label, or the message under it, and its control (`.srow`'s `gap`).
+pub const ROW_GAP: u32 = 10;
 
 /// A row's label (`#settings`' `font: 13px/1.3`) and note (`.note`: 11.5 tall on the same line-height, 1 below the
 /// label): their sizes, their lines, and the room between them.
@@ -219,15 +224,22 @@ pub struct Grown {
 }
 
 impl Grown {
-    /// How much it adds to `block`'s card.
-    fn in_block(grown: Option<Grown>, block: Block) -> u32 {
-        grown.map_or(0, |grown| {
-            if grown.row.slot().0 == block {
-                grown.by
-            } else {
-                0
-            }
-        })
+    /// How much the rows `grown` add to `block`'s card.
+    fn in_block(grown: &[Grown], block: Block) -> u32 {
+        grown
+            .iter()
+            .filter(|grown| grown.row.slot().0 == block)
+            .map(|grown| grown.by)
+            .sum()
+    }
+
+    /// How much the rows `grown` add to the row in `slot`.
+    fn in_slot(grown: &[Grown], slot: (Block, u32)) -> u32 {
+        grown
+            .iter()
+            .filter(|grown| grown.row.slot() == slot)
+            .map(|grown| grown.by)
+            .sum()
     }
 }
 
@@ -240,20 +252,17 @@ pub struct PlacedRow {
     pub line_above: bool,
 }
 
-/// Where `row` is on the page, with `grown` taller should it be shown. A card's rows share the room inside its border,
-/// the first ones a pixel taller when it doesn't divide evenly; the grown row has its share and the growth.
-pub fn place_row(row: Row, grown: Option<Grown>) -> PlacedRow {
+/// Where `row` is on the page, with the rows `grown` taller while their messages show. A card's rows share the room
+/// inside its border, the first ones a pixel taller when it doesn't divide evenly; a grown row has its share and its
+/// growth.
+pub fn place_row(row: Row, grown: &[Grown]) -> PlacedRow {
     let (block, index) = row.slot();
     let placed = page(grown).blocks[block.index()];
     let count = block.rows();
     let inside = block.card() - 2 * CARD_BORDER;
     let room = inside - (count - 1);
     let (each, extra) = (room / count, room % count);
-    let growth = |i: u32| match grown {
-        Some(grown) if grown.row.slot() == (block, i) => grown.by,
-        _ => 0,
-    };
-    let height = |i: u32| each + u32::from(i < extra) + growth(i);
+    let height = |i: u32| each + u32::from(i < extra) + Grown::in_slot(grown, (block, i));
     let top = placed.card.top + CARD_BORDER + (0..index).map(|i| height(i) + 1).sum::<u32>();
     PlacedRow {
         row,
@@ -265,8 +274,8 @@ pub fn place_row(row: Row, grown: Option<Grown>) -> PlacedRow {
     }
 }
 
-/// The page, laid out, with `grown` taller should it be shown.
-pub fn page(grown: Option<Grown>) -> Page {
+/// The page, laid out, with the rows `grown` taller while their messages show.
+pub fn page(grown: &[Grown]) -> Page {
     let mut top = PADDING;
     let blocks = BLOCKS.map(|block| {
         let heading = top;
@@ -302,7 +311,7 @@ mod tests {
     fn the_page_is_as_tall_as_the_prototype_without_the_language_row_in_whole_pixels() {
         // Measured in a browser for WPC-319: 588.56 for the prototype's window, less its 32 of drawn title bar.
         let measured = 556.56;
-        let height = f64::from(page(None).height);
+        let height = f64::from(page(&[]).height);
         assert!(
             (measured..measured + 2.0).contains(&height),
             "{height} for the {measured} measured"
@@ -311,7 +320,7 @@ mod tests {
 
     #[test]
     fn the_blocks_come_in_the_spec_s_order_one_below_the_other_with_the_footer_last() {
-        let page = page(None);
+        let page = page(&[]);
         let order: Vec<Block> = page.blocks.iter().map(|placed| placed.block).collect();
         assert_eq!(
             order,
@@ -338,7 +347,7 @@ mod tests {
     #[test]
     fn each_card_is_as_tall_as_the_prototype_s() {
         let measured = [128.0, 87.69, 43.33, 145.28];
-        for (placed, measured) in page(None).blocks.iter().zip(measured) {
+        for (placed, measured) in page(&[]).blocks.iter().zip(measured) {
             let height = f64::from(placed.card.bottom - placed.card.top);
             assert!(
                 (height - measured).abs() <= 0.5,
@@ -357,9 +366,9 @@ mod tests {
 
     #[test]
     fn measurements_two_rows_share_its_card_with_a_line_between_them() {
-        let card = page(None).blocks[1].card;
-        let tolerance = place_row(Row::DefaultTolerance, None);
-        let logical = place_row(Row::AlsoShowLogicalPixels, None);
+        let card = page(&[]).blocks[1].card;
+        let tolerance = place_row(Row::DefaultTolerance, &[]);
+        let logical = place_row(Row::AlsoShowLogicalPixels, &[]);
         // Inside the card's border, one below the other, a pixel apart for the line, filling the card.
         assert_eq!(tolerance.span.top, card.top + 1);
         assert_eq!(logical.span.top, tolerance.span.bottom + 1);
@@ -374,9 +383,20 @@ mod tests {
     }
 
     #[test]
+    fn start_with_windows_is_general_s_middle_row_between_the_shortcut_and_theme() {
+        let shortcut = place_row(Row::GlobalShortcut, &[]);
+        let start = place_row(Row::StartWithWindows, &[]);
+        let theme = place_row(Row::Theme, &[]);
+        assert_eq!(start.span.top, shortcut.span.bottom + 1);
+        assert_eq!(theme.span.top, start.span.bottom + 1);
+        assert_eq!(start.span.bottom - start.span.top, 41);
+        assert!(start.line_above);
+    }
+
+    #[test]
     fn theme_is_the_last_of_general_s_three_rows_against_the_card_s_bottom() {
-        let card = page(None).blocks[0].card;
-        let theme = place_row(Row::Theme, None);
+        let card = page(&[]).blocks[0].card;
+        let theme = place_row(Row::Theme, &[]);
         // General's 126 pixels inside its border: three rows of 42, 41 and 41, and two lines between them.
         assert_eq!(theme.span.bottom, card.bottom - 1);
         assert_eq!(theme.span.top, card.top + 1 + 42 + 1 + 41 + 1);
@@ -385,8 +405,8 @@ mod tests {
 
     #[test]
     fn inspect_s_one_row_fills_its_card() {
-        let card = page(None).blocks[2].card;
-        let color = place_row(Row::ColorFormat, None);
+        let card = page(&[]).blocks[2].card;
+        let color = place_row(Row::ColorFormat, &[]);
         assert_eq!(
             color.span,
             Span {
@@ -405,6 +425,7 @@ mod tests {
             texts,
             [
                 ("Global shortcut", None),
+                ("Start with Windows", None),
                 ("Theme", None),
                 (
                     "Default tolerance",
@@ -421,8 +442,8 @@ mod tests {
 
     #[test]
     fn the_global_shortcut_is_general_s_first_row_against_the_card_s_top() {
-        let card = page(None).blocks[0].card;
-        let shortcut = place_row(Row::GlobalShortcut, None);
+        let card = page(&[]).blocks[0].card;
+        let shortcut = place_row(Row::GlobalShortcut, &[]);
         assert_eq!(
             shortcut.span,
             Span {
@@ -435,11 +456,12 @@ mod tests {
 
     #[test]
     fn a_message_makes_its_row_its_card_and_the_page_taller_and_moves_what_is_below() {
-        let grown = Some(Grown {
+        let grown = [Grown {
             row: Row::GlobalShortcut,
             by: 31,
-        });
-        let (before, after) = (page(None), page(grown));
+        }];
+        let grown = &grown[..];
+        let (before, after) = (page(&[]), page(grown));
         assert_eq!(after.height, before.height + 31);
         assert_eq!(after.blocks[0].card.top, before.blocks[0].card.top);
         assert_eq!(
@@ -458,18 +480,19 @@ mod tests {
         let shortcut = place_row(Row::GlobalShortcut, grown);
         assert_eq!(
             shortcut.span.top,
-            place_row(Row::GlobalShortcut, None).span.top
+            place_row(Row::GlobalShortcut, &[]).span.top
         );
         assert_eq!(shortcut.span.bottom - shortcut.span.top, 42 + 31);
         let theme = place_row(Row::Theme, grown);
-        assert_eq!(theme.span.top, place_row(Row::Theme, None).span.top + 31);
+        assert_eq!(theme.span.top, place_row(Row::Theme, &[]).span.top + 31);
         assert_eq!(theme.span.bottom, after.blocks[0].card.bottom - 1);
         for row in [
+            Row::StartWithWindows,
             Row::DefaultTolerance,
             Row::AlsoShowLogicalPixels,
             Row::ColorFormat,
         ] {
-            let (was, is) = (place_row(row, None), place_row(row, grown));
+            let (was, is) = (place_row(row, &[]), place_row(row, grown));
             assert_eq!(is.span.top, was.span.top + 31, "{row:?}");
             assert_eq!(is.span.bottom, was.span.bottom + 31, "{row:?}");
         }
@@ -477,12 +500,40 @@ mod tests {
 
     #[test]
     fn with_no_message_the_page_is_as_it_always_was() {
-        assert_eq!(page(None).height, 558);
-        let grown_by_nothing = Some(Grown {
+        assert_eq!(page(&[]).height, 558);
+        let grown_by_nothing = [Grown {
             row: Row::GlobalShortcut,
             by: 0,
-        });
-        assert_eq!(page(grown_by_nothing), page(None));
+        }];
+        assert_eq!(page(&grown_by_nothing), page(&[]));
+    }
+
+    #[test]
+    fn two_messages_in_general_grow_each_its_row_and_the_card_by_both() {
+        let grown = [
+            Grown {
+                row: Row::GlobalShortcut,
+                by: 31,
+            },
+            Grown {
+                row: Row::StartWithWindows,
+                by: 16,
+            },
+        ];
+        let (before, after) = (page(&[]), page(&grown));
+        assert_eq!(after.height, before.height + 47);
+        assert_eq!(
+            after.blocks[0].card.bottom,
+            before.blocks[0].card.bottom + 47
+        );
+        let shortcut = place_row(Row::GlobalShortcut, &grown);
+        let start = place_row(Row::StartWithWindows, &grown);
+        let theme = place_row(Row::Theme, &grown);
+        assert_eq!(shortcut.span.bottom - shortcut.span.top, 42 + 31);
+        assert_eq!(start.span.top, shortcut.span.bottom + 1);
+        assert_eq!(start.span.bottom - start.span.top, 41 + 16);
+        assert_eq!(theme.span.top, start.span.bottom + 1);
+        assert_eq!(theme.span.bottom, after.blocks[0].card.bottom - 1);
     }
 
     #[test]

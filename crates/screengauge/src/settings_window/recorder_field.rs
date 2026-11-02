@@ -85,7 +85,7 @@ pub const WAITING_TEXT: f32 = layout::LABEL_TEXT;
 /// the same room either side of its word. Between it and the field is the row's gap (`.srow`'s `gap`).
 const BUTTON_HEIGHT: u32 = snip_card::FIELD_HEIGHT;
 const BUTTON_PADDING: u32 = snip_card::BUTTON_PADDING;
-const BUTTON_GAP: u32 = 10;
+const BUTTON_GAP: u32 = layout::ROW_GAP;
 
 /// `--accent` in the dark and the light palette, oklch(0.8 0.13 200) and oklch(0.55 0.15 235), as the tools' notices
 /// have it (`frozen_screen::overlay::palette`): the recording field's border, and its ring at 30%
