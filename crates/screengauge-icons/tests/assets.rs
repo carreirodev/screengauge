@@ -1,6 +1,7 @@
 //! The icon files in `assets/` are what this crate draws, and they hold what WPC-304 asks for: the .ico's sizes, the
 //! tray sizes drawn by hand, Microsoft's 3:1 contrast rule on both themes, every package image at its size, the
-//! notification header icons (WPC-347), and the Store icon at 300 × 300. After a change to the drawing, `cargo run -p screengauge-icons` writes the files again.
+//! notification header icons (WPC-347), and the Store icon at 300 × 300. After a change to the drawing,
+//! `cargo run -p screengauge-icons` writes the files again.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
