@@ -1,14 +1,14 @@
-//! The toolbar's colors and shadows in the light and the dark palette: the prototype's theme tokens (WPC-279, variant
-//! A: `--grp-*`, `--btn-*`, `--on-*`, `--sbtn-*` and `--ink*`, and the colors `.sbtn:hover`, `.sbtn.close:hover` and
-//! `#tbMini .chev` write out), where the `oklch` colors are converted to sRGB. Written as the CSS lists them, so a
-//! shadow list reads top to bottom as the stylesheet does: the first is painted on top. Sizes are in logical pixels,
-//! which `toolbar_paint` scales for the monitor.
+//! The raised surfaces' colors and shadows in the light and the dark palette, the toolbar's and Settings' controls': the
+//! prototype's theme tokens (WPC-279, variant A: `--grp-*`, `--btn-*`, `--on-*`, `--sbtn-*` and `--ink*`, and the colors
+//! `.sbtn:hover`, `.sbtn.close:hover` and `#tbMini .chev` write out), where the `oklch` colors are converted to sRGB.
+//! Written as the CSS lists them, so a shadow list reads top to bottom as the stylesheet does: the first is painted on
+//! top. Sizes are in logical pixels, which `relief` scales for the monitor.
 
 use crate::graphics::{Color, color};
 use crate::theme::Mode;
 
 /// An opaque color, as CSS writes `#rrggbb`.
-const fn rgb(r: u8, g: u8, b: u8) -> Color {
+pub const fn rgb(r: u8, g: u8, b: u8) -> Color {
     color(r, g, b, 1.0)
 }
 
@@ -20,11 +20,11 @@ pub struct Stop {
     pub color: Color,
 }
 
-const fn stop(at: f32, color: Color) -> Stop {
+pub const fn stop(at: f32, color: Color) -> Stop {
     Stop { at, color }
 }
 
-/// A `box-shadow` with no sideways offset, which none of the toolbar's has: it falls `y` down, blurs by `blur` and is
+/// A `box-shadow` with no sideways offset, which none of the toolbar's or Settings' has: it falls `y` down, blurs by `blur` and is
 /// `spread` bigger than its box on every side (smaller, should it be negative).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shadow {
@@ -34,7 +34,7 @@ pub struct Shadow {
     pub color: Color,
 }
 
-const fn shadow(y: i32, blur: u32, spread: i32, color: Color) -> Shadow {
+pub const fn shadow(y: i32, blur: u32, spread: i32, color: Color) -> Shadow {
     Shadow {
         y,
         blur,

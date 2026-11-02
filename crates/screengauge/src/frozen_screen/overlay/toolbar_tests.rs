@@ -9,9 +9,10 @@ use super::geometry::{self, scaled};
 use super::panel_tests::{MODES, over};
 use super::tests::{BACKGROUND, Canvas, Picture, SCALES, near};
 use super::toolbar::Layout;
+use super::toolbar_paint;
 use super::*;
-use super::{toolbar_paint, toolbar_palette};
 use crate::graphics::d2d_color;
+use crate::relief::palette as toolbar_palette;
 use screengauge_core::session::toolbar::{self as core_toolbar, Hit};
 use screengauge_core::session::{Point, Toolbar, ToolbarButton};
 

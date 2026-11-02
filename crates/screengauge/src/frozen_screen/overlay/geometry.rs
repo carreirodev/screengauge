@@ -3,7 +3,7 @@
 //! gives the line, its ticks and their outline, and [`place_label`] gives the label's place. Bounds' own are in
 //! `bounds`.
 
-use screengauge_core::session::{Measurement, Rect, Span, toolbar};
+use screengauge_core::session::{Measurement, Rect, Span};
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::core::Error;
 
@@ -35,12 +35,7 @@ const BAR_DROP: u32 = 1;
 pub const RING: u32 = 1;
 const STRIP: u32 = 3;
 
-/// `logical` pixels on a monitor of `dpi` (96 is 100%), in whole physical pixels, halves up: the session core's
-/// [`toolbar::scaled`], as a coordinate.
-pub fn scaled(logical: u32, dpi: u32) -> i32 {
-    // The core saturates the product, and divided by 96 it is at most 44 million, so the sign never flips.
-    toolbar::scaled(logical, dpi).cast_signed()
-}
+pub use crate::relief::scaled;
 
 /// A monitor's rectangle, with its right and bottom sides one past its last pixel, as Windows has it.
 pub fn bounds(monitor: Rect) -> windows::core::Result<RECT> {

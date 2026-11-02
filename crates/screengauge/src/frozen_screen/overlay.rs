@@ -16,7 +16,6 @@ mod notice;
 mod palette;
 #[cfg(test)]
 mod panel_tests;
-mod shadow;
 mod snip;
 #[cfg(test)]
 mod snip_tests;
@@ -28,7 +27,6 @@ pub mod toolbar;
 mod toolbar_cache;
 mod toolbar_icons;
 mod toolbar_paint;
-mod toolbar_palette;
 #[cfg(test)]
 mod toolbar_tests;
 
@@ -41,10 +39,9 @@ use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_CAP_STYLE_ROUND,
-    D2D1_COMBINE_MODE_EXCLUDE, D2D1_DASH_STYLE_SOLID, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
-    D2D1_LINE_JOIN_ROUND, D2D1_ROUNDED_RECT, D2D1_STROKE_STYLE_PROPERTIES,
-    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1Brush, ID2D1Factory, ID2D1RenderTarget,
-    ID2D1RoundedRectangleGeometry, ID2D1SolidColorBrush, ID2D1StrokeStyle,
+    D2D1_DASH_STYLE_SOLID, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_LINE_JOIN_ROUND, D2D1_ROUNDED_RECT,
+    D2D1_STROKE_STYLE_PROPERTIES, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1Factory,
+    ID2D1RenderTarget, ID2D1RoundedRectangleGeometry, ID2D1SolidColorBrush, ID2D1StrokeStyle,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_FEATURE, DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, DWRITE_FONT_WEIGHT,
@@ -56,6 +53,7 @@ use windows::core::Error;
 
 use crate::graphics::{Color, Fonts, color, solid_brush};
 use crate::log;
+use crate::relief::{self, dot, in_surface, px, ring, rounded_at};
 use crate::theme::Mode;
 use geometry::{Parts, scaled};
 use palette::Surfaces;
@@ -92,9 +90,6 @@ const LOGICAL_WEIGHT: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT_MEDIUM;
 /// The pill's shadow, approximating CSS `0 2px 7px rgba(0,0,0,.35)`: black rounded rectangles that grow by this many
 /// logical pixels and show this much, laid over each other, so the shadow fades outward from the pill.
 const SHADOW: [(u32, f32); 5] = [(0, 0.05), (1, 0.04), (2, 0.04), (4, 0.03), (6, 0.02)];
-
-/// How flat Direct2D makes the curves of a shape it combines with another: well under a pixel.
-const FLATTENING: f32 = 0.1;
 
 /// What draws the measurements and the notice on one monitor's window: brushes and a text format made for its render
 /// target and its scale. A render target that is lost takes its brushes with it, so this is made again with everything
@@ -623,8 +618,7 @@ impl Overlay {
         &self,
         shape: &D2D1_ROUNDED_RECT,
     ) -> windows::core::Result<ID2D1RoundedRectangleGeometry> {
-        // SAFETY: `shape` outlives the call, which keeps nothing of it.
-        unsafe { self.factory.CreateRoundedRectangleGeometry(shape) }
+        relief::geometry_of(&self.factory, shape)
     }
 
     /// Fills `shape` in `brush` everywhere except where `hole` is.
@@ -635,22 +629,7 @@ impl Overlay {
         hole: &ID2D1RoundedRectangleGeometry,
         brush: &ID2D1SolidColorBrush,
     ) -> windows::core::Result<()> {
-        let shape = self.geometry_of(shape)?;
-        // SAFETY: no arguments.
-        let cut = unsafe { self.factory.CreatePathGeometry() }?;
-        // SAFETY: no arguments.
-        let sink = unsafe { cut.Open() }?;
-        // SAFETY: the geometries and the sink outlive the call, which keeps nothing of them. No transform: both are
-        // already in the window's pixels.
-        unsafe {
-            shape.CombineWithGeometry(hole, D2D1_COMBINE_MODE_EXCLUDE, None, FLATTENING, &sink)
-        }?;
-        // SAFETY: closes the sink opened above, once.
-        unsafe { sink.Close() }?;
-        // SAFETY: a drawing call on a live render target with arguments that outlive it. Out of BeginDraw and EndDraw,
-        // Direct2D only fails the frame at EndDraw.
-        unsafe { target.FillGeometry(&cut, brush, None::<&ID2D1Brush>) };
-        Ok(())
+        relief::fill_except(&self.factory, target, shape, hole, brush)
     }
 
     /// `label` laid out on one line in `format`, with tabular figures.
@@ -720,93 +699,6 @@ impl Overlay {
         // None of these shapes is shrunk past half its height, so none needs the toolbar's clamp.
         rounded_at(self.window_origin(), rect, radius, grow, down, false)
     }
-}
-
-/// `rect`, from the virtual screen to the pixels of a surface whose pixel (0, 0) is the virtual screen's `origin`: the
-/// window's own, or a bitmap's.
-fn in_surface(origin: Point, rect: &RECT) -> D2D_RECT_F {
-    D2D_RECT_F {
-        left: px(rect.left - origin.x),
-        top: px(rect.top - origin.y),
-        right: px(rect.right - origin.x),
-        bottom: px(rect.bottom - origin.y),
-    }
-}
-
-/// `rect` as a rounded rectangle in the pixels of the surface at `origin`, with corners of `radius` pixels, grown by
-/// `grow` pixels on every side (or smaller, should it be negative) and moved `down` pixels. The corners grow with it, as
-/// a CSS shadow's do.
-///
-/// `clamp` is for a shape that may be shrunk past nothing: the toolbar's shadow layers and inset holes shrink a group's
-/// box by up to three deviations of the blur, which can pass half its height. Then a side that would cross the other
-/// goes to the middle instead of turning the rectangle inside out, and a corner's radius is never negative. The
-/// notice's, the tolerance indicator's and the labels' shapes never shrink that far, so they are left as they were.
-fn rounded_at(
-    origin: Point,
-    rect: &RECT,
-    radius: i32,
-    grow: i32,
-    down: i32,
-    clamp: bool,
-) -> D2D1_ROUNDED_RECT {
-    let span = |near: i32, far: i32| {
-        let (near_grown, far_grown) = (near - grow, far + grow);
-        if !clamp || near_grown <= far_grown {
-            (near_grown, far_grown)
-        } else {
-            let middle = near + (far - near) / 2;
-            (middle, middle)
-        }
-    };
-    let (left, right) = span(rect.left - origin.x, rect.right - origin.x);
-    let (top, bottom) = span(rect.top - origin.y + down, rect.bottom - origin.y + down);
-    let radius = if clamp {
-        (radius + grow).max(0)
-    } else {
-        radius + grow
-    };
-    D2D1_ROUNDED_RECT {
-        rect: D2D_RECT_F {
-            left: px(left),
-            top: px(top),
-            right: px(right),
-            bottom: px(bottom),
-        },
-        radiusX: px(radius),
-        radiusY: px(radius),
-    }
-}
-
-/// An ellipse of no size at (`x`, `y`), for its `point`: the Vector2 Direct2D's calls take, which windows 0.62 takes from
-/// the windows-numerics crate without re-exporting it, so this program can't name it, and may not add the crate.
-fn dot(x: f32, y: f32) -> D2D1_ELLIPSE {
-    let mut dot = D2D1_ELLIPSE::default();
-    dot.point.X = x;
-    dot.point.Y = y;
-    dot
-}
-
-/// The rounded rectangle to stroke with a line `width` pixels wide so the stroke covers the ring between `outer` and the
-/// same shape `width` smaller on every side: the line's middle runs half its width inside the outer edge.
-fn ring(outer: &D2D1_ROUNDED_RECT, width: f32) -> D2D1_ROUNDED_RECT {
-    let half = width / 2.0;
-    D2D1_ROUNDED_RECT {
-        rect: D2D_RECT_F {
-            left: outer.rect.left + half,
-            top: outer.rect.top + half,
-            right: outer.rect.right - half,
-            bottom: outer.rect.bottom - half,
-        },
-        radiusX: (outer.radiusX - half).max(0.0),
-        radiusY: (outer.radiusY - half).max(0.0),
-    }
-}
-
-/// A whole number of pixels as the float Direct2D takes. Positions are far below 2^24, up to which `f32` holds every
-/// whole number, so nothing is lost.
-fn px(pixels: i32) -> f32 {
-    debug_assert!(pixels.unsigned_abs() < 1 << 24, "{pixels} pixels");
-    pixels as f32
 }
 
 /// A measured width rounded up to whole pixels, so the pill never cuts into the text. Widths are a few hundred pixels

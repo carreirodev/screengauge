@@ -20,22 +20,19 @@
 use screengauge_core::session::toolbar::Hit;
 use screengauge_core::session::{Point, Toolbar};
 use windows::Win32::Foundation::E_FAIL;
-use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_RECT_F, D2D_SIZE_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT,
-};
+use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE,
-    ID2D1Bitmap, ID2D1BitmapRenderTarget, ID2D1RenderTarget,
+    D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, ID2D1Bitmap, ID2D1BitmapRenderTarget,
+    ID2D1RenderTarget,
 };
-use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::core::Error;
 
 use super::Overlay;
 use super::toolbar::Layout;
 use super::toolbar_paint::{self, Margins};
-use super::toolbar_palette;
 use crate::graphics::d2d_color;
 use crate::log;
+use crate::relief::{self, palette as toolbar_palette};
 
 /// What the bitmap shows of `toolbar` with `held` down: everything but where the toolbar is, which only moves where the
 /// bitmap is laid, so a drag never draws it again.
@@ -143,7 +140,7 @@ impl Overlay {
                 let height =
                     layout.toolbar.bottom - layout.toolbar.top + margins.top + margins.bottom;
                 (
-                    self.new_bitmap_target(target, width, height)?,
+                    relief::transparent_layer(target, width, height)?,
                     margins,
                     width,
                     height,
@@ -184,38 +181,5 @@ impl Overlay {
             width,
             height,
         })
-    }
-
-    /// A render target on a bitmap of `width` by `height` pixels, compatible with `target`, with room for transparency:
-    /// the window's own pixels are opaque, and the shadows are not.
-    fn new_bitmap_target(
-        &self,
-        target: &ID2D1RenderTarget,
-        width: i32,
-        height: i32,
-    ) -> windows::core::Result<ID2D1BitmapRenderTarget> {
-        let too_large = || Error::new(E_FAIL, "the toolbar's bitmap is too large");
-        let pixels = D2D_SIZE_U {
-            width: u32::try_from(width).map_err(|_| too_large())?,
-            height: u32::try_from(height).map_err(|_| too_large())?,
-        };
-        // Both are the same number because the target is at 96 DPI, where a unit is a pixel.
-        let units = D2D_SIZE_F {
-            width: super::px(width),
-            height: super::px(height),
-        };
-        let format = D2D1_PIXEL_FORMAT {
-            format: DXGI_FORMAT_B8G8R8A8_UNORM,
-            alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
-        };
-        // SAFETY: the sizes and the format outlive the call, which keeps nothing of them.
-        unsafe {
-            target.CreateCompatibleRenderTarget(
-                Some(&units),
-                Some(&pixels),
-                Some(&format),
-                D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE,
-            )
-        }
     }
 }

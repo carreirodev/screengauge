@@ -1554,7 +1554,7 @@ fn the_shadow_is_within_7_hundredths_of_opacity_of_the_prototypes_below_and_besi
             (background - f64::from(at(&picture, x, y)[0])) / (background - shadow)
         };
         let css = |beyond_the_edge: f64| {
-            alpha * (1.0 - super::shadow::normal_cdf(beyond_the_edge / sigma))
+            alpha * (1.0 - crate::relief::shadow::normal_cdf(beyond_the_edge / sigma))
         };
         for d in [0, 3, 8, 14, 22, 30] {
             let wanted = css(f64::from(d) + 0.5 - 2.0);

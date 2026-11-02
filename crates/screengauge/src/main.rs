@@ -18,6 +18,7 @@ mod graphics;
 mod log;
 mod notification;
 mod png;
+mod relief;
 mod resident;
 mod save_as;
 mod settings_file;

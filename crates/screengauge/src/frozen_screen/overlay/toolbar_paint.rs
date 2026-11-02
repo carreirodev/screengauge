@@ -18,32 +18,30 @@
 use screengauge_core::session::toolbar::Hit;
 use screengauge_core::session::{Point, Toolbar, ToolbarButton};
 use screengauge_core::settings::Tool;
+use std::ops::Deref;
 use windows::Win32::Foundation::{E_FAIL, RECT};
+
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D_SIZE_F, D2D1_FIGURE_BEGIN_HOLLOW, D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN,
-    D2D1_GRADIENT_STOP,
 };
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_ARC_SEGMENT, D2D1_ARC_SIZE_LARGE, D2D1_ARC_SIZE_SMALL,
-    D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
-    D2D1_ROUNDED_RECT, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE,
-    ID2D1PathGeometry, ID2D1RenderTarget, ID2D1RoundedRectangleGeometry, ID2D1SolidColorBrush,
-    ID2D1StrokeStyle,
+    D2D1_ELLIPSE, D2D1_ROUNDED_RECT, D2D1_SWEEP_DIRECTION_CLOCKWISE,
+    D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE, ID2D1PathGeometry, ID2D1RenderTarget,
 };
 use windows::core::Error;
 
-use super::geometry::scaled;
-use super::shadow::{self, Profile};
 use super::svg_path::{self, Figure, Pt, Segment};
 use super::toolbar::{ButtonKind, Layout, RING, Reaction, is_lit, kind, reaction};
 use super::toolbar_icons::{self, Icon, Shape, VIEW_BOX};
-use super::toolbar_palette::{
-    self, CLOSE_HOVER, CLOSE_INK_HOVER, OPEN_BOX, OPEN_INK, Palette, Shadow, Stop, Surface,
+use super::{Overlay, dot, in_surface, px};
+use crate::graphics::Color;
+use crate::relief::palette::{
+    self as toolbar_palette, CLOSE_HOVER, CLOSE_INK_HOVER, OPEN_BOX, OPEN_INK, Palette, Surface,
 };
-use super::{Overlay, dot, in_surface, px, ring, rounded_at};
-use crate::graphics::{Color, color, d2d_color, solid_brush};
+use crate::relief::{Canvas, Motion, OuterShadow, signed};
 
-// Every size below is in logical pixels, which `scaled` turns into physical pixels for the monitor's scale.
+// Every size below is in logical pixels, which the canvas's `scaled` turns into physical pixels for the monitor's scale.
 
 /// The corners of a group's panel (`.grp`), of a tool's button (`.tbtn`) and of the small buttons (`.mbtn`, `.sbtn`).
 const GROUP_RADIUS: u32 = 20;
@@ -72,14 +70,6 @@ fn style(palette: &Palette, kind: ButtonKind) -> (&Surface, u32) {
     }
 }
 
-/// How a button reacting to the mouse moves and shrinks, as its CSS `transform`: `scale` around its middle, then
-/// `down` logical pixels down (up when below zero).
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Motion {
-    scale: f32,
-    down: i32,
-}
-
 /// How a button of `kind` reacting as `reaction` moves, or `None` when it stays where it is.
 fn motion(kind: ButtonKind, reaction: Reaction) -> Option<Motion> {
     match (kind, reaction) {
@@ -96,45 +86,6 @@ fn motion(kind: ButtonKind, reaction: Reaction) -> Option<Motion> {
             down: 0,
         }),
         _ => None,
-    }
-}
-
-/// `logical` pixels of the monitor's scale, whole, for a length that may be negative, as a shadow's spread and drop may.
-fn signed(logical: i32, dpi: u32) -> i32 {
-    logical.signum() * scaled(logical.unsigned_abs(), dpi)
-}
-
-/// The standard deviation, in physical pixels, of a CSS blur radius of `blur` logical pixels: half of it.
-fn sigma(blur: u32, dpi: u32) -> f64 {
-    f64::from(blur) * f64::from(dpi) / 192.0
-}
-
-/// An outer shadow of a box in physical pixels: how much it is grown, how far it drops, and its layers, which are
-/// fitted across the box's short side after the spread.
-struct OuterShadow {
-    spread: i32,
-    drop: i32,
-    layers: shadow::Layers,
-}
-
-impl OuterShadow {
-    /// `None` when the spread leaves nothing of the box.
-    fn of(shadow: &Shadow, rect: &RECT, dpi: u32) -> Option<OuterShadow> {
-        let spread = signed(shadow.spread, dpi);
-        let short = (rect.right - rect.left).min(rect.bottom - rect.top) + 2 * spread;
-        if short <= 0 {
-            return None;
-        }
-        let layers = shadow::layers(
-            sigma(shadow.blur, dpi),
-            shadow.color.alpha,
-            Profile::Strip(f64::from(short)),
-        );
-        Some(OuterShadow {
-            spread,
-            drop: signed(shadow.y, dpi),
-            layers,
-        })
     }
 }
 
@@ -193,15 +144,20 @@ pub(super) fn reach(palette: &Palette, layout: &Layout, dpi: u32) -> Margins {
     margins
 }
 
-/// What paints on one render target. `origin` is the point of the virtual screen at the target's pixel (0, 0): the window's
-/// monitor when the target is the window, or where a bitmap kept for the toolbar starts.
+/// What paints on one render target: the canvas's `origin` is the point of the virtual screen at the target's pixel
+/// (0, 0), the window's monitor when the target is the window, or where a bitmap kept for the toolbar starts.
 struct Painter<'a> {
     overlay: &'a Overlay,
-    target: &'a ID2D1RenderTarget,
+    canvas: Canvas<'a>,
     palette: &'static Palette,
-    origin: Point,
-    /// Recolored for every fill, so the layers of a shadow share one.
-    brush: ID2D1SolidColorBrush,
+}
+
+impl<'a> Deref for Painter<'a> {
+    type Target = Canvas<'a>;
+
+    fn deref(&self) -> &Canvas<'a> {
+        &self.canvas
+    }
 }
 
 /// Where an icon's view box is on the target and how big a unit of it is, to turn its points into pixels.
@@ -230,10 +186,8 @@ impl Overlay {
     ) -> windows::core::Result<()> {
         let painter = Painter {
             overlay: self,
-            target,
+            canvas: Canvas::new(target, &self.factory, self.dpi, self.window_origin())?,
             palette: toolbar_palette::palette(self.mode),
-            origin: self.window_origin(),
-            brush: solid_brush(target, color(0, 0, 0, 1.0))?,
         };
         // SAFETY: a drawing call on a live render target. Out of BeginDraw and EndDraw, Direct2D only fails the frame
         // at EndDraw. The strokes need antialiasing, which the target may have been left without.
@@ -255,10 +209,8 @@ impl Overlay {
     ) -> windows::core::Result<()> {
         let painter = Painter {
             overlay: self,
-            target,
+            canvas: Canvas::new(target, &self.factory, self.dpi, origin)?,
             palette: toolbar_palette::palette(self.mode),
-            origin,
-            brush: solid_brush(target, color(0, 0, 0, 1.0))?,
         };
         // SAFETY: a drawing call on a live render target. Out of BeginDraw and EndDraw, Direct2D only fails the frame
         // at EndDraw. The corners need antialiasing, which the target may have been left without.
@@ -275,43 +227,6 @@ impl Overlay {
 }
 
 impl Painter<'_> {
-    fn dpi(&self) -> u32 {
-        self.overlay.dpi
-    }
-
-    /// `logical` pixels of the monitor's scale, whole.
-    fn scaled(&self, logical: u32) -> i32 {
-        scaled(logical, self.dpi())
-    }
-
-    fn signed(&self, logical: i32) -> i32 {
-        signed(logical, self.dpi())
-    }
-
-    fn sigma(&self, blur: u32) -> f64 {
-        sigma(blur, self.dpi())
-    }
-
-    /// `rect`, grown by `grow` pixels on every side and moved `down`, as a rounded rectangle in the target's own pixels.
-    /// Shadow layers and holes shrink a box by up to three deviations of the blur, which may pass half its height, so
-    /// what shrinks past nothing is clamped.
-    fn shape(&self, rect: &RECT, radius: i32, grow: i32, down: i32) -> D2D1_ROUNDED_RECT {
-        rounded_at(self.origin, rect, radius, grow, down, true)
-    }
-
-    /// Sets the shared brush to `rgb` at `alpha`.
-    fn set(&self, rgb: [u8; 3], alpha: f32) {
-        // SAFETY: the color outlives the call, which keeps nothing of it.
-        unsafe { self.brush.SetColor(&d2d_color(rgb, alpha)) };
-    }
-
-    fn fill(&self, shape: &D2D1_ROUNDED_RECT, color: Color) {
-        self.set(color.rgb, color.alpha);
-        // SAFETY: a drawing call on a live render target with arguments that outlive it. Out of BeginDraw and EndDraw,
-        // Direct2D only fails the frame at EndDraw.
-        unsafe { self.target.FillRoundedRectangle(shape, &self.brush) };
-    }
-
     /// A group's panel, and then its buttons in the toolbar's order.
     fn group(
         &self,
@@ -332,7 +247,8 @@ impl Painter<'_> {
             let lit = is_lit(toolbar, *button);
             match motion(members, reacts) {
                 Some(motion) => {
-                    self.in_motion(place, motion, || self.button(button, place, lit, reacts))?;
+                    self.canvas
+                        .in_motion(place, motion, || self.button(button, place, lit, reacts))?;
                 }
                 None => self.button(button, place, lit, reacts)?,
             }
@@ -392,43 +308,6 @@ impl Painter<'_> {
             OPEN_BOX,
         );
         self.icon(&toolbar_icons::OPEN, &corner, OPEN_INK)
-    }
-
-    /// Runs `paint` with the target moved and shrunk as `motion` says, around the middle of `place`, as CSS transforms
-    /// a box and all it draws, shadows included. The target's own transform is put back afterwards, whatever `paint` did.
-    fn in_motion(
-        &self,
-        place: &RECT,
-        motion: Motion,
-        paint: impl FnOnce() -> windows::core::Result<()>,
-    ) -> windows::core::Result<()> {
-        let area = in_surface(self.origin, place);
-        let (x, y) = (
-            (area.left + area.right) / 2.0,
-            (area.top + area.bottom) / 2.0,
-        );
-        // The windows crate takes its matrix from windows-numerics, which ScreenGauge doesn't name as a dependency: the
-        // target's own transform is a value of that type, and the move is a copy of it with every entry set.
-        let mut before = Default::default();
-        // SAFETY: fills a local.
-        unsafe { self.target.GetTransform(&mut before) };
-        let mut moving = before;
-        // A point p goes to (x, y) + scale × (p − (x, y)), then `down` pixels down. Direct2D multiplies a row vector by
-        // the matrix, so the last row is the move.
-        moving.M11 = motion.scale;
-        moving.M12 = 0.0;
-        moving.M21 = 0.0;
-        moving.M22 = motion.scale;
-        moving.M31 = x * (1.0 - motion.scale);
-        moving.M32 = y * (1.0 - motion.scale) + px(self.signed(motion.down));
-        // The button's own motion first, then whatever the target was already doing.
-        let moved_then_before = moving * before;
-        // SAFETY: the matrix outlives the call, which copies it.
-        unsafe { self.target.SetTransform(&moved_then_before) };
-        let painted = paint();
-        // SAFETY: as above.
-        unsafe { self.target.SetTransform(&before) };
-        painted
     }
 
     /// `icon` in `ink`, centered in `place`: its view box at its CSS size, scaled for the monitor, with its top left
@@ -550,161 +429,5 @@ impl Painter<'_> {
         // SAFETY: closes the sink opened above, once.
         unsafe { sink.Close() }?;
         Ok(geometry)
-    }
-
-    /// A box painted as CSS does: the outer shadows, the background, the border and the inset shadows, the last listed of
-    /// each kind first. `ring_width` is the border's width and `radius` the corners', in logical pixels, and `see_through`
-    /// is whether the shadow is cut out under the box, as it is for a background that lets what is under it show.
-    fn surface(
-        &self,
-        surface: &Surface,
-        rect: &RECT,
-        radius: u32,
-        ring_width: u32,
-        see_through: bool,
-    ) -> windows::core::Result<()> {
-        let radius = self.scaled(radius);
-        let ring_width = self.scaled(ring_width);
-        let outer = self.shape(rect, radius, 0, 0);
-        let hole = if see_through {
-            Some(self.overlay.geometry_of(&outer)?)
-        } else {
-            None
-        };
-        for shadow in surface.outer.iter().rev() {
-            self.outer_shadow(shadow, rect, radius, hole.as_ref())?;
-        }
-        // The background reaches under the border; a gradient runs from the top of the padding box to its bottom.
-        if let Some(base) = surface.base {
-            self.fill(&outer, base);
-        }
-        if !surface.gradient.is_empty() {
-            self.gradient(
-                &outer,
-                surface.gradient,
-                outer.rect.top + px(ring_width),
-                outer.rect.bottom - px(ring_width),
-            )?;
-        }
-        if let Some(border) = surface.border {
-            self.set(border.rgb, border.alpha);
-            let width = px(ring_width);
-            // SAFETY: a drawing call on a live render target with arguments that outlive it, as in `fill`.
-            unsafe {
-                self.target.DrawRoundedRectangle(
-                    &ring(&outer, width),
-                    &self.brush,
-                    width,
-                    None::<&ID2D1StrokeStyle>,
-                );
-            }
-        }
-        // Inset shadows are inside the border, in the padding box.
-        let padding = RECT {
-            left: rect.left + ring_width,
-            top: rect.top + ring_width,
-            right: rect.right - ring_width,
-            bottom: rect.bottom - ring_width,
-        };
-        for shadow in surface.inset.iter().rev() {
-            self.inset_shadow(shadow, &padding, (radius - ring_width).max(0))?;
-        }
-        Ok(())
-    }
-
-    /// An outer shadow of the box `rect`: the box moved down by the shadow's drop and grown by its spread, blurred.
-    /// `hole`, when there is one, is cut out of every layer.
-    fn outer_shadow(
-        &self,
-        shadow: &Shadow,
-        rect: &RECT,
-        radius: i32,
-        hole: Option<&ID2D1RoundedRectangleGeometry>,
-    ) -> windows::core::Result<()> {
-        let Some(outer) = OuterShadow::of(shadow, rect, self.dpi()) else {
-            return Ok(());
-        };
-        let (spread, drop) = (outer.spread, outer.drop);
-        for layer in &outer.layers.layers {
-            let grow = spread + layer.grow;
-            // A layer that stays inside the box is under it, or cut out of it: never seen.
-            if grow <= -drop.abs() {
-                continue;
-            }
-            self.set(shadow.color.rgb, layer.opacity);
-            let layer = self.shape(rect, radius, grow, drop);
-            match hole {
-                Some(hole) => self
-                    .overlay
-                    .fill_except(self.target, &layer, hole, &self.brush)?,
-                // SAFETY: a drawing call on a live render target with arguments that outlive it, as in `fill`.
-                None => unsafe { self.target.FillRoundedRectangle(&layer, &self.brush) },
-            }
-        }
-        Ok(())
-    }
-
-    /// An inset shadow of the box `padding`: the box less its own shape moved by the shadow's drop, smaller by its
-    /// spread, blurred. The blur moves the hole's outline in and out, a layer at a time, and what is filled is always
-    /// the box less the hole, so nothing reaches beyond the box.
-    fn inset_shadow(
-        &self,
-        shadow: &Shadow,
-        padding: &RECT,
-        radius: i32,
-    ) -> windows::core::Result<()> {
-        let spread = self.signed(shadow.spread);
-        let drop = self.signed(shadow.y);
-        let layers = shadow::layers(self.sigma(shadow.blur), shadow.color.alpha, Profile::Edge);
-        let inside = self.shape(padding, radius, 0, 0);
-        for layer in &layers.layers {
-            // A layer's reach is how far into the hole the shadow goes: the hole is that much smaller.
-            let hole = self.overlay.geometry_of(&self.shape(
-                padding,
-                radius,
-                -spread - layer.grow,
-                drop,
-            ))?;
-            self.set(shadow.color.rgb, layer.opacity);
-            self.overlay
-                .fill_except(self.target, &inside, &hole, &self.brush)?;
-        }
-        Ok(())
-    }
-
-    /// `shape` filled with `stops` running from `top` to `bottom`, in the target's pixels. Colors blend in sRGB, as
-    /// CSS does, and the first and last colors go on past the ends.
-    fn gradient(
-        &self,
-        shape: &D2D1_ROUNDED_RECT,
-        stops: &[Stop],
-        top: f32,
-        bottom: f32,
-    ) -> windows::core::Result<()> {
-        let stops: Vec<D2D1_GRADIENT_STOP> = stops
-            .iter()
-            .map(|stop| D2D1_GRADIENT_STOP {
-                position: stop.at,
-                color: d2d_color(stop.color.rgb, stop.color.alpha),
-            })
-            .collect();
-        // SAFETY: the stops outlive the call, which copies them.
-        let collection = unsafe {
-            self.target
-                .CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)
-        }?;
-        let mut line = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES::default();
-        line.startPoint.X = shape.rect.left;
-        line.startPoint.Y = top;
-        line.endPoint.X = shape.rect.left;
-        line.endPoint.Y = bottom;
-        // SAFETY: the line and the collection outlive the call, which keeps its own reference to the collection.
-        let brush = unsafe {
-            self.target
-                .CreateLinearGradientBrush(&line, None, &collection)
-        }?;
-        // SAFETY: a drawing call on a live render target with arguments that outlive it, as in `fill`.
-        unsafe { self.target.FillRoundedRectangle(shape, &brush) };
-        Ok(())
     }
 }
