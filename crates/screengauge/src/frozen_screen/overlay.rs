@@ -47,25 +47,33 @@ use windows::Win32::Graphics::Direct2D::{
     ID2D1RoundedRectangleGeometry, ID2D1SolidColorBrush, ID2D1StrokeStyle,
 };
 use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_FEATURE, DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES,
-    DWRITE_FONT_METRICS, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
+    DWRITE_FONT_FEATURE, DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, DWRITE_FONT_WEIGHT,
     DWRITE_FONT_WEIGHT_MEDIUM, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_LINE_METRICS,
-    DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE, DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory,
-    IDWriteFactory, IDWriteFontFamily, IDWriteTextFormat, IDWriteTextLayout, IDWriteTypography,
+    DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE, IDWriteTextFormat, IDWriteTextLayout,
+    IDWriteTypography,
 };
-use windows::core::{BOOL, Error, PCWSTR, w};
+use windows::core::Error;
 
+use crate::graphics::{Color, Fonts, color, solid_brush};
 use crate::log;
 use crate::theme::Mode;
 use geometry::{Parts, scaled};
-use palette::{Surfaces, color, solid_brush};
+use palette::Surfaces;
 
-/// The label's font. Its digits differ in width unless asked for tabular figures (a 1 is two pixels narrower than a 0
+/// The labels' font in `weight`, `size` logical pixels tall in a window of `dpi`, scaled to whole pixels, which keep
+/// the digits crisp. Its digits differ in width unless asked for tabular figures (a 1 is two pixels narrower than a 0
 /// at this size), which the label does, so the pill keeps its width while the number keeps its length.
-const FAMILY: PCWSTR = w!("Segoe UI");
+fn text_format(
+    fonts: &Fonts,
+    weight: DWRITE_FONT_WEIGHT,
+    size: u32,
+    dpi: u32,
+) -> windows::core::Result<IDWriteTextFormat> {
+    fonts.text_format(weight, px(scaled(size, dpi)))
+}
 
 /// The live label's ink, on the cyan (#04161b): its text, and the camera on Snip's label.
-const LIVE_INK: palette::Color = color(0x04, 0x16, 0x1b, 1.0);
+const LIVE_INK: Color = color(0x04, 0x16, 0x1b, 1.0);
 
 /// How much of the outline's black shows over the photo.
 const OUTLINE_OPACITY: f32 = 0.28;
@@ -84,103 +92,6 @@ const LOGICAL_WEIGHT: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT_MEDIUM;
 /// The pill's shadow, approximating CSS `0 2px 7px rgba(0,0,0,.35)`: black rounded rectangles that grow by this many
 /// logical pixels and show this much, laid over each other, so the shadow fades outward from the pill.
 const SHADOW: [(u32, f32); 5] = [(0, 0.05), (1, 0.04), (2, 0.04), (4, 0.03), (6, 0.02)];
-
-/// DirectWrite's factory and what the label needs to know about its font. Kept across calls, like the Direct2D factory,
-/// so opening the tools doesn't pay for them again.
-#[derive(Clone)]
-pub struct Fonts {
-    factory: IDWriteFactory,
-    /// The height of the font's capital letters, and of its digits, as a fraction of the font size.
-    cap_height: f32,
-}
-
-impl Fonts {
-    fn new() -> windows::core::Result<Fonts> {
-        // SAFETY: no pointers; the factory comes back as an owned interface.
-        let factory: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }?;
-        let family = font_family(&factory)?;
-        // SAFETY: plain values.
-        let font = unsafe {
-            family.GetFirstMatchingFont(
-                DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                DWRITE_FONT_STRETCH_NORMAL,
-                DWRITE_FONT_STYLE_NORMAL,
-            )
-        }?;
-        let mut metrics = DWRITE_FONT_METRICS::default();
-        // SAFETY: fills a local.
-        unsafe { font.GetMetrics(&mut metrics) };
-        if metrics.designUnitsPerEm == 0 {
-            return Err(Error::new(E_FAIL, "Segoe UI reports an em of no units"));
-        }
-        Ok(Fonts {
-            factory,
-            cap_height: f32::from(metrics.capHeight) / f32::from(metrics.designUnitsPerEm),
-        })
-    }
-
-    /// The label's font in `weight`, `size` logical pixels tall, in a window of `dpi`.
-    fn text_format(
-        &self,
-        weight: DWRITE_FONT_WEIGHT,
-        size: u32,
-        dpi: u32,
-    ) -> windows::core::Result<IDWriteTextFormat> {
-        // SAFETY: plain values and static strings. A size that is a whole number of pixels keeps the digits crisp.
-        let format = unsafe {
-            self.factory.CreateTextFormat(
-                FAMILY,
-                None,
-                weight,
-                DWRITE_FONT_STYLE_NORMAL,
-                DWRITE_FONT_STRETCH_NORMAL,
-                px(scaled(size, dpi)),
-                w!("en-US"),
-            )
-        }?;
-        // The label is one line, so the window's width is never the reason to break it.
-        // SAFETY: plain value.
-        unsafe { format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP) }?;
-        Ok(format)
-    }
-}
-
-/// The installed family of the label's font.
-fn font_family(factory: &IDWriteFactory) -> windows::core::Result<IDWriteFontFamily> {
-    let mut collection = None;
-    // SAFETY: fills `collection` with the installed fonts; the cached list is good enough.
-    unsafe { factory.GetSystemFontCollection(&mut collection, false) }?;
-    let collection = collection
-        .ok_or_else(|| Error::new(E_FAIL, "DirectWrite returned no collection of fonts"))?;
-    let (mut index, mut exists) = (0, BOOL::default());
-    // SAFETY: both outputs are locals, and the name is a static string.
-    unsafe { collection.FindFamilyName(FAMILY, &mut index, &mut exists) }?;
-    if !exists.as_bool() {
-        return Err(Error::new(E_FAIL, "Segoe UI is not installed"));
-    }
-    // SAFETY: `index` came from FindFamilyName just above.
-    unsafe { collection.GetFontFamily(index) }
-}
-
-thread_local! {
-    /// Made at the first call and kept until ScreenGauge exits, like the Direct2D factory in the parent module.
-    static FONTS: RefCell<Option<Fonts>> = const { RefCell::new(None) };
-}
-
-/// The kept fonts, made at the first call.
-pub fn fonts() -> windows::core::Result<Fonts> {
-    FONTS.with_borrow_mut(|kept| {
-        if let Some(fonts) = kept {
-            return Ok(fonts.clone());
-        }
-        Ok(kept.insert(Fonts::new()?).clone())
-    })
-}
-
-/// Releases the kept fonts as ScreenGauge exits, together with the Direct2D factory.
-pub fn release_fonts() {
-    drop(FONTS.with_borrow_mut(Option::take));
-}
 
 /// How flat Direct2D makes the curves of a shape it combines with another: well under a pixel.
 const FLATTENING: f32 = 0.1;
@@ -347,11 +258,12 @@ impl Overlay {
             surfaces: Surfaces::new(target, mode)?,
             factory,
             stroke,
-            format: fonts.text_format(DWRITE_FONT_WEIGHT_SEMI_BOLD, geometry::TEXT, dpi)?,
-            logical_format: fonts.text_format(LOGICAL_WEIGHT, geometry::TEXT, dpi)?,
-            word_format: fonts.text_format(DWRITE_FONT_WEIGHT_SEMI_BOLD, tolerance::TEXT, dpi)?,
-            number_format: fonts.text_format(tolerance::NUMBER_WEIGHT, tolerance::TEXT, dpi)?,
-            tag_format: fonts.text_format(
+            format: text_format(fonts, DWRITE_FONT_WEIGHT_SEMI_BOLD, geometry::TEXT, dpi)?,
+            logical_format: text_format(fonts, LOGICAL_WEIGHT, geometry::TEXT, dpi)?,
+            word_format: text_format(fonts, DWRITE_FONT_WEIGHT_SEMI_BOLD, tolerance::TEXT, dpi)?,
+            number_format: text_format(fonts, tolerance::NUMBER_WEIGHT, tolerance::TEXT, dpi)?,
+            tag_format: text_format(
+                fonts,
                 magnified_view::TAG_WEIGHT,
                 magnified_view::TAG_TEXT,
                 dpi,
@@ -927,7 +839,11 @@ mod tests {
         D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_SOFTWARE,
         D2D1_RENDER_TARGET_USAGE_NONE, D2D1CreateFactory, ID2D1Factory,
     };
-    use windows::Win32::Graphics::DirectWrite::DWRITE_FONT_SIMULATIONS_NONE;
+    use windows::Win32::Graphics::DirectWrite::{
+        DWRITE_FONT_SIMULATIONS_NONE, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+    };
+
+    use crate::graphics::font_family;
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
     use windows::Win32::Graphics::Imaging::{
         CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICBitmap, IWICImagingFactory,

@@ -4,7 +4,7 @@
 //! shadow list reads top to bottom as the stylesheet does: the first is painted on top. Sizes are in logical pixels,
 //! which `toolbar_paint` scales for the monitor.
 
-use super::palette::{Color, color};
+use crate::graphics::{Color, color};
 use crate::theme::Mode;
 
 /// An opaque color, as CSS writes `#rrggbb`.

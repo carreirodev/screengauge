@@ -3,7 +3,11 @@
 
 use screengauge_core::session::{Point, Sign, ToleranceIndicator};
 use screengauge_core::settings::Tolerance;
-use windows::Win32::Graphics::DirectWrite::DWRITE_FONT_SIMULATIONS_NONE;
+use windows::Win32::Graphics::DirectWrite::{
+    DWRITE_FONT_SIMULATIONS_NONE, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+};
+
+use crate::graphics::font_family;
 
 use super::panel_tests::{MODES, at, inside, over, pixels, rect, strongest_green, tokens};
 use super::tests::{

@@ -31,10 +31,10 @@ use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::core::Error;
 
 use super::Overlay;
-use super::palette::d2d_color;
 use super::toolbar::Layout;
 use super::toolbar_paint::{self, Margins};
 use super::toolbar_palette;
+use crate::graphics::d2d_color;
 use crate::log;
 
 /// What the bitmap shows of `toolbar` with `held` down: everything but where the toolbar is, which only moves where the

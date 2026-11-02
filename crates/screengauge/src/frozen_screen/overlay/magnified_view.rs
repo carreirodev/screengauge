@@ -24,10 +24,10 @@ use windows::Win32::Graphics::DirectWrite::{
 use windows::core::{Error, Interface};
 
 use super::geometry::{self, scaled};
-use super::palette::d2d_color;
 use super::{
     LOGICAL_OPACITY, Overlay, PlacedLogical, PlacedText, Typeset, dot, px, ring, rounded_at,
 };
+use crate::graphics::d2d_color;
 
 // Every size below is in logical pixels, which `scaled` turns into physical pixels for the monitor's scale.
 

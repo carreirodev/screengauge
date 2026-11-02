@@ -2,48 +2,13 @@
 //! and the dark palette: the prototype's theme tokens (WPC-279), where the two that are `oklch` there are converted to
 //! sRGB. The measurement's line and the live label are cyan in both and are not here.
 
-use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use windows::Win32::Graphics::Direct2D::{ID2D1RenderTarget, ID2D1SolidColorBrush};
 
+use crate::graphics::{Color, color, solid_brush};
 use crate::theme::Mode;
 
 /// How many rounded rectangles the notice's shadow is made of.
 pub const SHADOW_LAYERS: usize = 10;
-
-/// An sRGB color, with the opacity CSS gives it in `rgba()`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct Color {
-    pub(super) rgb: [u8; 3],
-    pub(super) alpha: f32,
-}
-
-pub(super) const fn color(r: u8, g: u8, b: u8, alpha: f32) -> Color {
-    Color {
-        rgb: [r, g, b],
-        alpha,
-    }
-}
-
-/// `rgb` at `alpha`, as Direct2D takes a color.
-pub(super) fn d2d_color(rgb: [u8; 3], alpha: f32) -> D2D1_COLOR_F {
-    let [r, g, b] = rgb;
-    D2D1_COLOR_F {
-        r: f32::from(r) / 255.0,
-        g: f32::from(g) / 255.0,
-        b: f32::from(b) / 255.0,
-        a: alpha,
-    }
-}
-
-/// A solid brush of `color` for `target`, which a render target that is lost takes with it.
-pub(super) fn solid_brush(
-    target: &ID2D1RenderTarget,
-    color: Color,
-) -> windows::core::Result<ID2D1SolidColorBrush> {
-    let color = d2d_color(color.rgb, color.alpha);
-    // SAFETY: `color` outlives the call, which keeps nothing of it.
-    unsafe { target.CreateSolidColorBrush(&color, None) }
-}
 
 /// One mode's colors.
 struct Palette {

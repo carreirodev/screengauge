@@ -6,12 +6,12 @@
 use screengauge_core::settings::{DimensionsMode, Tool, ToolbarPlace};
 
 use super::geometry::{self, scaled};
-use super::palette::d2d_color;
 use super::panel_tests::{MODES, over};
 use super::tests::{BACKGROUND, Canvas, Picture, SCALES, near};
 use super::toolbar::Layout;
 use super::*;
 use super::{toolbar_paint, toolbar_palette};
+use crate::graphics::d2d_color;
 use screengauge_core::session::toolbar::{self as core_toolbar, Hit};
 use screengauge_core::session::{Point, Toolbar, ToolbarButton};
 

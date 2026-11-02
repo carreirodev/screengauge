@@ -14,6 +14,7 @@ mod event;
 mod foreground;
 mod frozen_screen;
 mod global_shortcut;
+mod graphics;
 mod log;
 mod notification;
 mod png;

@@ -32,10 +32,10 @@ use windows::Win32::Graphics::Direct2D::Common::{
 };
 use windows::Win32::Graphics::Direct2D::{
     D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_BITMAP_PROPERTIES,
-    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
-    D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_PRESENT_OPTIONS_IMMEDIATELY,
-    D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE,
-    D2D1CreateFactory, ID2D1Bitmap, ID2D1Factory, ID2D1HwndRenderTarget,
+    D2D1_FEATURE_LEVEL_DEFAULT, D2D1_HWND_RENDER_TARGET_PROPERTIES,
+    D2D1_PRESENT_OPTIONS_IMMEDIATELY, D2D1_RENDER_TARGET_PROPERTIES,
+    D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, ID2D1Bitmap, ID2D1Factory,
+    ID2D1HwndRenderTarget,
 };
 use windows::Win32::Graphics::Dwm::{
     DWM_WINDOW_CORNER_PREFERENCE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
@@ -61,7 +61,7 @@ use windows::core::{Error, PCWSTR, w};
 
 use crate::theme::Mode;
 use crate::win32::{low_word, struct_size};
-use crate::{event, foreground, log};
+use crate::{event, foreground, graphics, log};
 use overlay::Overlay;
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.FrozenScreen");
@@ -102,34 +102,6 @@ pub fn register_class(instance: HINSTANCE) -> windows::core::Result<()> {
     Ok(())
 }
 
-thread_local! {
-    /// Made at the first call and kept until ScreenGauge exits, so nothing exists before the first call. The factory
-    /// keeps the graphics device its windows draw with, and with it the graphics card's driver. On the owner's
-    /// computer, a factory made for each call made every call about 350 ms slower, past the 250 ms target (WPC-286);
-    /// kept, ScreenGauge at rest after four calls used 47 MB in Task Manager, under the 80 MB target.
-    static FACTORY: RefCell<Option<ID2D1Factory>> = const { RefCell::new(None) };
-}
-
-fn factory() -> windows::core::Result<ID2D1Factory> {
-    FACTORY.with_borrow_mut(|kept| {
-        if let Some(factory) = kept {
-            return Ok(factory.clone());
-        }
-        // SAFETY: a single-threaded factory with default options, used only on this thread.
-        let factory: ID2D1Factory =
-            unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None) }?;
-        Ok(kept.insert(factory).clone())
-    })
-}
-
-/// Releases the kept factory, and the graphics device with it, as ScreenGauge exits, and DirectWrite's factory too.
-/// Left to the end of the process, the release happened while Windows was already taking it down: the exit took 3
-/// seconds and failed.
-pub fn release_factory() {
-    drop(FACTORY.with_borrow_mut(Option::take));
-    overlay::release_fonts();
-}
-
 /// The frozen screen's windows, one per monitor, and the session they show, while the tools are open.
 pub struct FrozenScreen {
     windows: Vec<HWND>,
@@ -166,7 +138,7 @@ impl FrozenScreen {
     ) -> windows::core::Result<FrozenScreen> {
         // SAFETY: no module name, so this is the handle of ScreenGauge.exe itself.
         let instance: HINSTANCE = unsafe { GetModuleHandleW(None) }?.into();
-        let factory = factory()?;
+        let factory = graphics::factory()?;
         let rects: Vec<Rect> = session
             .scene()
             .frozen_screen
@@ -1143,7 +1115,7 @@ impl Drawing {
                 )
             }
         })??;
-        let overlay = Overlay::new(&target, &overlay::fonts()?, rect, scale, window.mode)?;
+        let overlay = Overlay::new(&target, &graphics::fonts()?, rect, scale, window.mode)?;
         Ok(Drawing {
             target,
             bitmap,

@@ -28,7 +28,7 @@ use crate::notification::{self, Notification};
 use crate::settings_file::SettingsFile;
 use crate::win32::{low_word, struct_size};
 use crate::{
-    capture, clipboard, event, global_shortcut, log, png, save_as, snip_file, theme, tray,
+    capture, clipboard, event, global_shortcut, graphics, log, png, save_as, snip_file, theme, tray,
 };
 
 /// The resident window's class, which a copy opened again looks for to call the running copy.
@@ -191,7 +191,7 @@ extern "system" fn window_proc(
             // Save As runs its own message loop, which this exit may be inside of: it closes first.
             save_as::cancel();
             close(hwnd);
-            frozen_screen::release_factory();
+            graphics::release();
             if let Err(e) = global_shortcut::unregister(hwnd) {
                 log::failure("exit: unregistering the global shortcut", &e);
             }

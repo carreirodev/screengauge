@@ -33,7 +33,6 @@ use windows::Win32::Graphics::Direct2D::{
 use windows::core::Error;
 
 use super::geometry::scaled;
-use super::palette::{Color, color, d2d_color, solid_brush};
 use super::shadow::{self, Profile};
 use super::svg_path::{self, Figure, Pt, Segment};
 use super::toolbar::{ButtonKind, Layout, RING, Reaction, is_lit, kind, reaction};
@@ -42,6 +41,7 @@ use super::toolbar_palette::{
     self, CLOSE_HOVER, CLOSE_INK_HOVER, OPEN_BOX, OPEN_INK, Palette, Shadow, Stop, Surface,
 };
 use super::{Overlay, dot, in_surface, px, ring, rounded_at};
+use crate::graphics::{Color, color, d2d_color, solid_brush};
 
 // Every size below is in logical pixels, which `scaled` turns into physical pixels for the monitor's scale.
 
