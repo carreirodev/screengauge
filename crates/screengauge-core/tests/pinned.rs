@@ -401,7 +401,7 @@ fn the_next_call_opens_with_nothing_pinned() {
 
 #[test]
 fn a_click_in_inspect_pins_nothing_and_in_snip_copies_nothing_either() {
-    // Inspect's click copies the color (inspect_color.rs); Snip's copy comes with WPC-317.
+    // Inspect's click copies the color (inspect_color.rs); in Snip a click is a drag too short to count (snip.rs).
     let with = |tool| {
         Session::open(Opening {
             remembered: Remembered {

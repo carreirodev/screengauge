@@ -21,7 +21,7 @@ use std::time::Duration;
 use screengauge_core::session::toolbar::Hit;
 use screengauge_core::session::{
     Cursor, DrawnRectangle, Effect, Event, Input, Key, MagnifiedView, Measurement, Notice, Photo,
-    Point, Rect, Session, ToleranceIndicator, Toolbar,
+    Point, Rect, Session, SnipArea, ToleranceIndicator, Toolbar,
 };
 use windows::Win32::Foundation::{
     D2DERR_RECREATE_TARGET, E_FAIL, ERROR_SUCCESS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT,
@@ -375,6 +375,7 @@ impl SharedSession {
                 Shown {
                     live: scene.live.cloned(),
                     drawn_rectangle: scene.drawn_rectangle,
+                    snip_area: scene.snip_area,
                     pinned: scene.pinned.to_vec(),
                     magnified_view: scene.magnified_view,
                     tolerance_indicator: scene.tolerance_indicator,
@@ -483,6 +484,7 @@ impl SharedSession {
 struct Shown {
     live: Option<Measurement>,
     drawn_rectangle: Option<DrawnRectangle>,
+    snip_area: Option<SnipArea>,
     pinned: Vec<Measurement>,
     magnified_view: Option<MagnifiedView>,
     tolerance_indicator: Option<ToleranceIndicator>,
@@ -500,6 +502,7 @@ struct OnMonitor<'a> {
     pinned: Vec<&'a Measurement>,
     live: Option<&'a Measurement>,
     drawn_rectangle: Option<&'a DrawnRectangle>,
+    snip_area: Option<&'a SnipArea>,
     magnified_view: Option<&'a MagnifiedView>,
     tolerance_indicator: Option<&'a ToleranceIndicator>,
     notice: Option<&'a Notice>,
@@ -522,6 +525,10 @@ impl Shown {
                 .drawn_rectangle
                 .as_ref()
                 .filter(|drawn| drawn.monitor == monitor),
+            snip_area: self
+                .snip_area
+                .as_ref()
+                .filter(|area| area.monitor == monitor),
             magnified_view: self
                 .magnified_view
                 .as_ref()
@@ -548,7 +555,8 @@ impl Shown {
             .iter()
             .chain(&self.live)
             .map(|measurement| measurement.monitor)
-            .chain(self.drawn_rectangle.iter().map(|drawn| drawn.monitor));
+            .chain(self.drawn_rectangle.iter().map(|drawn| drawn.monitor))
+            .chain(self.snip_area.iter().map(|area| area.monitor));
         let magnified = self.magnified_view.iter().map(|view| view.monitor);
         let indicated = self
             .tolerance_indicator
@@ -564,7 +572,8 @@ impl Shown {
 
 /// The monitors whose windows show something different from `before` to `after`, each once and in order: the one a
 /// measurement left, which must lose its line, the one it is on now, the one a measurement was pinned on or taken off,
-/// the one Bounds draws a rectangle on while it appears, changes or goes, the ones Inspect's magnified view appeared on,
+/// the one Bounds or Snip draws a rectangle on while it appears, changes or goes, the one Snip's area appeared on,
+/// changed on or went from, the ones Inspect's magnified view appeared on,
 /// changed on, followed the cursor between or went from, the ones the tolerance indicator appeared on,
 /// followed the cursor between or went from, the one a notice appeared on or went from, and the toolbar's when another
 /// of its buttons lights up or it moves.
@@ -928,8 +937,8 @@ fn paint(hwnd: HWND, window: &Window) {
 }
 
 /// Draws the window's part of the scene: its monitor's photo, and over it the measurements pinned on this monitor, what
-/// Dimensions measures when that is on this monitor, and Inspect's magnified view, the toolbar, the tolerance indicator
-/// and the notice when they are here, in that order.
+/// Dimensions measures when that is on this monitor, and Snip's area, Inspect's magnified view, the toolbar, the
+/// tolerance indicator and the notice when they are here, in that order.
 fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
     // A copy, so the session is borrowed only for a moment.
     let shown = window.session.shown();
@@ -959,6 +968,11 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
     let measured = ready
         .overlay
         .draw(&ready.target, &here.pinned, here.live, here.drawn_rectangle);
+    // Snip's corners and label go over the drawn rectangle and the pinned measurements.
+    let snipped = match here.snip_area {
+        Some(area) => ready.overlay.draw_snip(&ready.target, area),
+        None => Ok(()),
+    };
     // The magnified view enlarges the photo itself, never what is drawn over it.
     let magnified = match here.magnified_view {
         Some(view) => ready
@@ -986,6 +1000,7 @@ fn draw(hwnd: HWND, window: &Window) -> windows::core::Result<()> {
     };
     let overlaid = first_failure([
         ("frozen screen: drawing the measurements", measured),
+        ("frozen screen: drawing the Snip's area", snipped),
         ("frozen screen: drawing the magnified view", magnified),
         ("frozen screen: drawing the toolbar", toolbar),
         ("frozen screen: drawing the tolerance indicator", indicated),
@@ -1181,6 +1196,42 @@ mod tests {
         assert_eq!(monitors_to_draw_again(&drawing(1, 301), &nothing), [1]);
         assert_eq!(
             monitors_to_draw_again(&drawing(1, 301), &drawing(1, 301)),
+            Vec::<usize>::new()
+        );
+    }
+
+    fn snipping(monitor: usize, right: i32) -> Shown {
+        let width = right.abs_diff(100) + 1;
+        Shown {
+            snip_area: Some(SnipArea {
+                monitor,
+                rect: Rect {
+                    left: 100,
+                    top: 100,
+                    width,
+                    height: 50,
+                },
+                label: Label {
+                    physical: format!("{width} × 50"),
+                    logical: None,
+                },
+            }),
+            ..Shown::default()
+        }
+    }
+
+    #[test]
+    fn a_snip_area_that_appears_grows_or_goes_redraws_its_monitor_alone() {
+        // With Alt, Snip shows its area with no drawn rectangle under it, so the area alone changes.
+        let nothing = Shown::default();
+        assert_eq!(monitors_to_draw_again(&nothing, &snipping(1, 300)), [1]);
+        assert_eq!(
+            monitors_to_draw_again(&snipping(1, 300), &snipping(1, 301)),
+            [1]
+        );
+        assert_eq!(monitors_to_draw_again(&snipping(1, 301), &nothing), [1]);
+        assert_eq!(
+            monitors_to_draw_again(&snipping(1, 301), &snipping(1, 301)),
             Vec::<usize>::new()
         );
     }

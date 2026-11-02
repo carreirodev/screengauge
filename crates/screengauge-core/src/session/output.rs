@@ -18,9 +18,12 @@ pub struct Scene<'a> {
     /// What the active tool measures right now, drawn over the photo of its monitor, over the pinned measurements:
     /// Dimensions around the cursor, or Bounds the content of the rectangle being drawn. `None` while no tool measures.
     pub live: Option<&'a Measurement>,
-    /// The rectangle Bounds is drawing while the button is held, drawn under every measurement on its monitor. `None`
-    /// the rest of the time.
+    /// The rectangle Bounds or Snip is drawing while the button is held, drawn under every measurement on its monitor.
+    /// `None` the rest of the time.
     pub drawn_rectangle: Option<DrawnRectangle>,
+    /// The area Snip takes the image of as the button comes up, while it is held, drawn over the drawn rectangle and the
+    /// pinned measurements on its monitor. `None` the rest of the time, and while the drawn rectangle holds no content.
+    pub snip_area: Option<SnipArea>,
     /// The pinned measurements, oldest first, each drawn over the photo of the monitor it was measured on, whichever
     /// monitor the cursor is on. Their labels are in the theme's colors, the live one's in cyan, so the one that still
     /// changes stands out (v1 spec WPC-296, Como as medidas aparecem).
@@ -47,6 +50,19 @@ pub struct DrawnRectangle {
     pub monitor: usize,
     /// Its pixels, both corners included, in physical pixels of the virtual screen.
     pub rect: Rect,
+}
+
+/// What Snip shows while the button is held (v1 spec WPC-296, Snip): cyan corners around the area it takes the image of,
+/// with no fill, and a cyan label with a camera and the image's size, in physical pixels alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnipArea {
+    /// The monitor the drag began on, as an index in the frozen screen's order. The area never leaves it.
+    pub monitor: usize,
+    /// The image's pixels, both corners included, in physical pixels of the virtual screen: the content of the drawn
+    /// rectangle, or with Alt the drawn rectangle itself.
+    pub rect: Rect,
+    /// The image's size, `100 × 40`. It never has a logical part: an image is in physical pixels.
+    pub label: Label,
 }
 
 /// The toolbar (v1 spec WPC-296, Toolbar): the tools' buttons with the active tool's lit, then H, V and C in a room kept
@@ -188,6 +204,9 @@ pub enum Message {
     /// It says how to measure the drawn rectangle itself, since nothing else on screen tells of Alt (the owner's choice
     /// in WPC-314).
     NoContentFound,
+    /// The same for Snip: a drawn rectangle held nothing but the reference color, so no image was taken and the
+    /// clipboard stays as it was (v1 spec WPC-296, Snip). It tells of Alt as Bounds' does, in Snip's words.
+    NoContentFoundToSnip,
 }
 
 impl Message {
@@ -196,13 +215,14 @@ impl Message {
         match self {
             Message::Copied => "Copied",
             Message::NoContentFound => "No content found · Hold Alt to measure the rectangle",
+            Message::NoContentFoundToSnip => "No content found · Hold Alt to capture the rectangle",
         }
     }
 
     pub fn sign(self) -> Sign {
         match self {
             Message::Copied => Sign::Ok,
-            Message::NoContentFound => Sign::Alert,
+            Message::NoContentFound | Message::NoContentFoundToSnip => Sign::Alert,
         }
     }
 }

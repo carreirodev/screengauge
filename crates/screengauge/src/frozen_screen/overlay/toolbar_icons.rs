@@ -96,6 +96,14 @@ const SNIP: Icon = Icon {
     ],
 };
 
+/// The camera on Snip's label while the button is held: Snip's icon, smaller and with a bolder stroke (the prototype's
+/// `IC.cam`, `sv(12, ..., 2.4)`).
+pub const CAMERA: Icon = Icon {
+    size: 12,
+    stroke: 2.4,
+    shapes: SNIP.shapes,
+};
+
 /// H, V and C: arrows along the measurement's directions.
 const HORIZONTAL: Icon = Icon {
     size: 16,

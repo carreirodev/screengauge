@@ -566,8 +566,8 @@ fn an_arrow_never_takes_the_cursor_off_every_monitor() {
 
 #[test]
 fn with_another_tool_active_nothing_measures_around_the_cursor() {
-    // Bounds measures only while a rectangle is drawn, Inspect shows its magnified view instead (WPC-315), and Snip comes
-    // with its own ticket: opened with one of them the last used, nothing measures around the cursor.
+    // Bounds and Snip work only while a rectangle is drawn (WPC-313, WPC-317), and Inspect shows its magnified view
+    // instead (WPC-315): opened with one of them the last used, nothing measures around the cursor.
     for last_tool in [Tool::Bounds, Tool::Inspect, Tool::Snip] {
         let session = open_remembering(Remembered {
             last_tool,

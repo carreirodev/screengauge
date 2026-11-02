@@ -1,7 +1,7 @@
 //! The frozen screen's pixels, and the one rule that tells content from the reference color, which Dimensions and
 //! Bounds share, so the calibration (WPC-332) changes it in one place.
 
-use super::{Photo, Point};
+use super::{Image, Photo, Point, Rect};
 use crate::settings::Tolerance;
 
 /// The pixels of row `y` from column `left`, `count` of them, which must all be on the monitor: four bytes each, as
@@ -13,6 +13,22 @@ pub(super) fn row(photo: &Photo, y: i32, left: i32, count: u32) -> &[[u8; 4]] {
     let line = y.abs_diff(photo.rect.top) as usize;
     let start = line * photo.rect.width as usize + column;
     &photo.image.bgra().as_chunks::<4>().0[start..start + count as usize]
+}
+
+/// The pixels of `rect`, which must lie on the monitor, as an image of their own: Snip's, taken from the frozen screen
+/// pixel for pixel, never from the screen as it is now (v1 spec WPC-296, Snip). Each pixel keeps its four bytes as the
+/// photo has them, so the fourth still says nothing.
+pub(super) fn crop(photo: &Photo, rect: Rect) -> Option<Image> {
+    let rows = rect.top..=rect.bottom();
+    let bgra = rows
+        .flat_map(|y| {
+            row(photo, y, rect.left, rect.width)
+                .as_flattened()
+                .iter()
+                .copied()
+        })
+        .collect();
+    Image::new(rect.width, rect.height, bgra)
 }
 
 /// The red, green and blue of the pixel at `point`, which must be on the monitor.

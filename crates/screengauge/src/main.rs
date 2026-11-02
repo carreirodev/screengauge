@@ -9,12 +9,14 @@ compile_error!("ScreenGauge v1 is built for 64-bit Windows (x64) only.");
 
 mod capture;
 mod clipboard;
+mod com;
 mod event;
 mod foreground;
 mod frozen_screen;
 mod global_shortcut;
 mod log;
 mod notification;
+mod png;
 mod resident;
 mod settings_file;
 mod single_instance;
@@ -46,5 +48,7 @@ fn run() -> windows::core::Result<()> {
     // Only the copy that runs touches the settings file. The global shortcut, the options and the remembered state the
     // tools open with come from it, and the remembered state goes back to it; Settings will save to it too.
     let (file, stored) = settings_file::open_at_startup();
+    // For the whole time ScreenGauge runs, on the thread of its windows: the Snip's PNG is written with WIC.
+    let _com = com::Apartment::enter()?;
     resident::run(file, stored)
 }

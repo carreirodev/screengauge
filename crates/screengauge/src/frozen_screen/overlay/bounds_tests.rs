@@ -8,7 +8,7 @@ use super::panel_tests::over;
 use super::tests::{BACKGROUND, CYAN, Canvas, MONITOR, Picture, SCALES, near, text_width};
 use super::*;
 
-fn rect(left: i32, top: i32, right: i32, bottom: i32) -> Rect {
+pub(super) fn rect(left: i32, top: i32, right: i32, bottom: i32) -> Rect {
     Rect {
         left,
         top,
@@ -37,7 +37,7 @@ fn over_background(color: [u8; 3], alpha: f32) -> [u8; 3] {
 }
 
 /// The window's pixel (`x`, `y`) of `picture`, by its place in the virtual screen.
-fn pixel(picture: &Picture, x: i32, y: i32) -> [u8; 3] {
+pub(super) fn pixel(picture: &Picture, x: i32, y: i32) -> [u8; 3] {
     let column = usize::try_from(x - MONITOR.left).expect("a pixel in the window");
     let row = usize::try_from(y - MONITOR.top).expect("a pixel in the window");
     picture.at(column, row)
@@ -78,7 +78,7 @@ fn dashed(drawn: Rect, dpi: u32, x: i32, y: i32) -> [u8; 3] {
 }
 
 /// Checks every pixel of the window against `wanted`, within one level for the colors that are mixed.
-fn check_every_pixel(
+pub(super) fn check_every_pixel(
     picture: &Picture,
     canvas: &Canvas,
     what: &str,
@@ -258,7 +258,7 @@ fn wanted_pill(overlay: &Overlay, content: Rect, text: &str, dpi: u32, above: bo
 }
 
 /// Checks the live pill's sides at `pill`: opaque cyan just inside each side, along its middle, and not just outside.
-fn check_live_pill(picture: &Picture, pill: RECT, what: &str) {
+pub(super) fn check_live_pill(picture: &Picture, pill: RECT, what: &str) {
     let middle_row = (pill.top + pill.bottom) / 2;
     // Left of the text, inside the padding.
     let padding_column = pill.left + 2;

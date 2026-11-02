@@ -14,15 +14,15 @@ use crate::settings::Tolerance;
 /// WPC-314).
 const CLICK_LIMIT: u32 = 4;
 
-/// A drag of Bounds, from the press until the button comes up.
+/// A drag of Bounds or Snip, from the press until the button comes up.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Drag {
     /// Where the button went down: the drawn rectangle's fixed corner, and the place of the reference color.
     pub(super) start: Point,
     /// The monitor the drag began on, as an index in the frozen screen's order. The drawn rectangle never leaves it.
     pub(super) monitor: usize,
-    /// Whether Alt is held, as the last event had it: Bounds then measures exactly the drawn rectangle, for photos,
-    /// gradients and empty areas, and doesn't shrink it (v1 spec WPC-296, Bounds).
+    /// Whether Alt is held, as the last event had it: Bounds then measures exactly the drawn rectangle, and Snip takes
+    /// it, for photos, gradients and empty areas, without shrinking it (v1 spec WPC-296, Bounds and Snip).
     exact: bool,
     /// Whether the cursor has gone further than [`CLICK_LIMIT`] from the start along either axis since the press.
     past_click_limit: bool,
@@ -82,10 +82,22 @@ pub(super) fn drawn_rectangle(photo: &Photo, drag: Drag, cursor: Point) -> Rect 
     }
 }
 
-/// What Bounds measures for `drag` with the cursor at `cursor`: the content of the drawn rectangle, every pixel that
-/// differs from the reference color, the color where the drag began, by more than `tolerance`, or, with Alt held, the
-/// drawn rectangle itself. `None` when there is no content. The label shows the logical pixels too when
-/// `also_show_logical_pixels` is on and the monitor's scale isn't 100%.
+/// The area `drag` takes with the cursor at `cursor`, which Bounds measures and Snip takes the image of: the content
+/// of the drawn rectangle, every pixel that differs from the reference color, the color where the drag began, by more
+/// than `tolerance`, or, with Alt held, the drawn rectangle itself (v1 spec WPC-296, Bounds and Snip). `None` when
+/// there is no content, and on `photo`, the photo of the monitor the drag began on.
+pub(super) fn area(photo: &Photo, drag: Drag, cursor: Point, tolerance: Tolerance) -> Option<Rect> {
+    let drawn = drawn_rectangle(photo, drag, cursor);
+    if drag.exact {
+        Some(drawn)
+    } else {
+        shrink(photo, drawn, color(photo, drag.start), tolerance)
+    }
+}
+
+/// What Bounds measures for `drag` with the cursor at `cursor`: its [`area`], with a label. `None` when there is no
+/// content. The label shows the logical pixels too when `also_show_logical_pixels` is on and the monitor's scale isn't
+/// 100%.
 pub(super) fn measure(
     frozen_screen: &[Photo],
     drag: Drag,
@@ -97,12 +109,7 @@ pub(super) fn measure(
         // Can't happen: a drag begins on a monitor of the frozen screen.
         return None;
     };
-    let drawn = drawn_rectangle(photo, drag, cursor);
-    let content = if drag.exact {
-        drawn
-    } else {
-        shrink(photo, drawn, color(photo, drag.start), tolerance)?
-    };
+    let content = area(photo, drag, cursor, tolerance)?;
     let mut measurement = Measurement {
         monitor: drag.monitor,
         horizontal: None,

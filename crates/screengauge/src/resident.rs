@@ -316,6 +316,14 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
                 }
                 continue;
             }
+            // As with the text: "Copied" already shows.
+            // TODO(WPC-352): tell the user when the copy fails instead of showing "Copied" anyway.
+            Effect::CopyImage(image) => {
+                if let Err(e) = clipboard::copy_image(resident, &image) {
+                    log::failure("session: copying an image", &e);
+                }
+                continue;
+            }
             Effect::WakeAt(uptime) => {
                 FROZEN_SCREEN.with_borrow(|open| {
                     // With the tools closed there is nothing left to wake: what was due to go went with them.
@@ -325,9 +333,8 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
                 });
                 continue;
             }
-            // No rule asks for these yet: the tools that do bring them (Snip with WPC-317 and WPC-318, the gear with
-            // WPC-319). The log never shows their content, which may hold a path.
-            Effect::CopyImage(_) => "copying an image",
+            // No rule asks for these yet: the tools that do bring them (Snip's file with WPC-318, the gear with WPC-319).
+            // The log never shows their content, which may hold a path.
             Effect::WritePng { .. } => "writing a PNG file",
             Effect::OpenSaveAs { .. } => "opening Save As",
             Effect::OpenSettings => "opening Settings",

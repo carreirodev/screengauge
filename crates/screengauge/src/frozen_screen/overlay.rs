@@ -1,7 +1,7 @@
 //! The measurements drawn over a window's photo: Dimensions' cyan line with its ticks and outline, Bounds' drawn
-//! rectangle and the content it shrinks to, and the label in a pill, for the pinned measurements and the live one; the
-//! toolbar, the tolerance indicator and the notice. Everything about where they go is in `geometry`, `bounds`,
-//! `toolbar`, `tolerance` and `notice`, which need no Windows; this draws them onto any Direct2D render target at 96 DPI,
+//! rectangle and the content it shrinks to, and the label in a pill, for the pinned measurements and the live one; Snip's
+//! corners and label; the toolbar, the tolerance indicator and the notice. Everything about where they go is in
+//! `geometry`, `bounds`, `snip`, `toolbar`, `tolerance` and `notice`, which need no Windows; this draws them onto any Direct2D render target at 96 DPI,
 //! so a test can render them on a bitmap and count pixels.
 
 mod bounds;
@@ -17,6 +17,9 @@ mod palette;
 #[cfg(test)]
 mod panel_tests;
 mod shadow;
+mod snip;
+#[cfg(test)]
+mod snip_tests;
 mod svg_path;
 mod tolerance;
 #[cfg(test)]

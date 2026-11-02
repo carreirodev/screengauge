@@ -219,6 +219,28 @@ impl Placement {
 }
 
 impl Overlay {
+    /// `icon` in `ink`, centered in `place` in the virtual screen, on the window's render target `target`, as the toolbar
+    /// paints its icons: for the camera on Snip's label. Between BeginDraw and EndDraw.
+    pub(super) fn draw_icon(
+        &self,
+        target: &ID2D1RenderTarget,
+        icon: &Icon,
+        place: &RECT,
+        ink: Color,
+    ) -> windows::core::Result<()> {
+        let painter = Painter {
+            overlay: self,
+            target,
+            palette: toolbar_palette::palette(self.mode),
+            origin: self.window_origin(),
+            brush: solid_brush(target, color(0, 0, 0, 1.0))?,
+        };
+        // SAFETY: a drawing call on a live render target. Out of BeginDraw and EndDraw, Direct2D only fails the frame
+        // at EndDraw. The strokes need antialiasing, which the target may have been left without.
+        unsafe { target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };
+        painter.icon(icon, place, ink)
+    }
+
     /// Paints `toolbar` at `layout` onto `target`, whose pixel (0, 0) is the virtual screen's `origin`: for each group
     /// its panel and then its buttons, the ones the scene lights lit and the one under the cursor reacting to it, with
     /// `held` what the left button is held down on. H, V and C are left out while `toolbar.mode` is `None`: their room
