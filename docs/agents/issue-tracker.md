@@ -4,14 +4,14 @@ Issues and specs for this repo live in Linear: team **WPC Solutions** (key `WPC`
 
 ## Conventions
 
-- **Create an issue**: `save_issue` with `team: "WPC Solutions"`, `project: "ScreenGauge"`, `state: "Backlog"`, a `title`, a Markdown `description`, and an `estimate` on the T-shirt scale sent as a number (XS = 1, S = 2, M = 3, L = 5, XL = 8). Search first with `list_issues` (`project: "ScreenGauge"`, `query: "..."`) so you don't file a duplicate.
+- **Create an issue**: `save_issue` with `team: "WPC Solutions"`, `project: "ScreenGauge"`, `state: "Backlog"` (or `"Todo"` for a ticket whose plan is complete when it is created, such as one `/to-tickets` cuts from an approved spec), a `title`, a Markdown `description`, and an `estimate` on the T-shirt scale sent as a number (XS = 1, S = 2, M = 3, L = 5, XL = 8). Search first with `list_issues` (`project: "ScreenGauge"`, `query: "..."`) so you don't file a duplicate.
 - **Read an issue**: `get_issue` with the identifier (e.g. `WPC-123`); pass `includeRelations: true` when blocking matters. Comments: `list_comments`.
 - **List issues**: `list_issues` with `project: "ScreenGauge"` plus `state`, `label` or `parentId` filters.
 - **Make an issue a sub-issue of a parent**: `save_issue` with `parentId: "WPC-<n>"`, on create or afterwards.
 - **Start work on an issue**: `save_issue` with `assignee: "me"` and `state: "In Progress"`, before anything else, so the owner sees in Linear which issue is being worked on. This holds for every issue, wayfinder tickets included.
 - **Comment on an issue**: `save_comment` on the issue.
 - **Apply / remove labels**: `save_issue` with `addLabels` / `removeLabels`. Create a missing label with `create_issue_label` first.
-- **Close**: comment with the outcome, then `save_issue` with `state: "Done"` (or `"Canceled"`).
+- **Close**: for a built ticket, before asking the owner to approve its merge, re-read the description and update it so the acceptance criteria say what was actually decided, ticking the ones met. Then post one result comment that lists each criterion with its proof (a named test, a CI run, a live check on the hardware) or "não verificado" and why. After the merge, `save_issue` with `state: "Done"`. For work that won't be built, comment the reason, then `state: "Canceled"`.
 
 The `WPC` team is shared with other projects, so always scope lists and searches to `project: "ScreenGauge"`.
 
