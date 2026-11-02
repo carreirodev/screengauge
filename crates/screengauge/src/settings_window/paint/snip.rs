@@ -7,12 +7,14 @@ use std::cell::RefCell;
 use screengauge_core::session::toolbar::scaled;
 use screengauge_core::settings::Options;
 use windows::Win32::Foundation::{E_FAIL, RECT};
-use windows::Win32::Graphics::DirectWrite::DWRITE_FONT_WEIGHT_NORMAL;
+use windows::Win32::Graphics::DirectWrite::{
+    DWRITE_CLUSTER_METRICS, DWRITE_FONT_WEIGHT_NORMAL, IDWriteTextFormat,
+};
 use windows::core::Error;
 
 use super::{Placed, Rows, draw_text, place, px_i, text, to_i32, width_of};
 use crate::settings_window::controls::{self, Control, Laid};
-use crate::settings_window::layout::{self, Span};
+use crate::settings_window::layout::{self, Page, Span};
 use crate::settings_window::snip_card::{self, DESTINATIONS};
 
 /// The path's text, made while the card is laid out and drawn once its box is: the text goes over the box.
@@ -30,12 +32,12 @@ pub(super) struct Snip {
 
 impl Rows<'_> {
     /// Draws the card's labels, its line and its note, which nothing is drawn over, and lays out its controls and its
-    /// path's text for after their surfaces.
-    pub(super) fn snip(&self, options: &Options) -> windows::core::Result<Snip> {
+    /// path's text for after their surfaces. `page` is the page as it is drawn, the card's top on it.
+    pub(super) fn snip(&self, options: &Options, page: &Page) -> windows::core::Result<Snip> {
         let on = self.on;
         let dpi = on.dpi;
         let fonts = on.fonts;
-        let top = snip_card::top_of(&layout::page())
+        let top = snip_card::top_of(page)
             .ok_or_else(|| Error::new(E_FAIL, "the page has no Snip block"))?;
         let parts = snip_card::parts(top, snip_card::note_shown(options));
         let rows = |span: Span| -> windows::core::Result<(i32, i32)> {
@@ -134,6 +136,28 @@ impl Rows<'_> {
         Ok(())
     }
 
+    /// The lengths, in UTF-16 units, of the clusters `words` lays out in `format`: the letters DirectWrite keeps whole.
+    fn cluster_lengths(
+        &self,
+        words: &str,
+        format: &IDWriteTextFormat,
+    ) -> windows::core::Result<Vec<u16>> {
+        let layout = text(self.on.fonts, words, format, None)?;
+        // A cluster is at least one unit, so there are never more clusters than units.
+        let units = words.encode_utf16().count();
+        let mut metrics = vec![DWRITE_CLUSTER_METRICS::default(); units];
+        let mut count = 0;
+        // SAFETY: fills a buffer with a place for every cluster there can be, and the count it gives.
+        unsafe { layout.GetClusterMetrics(Some(&mut metrics), &mut count) }?;
+        let count = usize::try_from(count)
+            .map_err(|_| Error::new(E_FAIL, "more clusters than the text has units"))?;
+        Ok(metrics
+            .iter()
+            .take(count)
+            .map(|cluster| cluster.length)
+            .collect())
+    }
+
     /// The text of the box at `place`: the folder's path cut in its middle to fit, or "No folder chosen" in italics and
     /// the dim color when no folder is kept.
     fn path_text(&self, options: &Options, field: RECT) -> windows::core::Result<PathText> {
@@ -148,7 +172,8 @@ impl Rows<'_> {
                 let format = fonts.text_format(DWRITE_FONT_WEIGHT_NORMAL, size)?;
                 // A failure to measure stops the cut at once, and comes back after it, never lost.
                 let failed = RefCell::new(None);
-                let cut = snip_card::middle_cut(&full, |candidate| {
+                let points = snip_card::cut_points(&full, &self.cluster_lengths(&full, &format)?);
+                let cut = snip_card::middle_cut(&full, &points, |candidate| {
                     match text(fonts, candidate, &format, None).and_then(|text| width_of(&text)) {
                         Ok(width) => width <= room,
                         Err(e) => {

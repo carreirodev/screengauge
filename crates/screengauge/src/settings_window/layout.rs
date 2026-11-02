@@ -197,8 +197,9 @@ impl Block {
             Block::General => 3,
             Block::Measurements => 2,
             Block::Inspect => 1,
-            // Not used: the Snip's card has its own shape (the folder's line and its note), which `snip_card` lays out.
-            Block::Snip => 2,
+            // None of the Snip's parts is a `Row`: its card has its own shape (the folder's line and its note), which
+            // `snip_card` lays out.
+            Block::Snip => 0,
         }
     }
 }

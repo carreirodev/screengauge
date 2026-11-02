@@ -130,7 +130,7 @@ pub fn draw(on: &Surface, options: &Options, pointer: Pointer) -> windows::core:
     let width = px(on.width);
     background(on.target, palette, width, height)?;
     cards(on.target, on.fonts, palette, &page, on.dpi, width)?;
-    let controls = Rows::new(on, palette)?.draw(options, pointer)?;
+    let controls = Rows::new(on, palette)?.draw(options, pointer, &page)?;
     let link = footer(on.target, on.fonts, palette, page.footer, on.dpi, width)?;
     Ok(Drawn { link, controls })
 }
@@ -171,11 +171,12 @@ impl<'a> Rows<'a> {
         })
     }
 
-    /// Each row's line above it, label, note and control, and where its control's parts are.
+    /// Each row's line above it, label, note and control, and where its control's parts are, on `page`.
     fn draw(
         &self,
         options: &Options,
         pointer: Pointer,
+        page: &Page,
     ) -> windows::core::Result<Vec<(Control, RECT)>> {
         let dpi = self.on.dpi;
         let width = to_i32(self.on.width)?;
@@ -228,7 +229,7 @@ impl<'a> Rows<'a> {
         let snip::Snip {
             laid: snip_laid,
             path,
-        } = self.snip(options)?;
+        } = self.snip(options, page)?;
         laid.extend(snip_laid);
         self.surfaces(&laid, pointer)?;
         for control in &laid {

@@ -29,7 +29,7 @@ const SECOND_ROW: u32 = 41;
 
 /// The folder's line: its path's box and the button have the same height (`.fpath` and `.pbtn`), with 9 pixels under
 /// them (`.fline`'s padding) when the note isn't shown.
-const FIELD: u32 = 30;
+pub const FIELD_HEIGHT: u32 = 30;
 const BELOW_FIELD: u32 = 9;
 
 /// The note's line (`.fnote`, 11.5 tall on a line-height of 1.3), the room between the path's box and its text (a
@@ -46,8 +46,6 @@ pub const PATH_PADDING: u32 = 10;
 pub const BUTTON_PADDING: u32 = 11;
 pub const PATH_RADIUS: u32 = 8;
 pub const BUTTON_RADIUS: u32 = 9;
-pub const FIELD_HEIGHT: u32 = FIELD;
-
 /// The path's text (`.fpath`: `font-size: 12px`).
 pub const PATH_TEXT: f32 = 12.0;
 
@@ -92,7 +90,7 @@ pub fn parts(top: u32, note: bool) -> Parts {
     };
     let field = Span {
         top: save.bottom,
-        bottom: save.bottom + FIELD,
+        bottom: save.bottom + FIELD_HEIGHT,
     };
     let (note, inside) = if note {
         let line = Span {
@@ -136,21 +134,62 @@ pub fn fitted(mut page: Page, note: bool) -> Page {
     page
 }
 
+/// Where `path` may be cut without splitting a letter: the offsets, in characters, at which a cluster of the text begins
+/// (a base letter with its accents, or an emoji with its joiners, is one), and its end. `cluster_lengths` are the
+/// clusters' lengths in UTF-16 units, as DirectWrite's layout of `path` gives them.
+pub fn cut_points(path: &str, cluster_lengths: &[u16]) -> Vec<usize> {
+    let mut starts = Vec::with_capacity(cluster_lengths.len());
+    let mut unit = 0usize;
+    for &length in cluster_lengths {
+        starts.push(unit);
+        unit += usize::from(length);
+    }
+    let mut points = Vec::new();
+    let mut unit = 0usize;
+    let mut count = 0usize;
+    for (offset, character) in path.chars().enumerate() {
+        if starts.binary_search(&unit).is_ok() {
+            points.push(offset);
+        }
+        unit += character.len_utf16();
+        count = offset + 1;
+    }
+    points.push(count);
+    points
+}
+
 /// `path` cut in its middle with an ellipsis until `fits`, which says whether a text is narrow enough, accepts it; as
 /// much of it is kept as fits, a third of the characters kept at the start (the drive) and the rest at the end (the
-/// folder's own name, which says most). A path that fits is kept whole. When nothing of it fits with the ellipsis, the
-/// ellipsis alone stays.
-pub fn middle_cut(path: &str, fits: impl Fn(&str) -> bool) -> String {
+/// folder's own name, which says most). Only at `points`, which `cut_points` gives, so no letter is split. A path that
+/// fits is kept whole. When nothing of it fits with the ellipsis, the ellipsis alone stays.
+pub fn middle_cut(path: &str, points: &[usize], fits: impl Fn(&str) -> bool) -> String {
     if fits(path) {
         return path.to_owned();
     }
     let chars: Vec<char> = path.chars().collect();
+    let end = chars.len();
+    // The start kept ends at a point at or before the share asked for, the end kept begins at one at or after it.
+    let down = |share: usize| {
+        points
+            .iter()
+            .rev()
+            .find(|&&at| at <= share)
+            .copied()
+            .unwrap_or(0)
+    };
+    let up = |share: usize| {
+        points
+            .iter()
+            .find(|&&at| at >= share)
+            .copied()
+            .unwrap_or(end)
+    };
     let cut = |kept: usize| -> String {
-        let head = kept / 3;
-        let tail = kept - head;
+        let head = down(kept / 3);
+        let tail = up(end - (kept - kept / 3));
         let mut text: String = chars[..head].iter().collect();
         text.push('\u{2026}');
-        text.extend(&chars[chars.len() - tail..]);
+        text.extend(&chars[tail..]);
         text
     };
     // The most characters kept that still fit: one fewer than all of them is already a cut. Fewer characters are never
@@ -177,17 +216,25 @@ mod tests {
         move |text| text.chars().count() <= width
     }
 
+    /// Every character is a place to cut, as for a text with no accents or joiners.
+    fn every(path: &str) -> Vec<usize> {
+        (0..=path.chars().count()).collect()
+    }
+
     #[test]
     fn a_path_that_fits_is_kept_whole() {
         let path = r"C:\Users\Ana\Pictures";
-        assert_eq!(middle_cut(path, up_to(path.chars().count())), path);
-        assert_eq!(middle_cut(path, up_to(100)), path);
+        assert_eq!(
+            middle_cut(path, &every(path), up_to(path.chars().count())),
+            path
+        );
+        assert_eq!(middle_cut(path, &every(path), up_to(100)), path);
     }
 
     #[test]
     fn a_path_too_long_is_cut_in_the_middle_keeping_its_start_and_its_end() {
         let path = r"C:\Users\Ana\Pictures\Screenshots\Design Reviews\2026";
-        let cut = middle_cut(path, up_to(24));
+        let cut = middle_cut(path, &every(path), up_to(24));
         assert_eq!(cut.chars().count(), 24, "{cut}");
         assert!(cut.starts_with(r"C:\U"), "{cut}");
         assert!(cut.ends_with(r"gn Reviews\2026"), "{cut}");
@@ -197,7 +244,7 @@ mod tests {
     #[test]
     fn the_drive_stays_and_most_of_what_is_kept_is_the_end() {
         let path = r"D:\Projects\ScreenGauge\Exports\Snips\Final";
-        let cut = middle_cut(path, up_to(20));
+        let cut = middle_cut(path, &every(path), up_to(20));
         let (head, tail) = cut.split_once('\u{2026}').expect("an ellipsis");
         assert!(head.starts_with(r"D:\"), "{cut}");
         assert!(tail.chars().count() > head.chars().count(), "{cut}");
@@ -209,7 +256,7 @@ mod tests {
         let path = r"\\server\share\Design Reviews\2026\Q4\Buttons and icons";
         let mut last = 0;
         for width in 1..=path.chars().count() {
-            let cut = middle_cut(path, up_to(width));
+            let cut = middle_cut(path, &every(path), up_to(width));
             let kept = cut.chars().filter(|&c| c != '\u{2026}').count();
             assert!(kept >= last, "{width}: {cut}");
             assert!(cut.chars().count() <= width.max(1), "{width}: {cut}");
@@ -219,8 +266,14 @@ mod tests {
 
     #[test]
     fn with_no_room_for_anything_the_ellipsis_alone_stays() {
-        assert_eq!(middle_cut(r"C:\Users\Ana", up_to(1)), "\u{2026}");
-        assert_eq!(middle_cut(r"C:\Users\Ana", up_to(0)), "\u{2026}");
+        assert_eq!(
+            middle_cut(r"C:\Users\Ana", &every(r"C:\Users\Ana"), up_to(1)),
+            "\u{2026}"
+        );
+        assert_eq!(
+            middle_cut(r"C:\Users\Ana", &every(r"C:\Users\Ana"), up_to(0)),
+            "\u{2026}"
+        );
     }
 
     #[test]
@@ -228,19 +281,57 @@ mod tests {
         let path = "C:\\Usu\u{e1}rios\\Jo\u{e3}o\\Imagens\\Capturas de tela\\\u{1f4f7} fotos";
         for width in 1..=path.chars().count() {
             // Slicing inside a character would have panicked; what is kept is whole characters of the path.
-            let cut = middle_cut(path, up_to(width));
+            let cut = middle_cut(path, &every(path), up_to(width));
             assert!(
                 cut.chars().all(|c| c == '\u{2026}' || path.contains(c)),
                 "{cut}"
             );
         }
-        let cut = middle_cut(path, up_to(20));
+        let cut = middle_cut(path, &every(path), up_to(20));
         assert!(cut.ends_with("fotos"), "{cut}");
+    }
+
+    /// The clusters of `path` as DirectWrite gives them for a font with these accents: a letter and the combining accent
+    /// after it are one, every other character is its own.
+    fn clusters(path: &str) -> Vec<u16> {
+        let mut lengths: Vec<u16> = Vec::new();
+        for character in path.chars() {
+            let units = u16::try_from(character.len_utf16()).expect("one or two units");
+            match (character, lengths.last_mut()) {
+                ('\u{301}', Some(last)) => *last += units,
+                _ => lengths.push(units),
+            }
+        }
+        lengths
+    }
+
+    #[test]
+    fn the_places_to_cut_are_where_a_cluster_begins() {
+        // "e" and its accent are one cluster; an emoji is two UTF-16 units and one character.
+        let path = "Cafe\u{301}\u{1f4f7}x";
+        let points = cut_points(path, &clusters(path));
+        // C a f [e + accent] [emoji] x, and the end: no place between the "e" and its accent (offset 4).
+        assert_eq!(points, [0, 1, 2, 3, 5, 6, 7]);
+    }
+
+    #[test]
+    fn a_letter_and_its_accent_are_never_split_by_the_cut() {
+        let path = "C:\\Users\\Jose\u{301}\\Fotos de fe\u{301}rias\\Re\u{301}sume\u{301}s\\Q4";
+        let points = cut_points(path, &clusters(path));
+        let chars: Vec<char> = path.chars().collect();
+        for width in 1..=chars.len() {
+            let cut = middle_cut(path, &points, up_to(width));
+            let (head, tail) = cut.split_once('\u{2026}').unwrap_or((&cut, ""));
+            let head_end = head.chars().count();
+            let tail_start = chars.len() - tail.chars().count();
+            assert_ne!(chars.get(head_end), Some(&'\u{301}'), "{width}: {cut}");
+            assert_ne!(chars.get(tail_start), Some(&'\u{301}'), "{width}: {cut}");
+        }
     }
 
     #[test]
     fn a_path_of_one_character_that_does_not_fit_is_the_ellipsis() {
-        assert_eq!(middle_cut("X", up_to(0)), "\u{2026}");
+        assert_eq!(middle_cut("X", &every("X"), up_to(0)), "\u{2026}");
     }
 
     #[test]
