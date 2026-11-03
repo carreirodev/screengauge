@@ -4,7 +4,8 @@
 //! pixel has a color of its own, so a pixel in the wrong place is a wrong color.
 
 use screengauge_core::session::{
-    ColorText, Coordinate, Label, MagnifiedView, PixelColor, Point, Rect,
+    ApproximateColor, ColorText, Coordinate, Label, MagnifiedView, NoticeLine, PixelColor, Point,
+    Rect,
 };
 use screengauge_core::settings::Magnification;
 use windows::Win32::Graphics::Direct2D::Common::{
@@ -121,6 +122,9 @@ struct Fixture {
     rgb: [u8; 3],
     /// What the color's lines say: the first, and the one under it with both formats.
     color: (&'static str, Option<&'static str>),
+    /// Whether the strip ends with the Approximate color notice, as on a monitor whose photo didn't come through the
+    /// exact path.
+    approximate: bool,
 }
 
 impl Fixture {
@@ -140,6 +144,7 @@ impl Fixture {
             labels: [("1234", "1234.5"), ("1010", "1010.1")],
             rgb: [30, 144, 255],
             color: ("#1E90FF", Some("30, 144, 255")),
+            approximate: false,
         }
     }
 
@@ -165,6 +170,12 @@ impl Fixture {
         i32::try_from((162 * self.dpi + 480) / 960).expect("a small height")
     }
 
+    /// The height of one line of the Approximate color notice: CSS 11px at the strip's 1.35, scaled and rounded to whole
+    /// pixels.
+    fn notice_line_height(&self) -> i32 {
+        i32::try_from((1485 * self.dpi + 4800) / 9600).expect("a small height")
+    }
+
     fn view(&self) -> MagnifiedView {
         let dpi = self.dpi;
         let (n, factor) = (self.across(), self.factor());
@@ -176,7 +187,15 @@ impl Fixture {
         let swatch_side = scaled(22, dpi);
         let color_lines = if self.color.1.is_some() { 2 } else { 1 };
         let row = swatch_side.max(color_lines * line_height);
-        let strip = scaled(7, dpi) + lines * line_height + scaled(5, dpi) + row + scaled(2, dpi);
+        // The notice: 4 under the color's row, two lines beside the sign of 13.
+        let notice_line = self.notice_line_height();
+        let notice = if self.approximate {
+            scaled(4, dpi) + 2 * notice_line
+        } else {
+            0
+        };
+        let strip =
+            scaled(7, dpi) + lines * line_height + scaled(5, dpi) + row + notice + scaled(2, dpi);
         let (left, top) = (SCREEN.left + 100, SCREEN.top + 70);
         let panel = core_rect(
             left,
@@ -278,6 +297,34 @@ impl Fixture {
             x: coordinate(self.labels[0], x_line),
             y: coordinate(self.labels[1], y_line),
             color,
+            approximate_color: self.approximate.then(|| {
+                // The sign at the strip's left, centered beside the two lines with the odd pixel below, and the text 5
+                // after it.
+                let top = row_top + row + scaled(4, dpi);
+                let sign_side = scaled(13, dpi);
+                let after_sign = sign_side + scaled(5, dpi);
+                let line = |top, text| NoticeLine {
+                    text,
+                    line: core_rect(
+                        frame_left + inset + after_sign,
+                        top,
+                        width - after_sign,
+                        notice_line,
+                    ),
+                };
+                ApproximateColor {
+                    sign: core_rect(
+                        frame_left + inset,
+                        top + (2 * notice_line - sign_side + 1) / 2,
+                        sign_side,
+                        sign_side,
+                    ),
+                    lines: [
+                        line(top, "Approximate color"),
+                        line(top + notice_line, "(HDR on)"),
+                    ],
+                }
+            }),
         }
     }
 }
@@ -1614,6 +1661,85 @@ fn the_swatch_is_exactly_the_pixels_color_inside_a_ring_of_the_border_with_round
                 near(corner, panel, 2),
                 "corner {corner:?}, panel {panel:?}, {context}"
             );
+        }
+    }
+}
+
+#[test]
+fn the_approximate_color_notice_is_amber_and_stays_inside_its_sign_and_lines_on_the_narrowest_strips()
+ {
+    let canvas = Canvas::new(640, 640);
+    let photo = photo(&canvas);
+    // At 32x the strip is narrowest: at 120 DPI its 5 pixels a side are 160 physical pixels, 128 logical, and its text
+    // 120 of them. 8x is the first magnification.
+    for mode in MODES {
+        let warn = tokens(mode).warn;
+        for dpi in [96, 120, 144, 168] {
+            for magnification in [Magnification::X32, Magnification::X8] {
+                let fixture = Fixture {
+                    approximate: true,
+                    ..widest(dpi, magnification)
+                };
+                let drawn = draw_view(&canvas, &photo, mode, dpi, fixture.view());
+                let context = format!("{mode:?} at {dpi} DPI and {magnification:?}");
+                let strip = drawn.strip();
+                let notice = drawn.view.approximate_color.clone().expect("the notice");
+                let sign = ints(notice.sign);
+                let lines = notice.lines.clone().map(|line| ints(line.line));
+                // Leaving the notice out of the same panel changes the sign and the lines alone.
+                let mut without = drawn.view.clone();
+                without.approximate_color = None;
+                let without = draw_view(&canvas, &photo, mode, dpi, without);
+                let changed: Vec<(i32, i32)> = pixels(strip)
+                    .filter(|&(x, y)| at(&drawn.picture, x, y) != at(&without.picture, x, y))
+                    .collect();
+                for &(x, y) in &changed {
+                    assert!(
+                        inside(&sign, x, y) || lines.iter().any(|line| inside(line, x, y)),
+                        "ink at ({x}, {y}) outside the sign {sign:?} and the lines {lines:?}, {context}"
+                    );
+                }
+                let amber = |area: &RECT, changed: &[(i32, i32)]| {
+                    changed.iter().any(|&(x, y)| {
+                        inside(area, x, y) && near(at(&drawn.picture, x, y), warn, 12)
+                    })
+                };
+                assert!(
+                    amber(&sign, &changed),
+                    "no amber in the sign {sign:?}, {context}"
+                );
+                // Each line's text is what changes when it alone is blanked: inside its own line, which starts after
+                // the sign and ends before the strip does, and amber.
+                for (index, line) in lines.iter().enumerate() {
+                    let what = notice.lines[index].text;
+                    let mut blanked = drawn.view.clone();
+                    if let Some(notice) = blanked.approximate_color.as_mut() {
+                        notice.lines[index].text = " ";
+                    }
+                    let without = draw_view(&canvas, &photo, mode, dpi, blanked);
+                    let changed: Vec<(i32, i32)> = pixels(strip)
+                        .filter(|&(x, y)| at(&drawn.picture, x, y) != at(&without.picture, x, y))
+                        .collect();
+                    assert!(
+                        changed.len() > 30,
+                        "{} pixels of {what:?}, {context}",
+                        changed.len()
+                    );
+                    for &(x, y) in &changed {
+                        assert!(
+                            inside(line, x, y),
+                            "{what:?} at ({x}, {y}) outside its line {line:?}, {context}"
+                        );
+                    }
+                    let left = changed.iter().map(|&(x, _)| x).min().expect("ink");
+                    let right = changed.iter().map(|&(x, _)| x).max().expect("ink");
+                    assert!(
+                        left >= sign.right && right < line.right && line.right <= strip.right,
+                        "{what:?} from column {left} to {right}, sign {sign:?}, line {line:?}, strip {strip:?}, {context}"
+                    );
+                    assert!(amber(line, &changed), "no amber in {what:?}, {context}");
+                }
+            }
         }
     }
 }

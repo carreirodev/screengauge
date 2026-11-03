@@ -3,8 +3,10 @@
 //! [`scaled`](super::toolbar::scaled) turns into physical pixels for the current monitor's scale. The strip's lines have
 //! a fixed height, as CSS gives them, so the panel's size needs no font and the session core places it.
 
-use super::frozen_screen::{Photo, Point, Rect};
-use super::output::{ColorText, Coordinate, MagnifiedView, PixelColor};
+use super::frozen_screen::{Colors, Photo, Point, Rect};
+use super::output::{
+    ApproximateColor, ColorText, Coordinate, MagnifiedView, NoticeLine, PixelColor,
+};
 use super::toolbar::scaled;
 use super::{color, pixels, units};
 use crate::settings::{ColorFormat, Magnification};
@@ -39,6 +41,16 @@ const COLOR_GAP: u32 = 5;
 const SWATCH: u32 = 22;
 /// The room between the swatch and the color's text (the row's `gap: 8px`).
 const SWATCH_GAP: u32 = 8;
+/// The Approximate color notice under the color's row (the prototype's `.hdr` in a `div` with `margin-top: 4px`): the
+/// room above it, the height of each of its two lines in hundredths of a logical pixel (11px text at the strip's line
+/// height of 1.35), its sign's side, and the room between the sign and the text (`gap: 5px`).
+const NOTICE_GAP: u32 = 4;
+const NOTICE_LINE_HUNDREDTHS: u32 = 1485;
+const NOTICE_SIGN: u32 = 13;
+const NOTICE_SIGN_GAP: u32 = 5;
+/// What the notice says, a line each (the owner's choice in WPC-328).
+const NOTICE_TEXT: [&str; 2] = ["Approximate color", "(HDR on)"];
+
 /// The lowest magnification with a grid between the enlarged pixels.
 const GRID_FROM: Magnification = Magnification::X8;
 
@@ -92,10 +104,21 @@ pub(super) fn magnified_view(
     let color_lines = if second.is_some() { 2 } else { 1 };
     // The color's row is as tall as the swatch or its text, whichever is taller (`align-items: center`).
     let row = swatch_side.max(color_lines * line);
+    // The notice shows only on a monitor whose photo didn't come through the exact path (v1 spec WPC-296, Colors and
+    // HDR): the photo's mark already says HDR is on there.
+    let approximate = photo.colors == Colors::Approximate;
+    let notice_line = notice_line_height(dpi);
+    let notice_row = notice_line * 2;
+    let notice = if approximate {
+        scaled(NOTICE_GAP, dpi) + notice_row
+    } else {
+        0
+    };
     let strip = scaled(STRIP_TOP, dpi)
         + lines * line
         + scaled(COLOR_GAP, dpi)
         + row
+        + notice
         + scaled(STRIP_BOTTOM, dpi);
     let width = inset + side + inset;
     let height = inset + side + strip + inset;
@@ -177,6 +200,41 @@ pub(super) fn magnified_view(
         }),
     };
 
+    let approximate_color = approximate.then(|| {
+        let top = row_top
+            .saturating_add_unsigned(row)
+            .saturating_add_unsigned(scaled(NOTICE_GAP, dpi));
+        let sign_side = scaled(NOTICE_SIGN, dpi);
+        let beside = sign_side + scaled(NOTICE_SIGN_GAP, dpi);
+        let first = Rect {
+            left: text_left.saturating_add_unsigned(beside),
+            top,
+            width: text_width.saturating_sub(beside),
+            height: notice_line,
+        };
+        ApproximateColor {
+            sign: Rect {
+                left: text_left,
+                top: top.saturating_add_unsigned(offset_to_center(notice_row, sign_side)),
+                width: sign_side,
+                height: sign_side,
+            },
+            lines: [
+                NoticeLine {
+                    text: NOTICE_TEXT[0],
+                    line: first,
+                },
+                NoticeLine {
+                    text: NOTICE_TEXT[1],
+                    line: Rect {
+                        top: top.saturating_add_unsigned(notice_line),
+                        ..first
+                    },
+                },
+            ],
+        }
+    });
+
     MagnifiedView {
         monitor,
         panel,
@@ -196,6 +254,7 @@ pub(super) fn magnified_view(
             line: y_line,
         },
         color,
+        approximate_color,
     }
 }
 
@@ -221,6 +280,14 @@ fn pixels_across(dpi: u32, magnification: Magnification) -> u32 {
 /// The height of a line of the strip on a monitor of `dpi`, in whole physical pixels, halves up.
 fn line_height(dpi: u32) -> u32 {
     LINE_TENTHS.saturating_mul(dpi).saturating_add(480) / 960
+}
+
+/// The height of a line of the Approximate color notice on a monitor of `dpi`, in whole physical pixels, halves up.
+fn notice_line_height(dpi: u32) -> u32 {
+    NOTICE_LINE_HUNDREDTHS
+        .saturating_mul(dpi)
+        .saturating_add(4800)
+        / 9600
 }
 
 /// Where the panel, `size` physical pixels along one axis, starts on that axis, with the cursor at `cursor` on a monitor

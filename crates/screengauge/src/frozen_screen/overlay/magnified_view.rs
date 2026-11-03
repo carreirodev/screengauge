@@ -1,15 +1,18 @@
 //! Inspect's magnified view (v1 spec WPC-296, Inspect; the prototype's variant A, WPC-279): the floating panel, the
 //! frozen screen's pixels enlarged without smoothing, the grid, the outline around the pixel under the cursor, the
-//! magnification's tag and the strip with the cursor's position and the color of the pixel under it. Every rectangle
-//! comes from the session core's [`MagnifiedView`]; this only draws them onto the overlay's render target.
+//! magnification's tag and the strip with the cursor's position, the color of the pixel under it and, on a monitor
+//! whose photo didn't come through the exact path, the Approximate color notice. Every rectangle comes from the session
+//! core's [`MagnifiedView`]; this only draws them onto the overlay's render target.
 //!
-//! The prototype's `drawMag` and its CSS (`.panel`, `.magframe`, `.magtag`, `.info`, `.sw`) are the model. Where the
+//! The prototype's `drawMag` and its CSS (`.panel`, `.magframe`, `.magtag`, `.info`, `.sw`, `.hdr`) are the model. Where the
 //! core hands over a rectangle, it is used as it is; the rest of the sizes below are the prototype's, in logical
 //! pixels, which `scaled` turns into physical pixels for the monitor's scale, each one on its own.
 
 use std::mem::ManuallyDrop;
 
-use screengauge_core::session::{ColorText, Coordinate, MagnifiedView, PixelColor};
+use screengauge_core::session::{
+    ApproximateColor, ColorText, Coordinate, MagnifiedView, PixelColor, Sign,
+};
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
@@ -36,9 +39,9 @@ const PANEL_RADIUS: u32 = 14;
 const FRAME_RADIUS: u32 = 9;
 
 /// How much of the notice's shadow this panel casts. The notice's layers are fitted to a shadow box 15px tall (the
-/// notice's 31px less the spread of 8 on each side). This panel is up to 190 by 269 logical pixels (a frame of 176 or
-/// less, a strip of 79 at most, the position and the color on two lines each), so its box is up to 174 by 253: as good
-/// as an edge, as far as a blur of sigma 14 (dark) or 13 (light) can tell. A box that tall casts a shadow stronger
+/// notice's 31px less the spread of 8 on each side). This panel is up to 190 by 303 logical pixels (a frame of 176 or
+/// less, a strip of 113 at most, the position and the color on two lines each and the Approximate color notice's two
+/// under them), so its box is up to 174 by 287: as good as an edge, as far as a blur of sigma 14 (dark) or 13 (light) can tell. A box that tall casts a shadow stronger
 /// than the layers give at full strength, so they are made stronger, as the tolerance indicator's, a lower panel than
 /// the notice, makes them fainter (see `SHADOW_STRENGTH` in `tolerance`).
 ///
@@ -84,6 +87,9 @@ const BAR_MARGIN: u32 = 7;
 /// color.
 const SWATCH_RADIUS: u32 = 6;
 const SWATCH_RING: u32 = 1;
+
+/// The Approximate color notice's text (the prototype's `.hdr`): semibold, 11px, in `--warn`, as its sign is.
+pub const APPROXIMATE_TEXT: u32 = 11;
 
 /// Where the frame's parts go, in physical pixels of the virtual screen, right and bottom one past the last pixel.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -207,6 +213,12 @@ struct PlacedLine {
     logical: Option<PlacedLogical>,
 }
 
+/// The Approximate color notice, ready to draw: where its sign's top left corner goes in the window, and its two lines.
+struct PlacedApproximate {
+    sign: (f32, f32),
+    lines: [PlacedText; 2],
+}
+
 /// The color's part of the strip, ready to draw: the swatch and its ring, and the texts beside it.
 struct PlacedColor {
     swatch: D2D1_ROUNDED_RECT,
@@ -236,6 +248,11 @@ impl Overlay {
         };
         let lines = [self.line("X", &view.x)?, self.line("Y", &view.y)?];
         let color = self.color(&view.color)?;
+        let approximate = view
+            .approximate_color
+            .as_ref()
+            .map(|notice| self.approximate(notice))
+            .transpose()?;
         let radius = scaled(FRAME_RADIUS, self.dpi);
         let mask: ID2D1Geometry = self
             .geometry_of(&self.shaped(&places.frame, radius, 0, 0))?
@@ -278,6 +295,9 @@ impl Overlay {
 
         self.draw_strip(target, &lines);
         self.draw_color(target, &color);
+        if let Some(approximate) = &approximate {
+            self.draw_approximate(target, approximate)?;
+        }
         Ok(())
     }
 
@@ -542,6 +562,55 @@ impl Overlay {
         })
     }
 
+    /// The Approximate color notice: its sign's corner and its lines, each laid out in its line with its baseline on a
+    /// whole pixel, as the color's texts are. The text has no digits to align, so it is laid out without the tabular
+    /// figures.
+    fn approximate(&self, notice: &ApproximateColor) -> windows::core::Result<PlacedApproximate> {
+        let sign = self.in_window(&geometry::bounds(notice.sign)?);
+        let place = |index: usize| {
+            let line = &notice.lines[index];
+            let typeset = self.typeset_plain(line.text, &self.approximate_format)?;
+            let bounds = geometry::bounds(line.line)?;
+            let window = self.in_window(&bounds);
+            let baseline = typeset.baseline_in(window.top, px(bounds.bottom - bounds.top));
+            Ok::<_, Error>(PlacedText {
+                left: window.left,
+                top: baseline - typeset.baseline,
+                layout: typeset.layout,
+            })
+        };
+        Ok(PlacedApproximate {
+            sign: (sign.left, sign.top),
+            lines: [place(0)?, place(1)?],
+        })
+    }
+
+    /// The Approximate color notice's alert sign, the notices' own, and its two lines beside it, all in the warning's
+    /// amber.
+    fn draw_approximate(
+        &self,
+        target: &ID2D1RenderTarget,
+        approximate: &PlacedApproximate,
+    ) -> windows::core::Result<()> {
+        let (left, top) = approximate.sign;
+        self.draw_sign(target, Sign::Alert, left, top)?;
+        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
+        // Direct2D only fails the frame at EndDraw. The warning's brush never changes its opacity.
+        unsafe {
+            // Grayscale, not ClearType: color fringes would show on the see-through panel.
+            target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+            for line in &approximate.lines {
+                target.DrawTextLayout(
+                    dot(line.left, line.top).point,
+                    &line.layout,
+                    &self.surfaces.warn,
+                    D2D1_DRAW_TEXT_OPTIONS_NONE,
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// The swatch in the pixel's color with the palette's border over its edge, then the first text in the ink and the
     /// one under it, when there is one, at `LOGICAL_OPACITY`, as the prototype's `.dm` and a label's logical part.
     fn draw_color(&self, target: &ID2D1RenderTarget, color: &PlacedColor) {
@@ -628,6 +697,7 @@ mod tests {
             x: coordinate.clone(),
             y: coordinate,
             color,
+            approximate_color: None,
         }
     }
 

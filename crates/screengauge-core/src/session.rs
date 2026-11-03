@@ -20,8 +20,9 @@ mod units;
 pub use event::{Event, Held, Input, Key, LocalTime, ToolbarButton};
 pub use frozen_screen::{Colors, Image, Photo, Point, Rect, Scale};
 pub use output::{
-    ColorText, Coordinate, Cursor, DrawnRectangle, Effect, Label, MagnifiedView, Measurement,
-    Message, Notice, PixelColor, SaveTo, Scene, Sign, SnipArea, Span, ToleranceIndicator, Toolbar,
+    ApproximateColor, ColorText, Coordinate, Cursor, DrawnRectangle, Effect, Label, MagnifiedView,
+    Measurement, Message, Notice, NoticeLine, PixelColor, SaveTo, Scene, Sign, SnipArea, Span,
+    ToleranceIndicator, Toolbar,
 };
 pub use snip_file::{FileNames, png_path};
 

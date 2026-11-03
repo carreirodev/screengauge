@@ -121,7 +121,7 @@ impl Overlay {
     /// The sign with its top left corner at (`left`, `top`) in the window: the check mark in the accent's color, or the
     /// exclamation mark in a circle in the warning's. Both are strokes with round caps and joins, as in the prototype,
     /// in a box of 24 units that is `SIGN` logical pixels wide.
-    fn draw_sign(
+    pub(super) fn draw_sign(
         &self,
         target: &ID2D1RenderTarget,
         sign: Sign,

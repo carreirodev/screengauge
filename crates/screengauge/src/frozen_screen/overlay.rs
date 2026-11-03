@@ -121,6 +121,8 @@ pub struct Overlay {
     number_format: IDWriteTextFormat,
     /// The magnified view's tag: bold, at its own size.
     tag_format: IDWriteTextFormat,
+    /// The magnified view's Approximate color notice: semibold, at its own size.
+    approximate_format: IDWriteTextFormat,
     /// Asks for tabular figures; applied to each label's text.
     figures: IDWriteTypography,
     fonts: Fonts,
@@ -261,6 +263,12 @@ impl Overlay {
                 fonts,
                 magnified_view::TAG_WEIGHT,
                 magnified_view::TAG_TEXT,
+                dpi,
+            )?,
+            approximate_format: text_format(
+                fonts,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                magnified_view::APPROXIMATE_TEXT,
                 dpi,
             )?,
             figures,

@@ -140,6 +140,33 @@ pub struct MagnifiedView {
     pub y: Coordinate,
     /// The color of the pixel under the cursor, on the strip under its position.
     pub color: PixelColor,
+    /// The Approximate color notice under the color, while the view is on a monitor whose photo didn't come through
+    /// the exact path. `None` on every other monitor, where the strip ends with the color.
+    pub approximate_color: Option<ApproximateColor>,
+}
+
+/// The Approximate color notice on the magnified view's strip (v1 spec WPC-296, Inspect and Colors and HDR): the alert
+/// sign in the warning's amber, and beside it "Approximate color" above "(HDR on)", semibold, 11 logical pixels tall
+/// and in the amber too (the prototype's `.hdr`). It is the one notice that stays, for as long as the view is on that
+/// monitor, and Inspect works as ever: the click still copies the color. The text takes two lines whatever the
+/// magnification, since it doesn't fit one at every magnification and scale (the owner's choice in WPC-328), so on that
+/// monitor the panel keeps its height as the mouse wheel turns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApproximateColor {
+    /// The alert sign's square, 13 logical pixels a side, at the strip's left and centered beside the two lines: the
+    /// notices' exclamation mark in a circle.
+    pub sign: Rect,
+    /// "Approximate color", then "(HDR on)" under it, after the sign.
+    pub lines: [NoticeLine; 2],
+}
+
+/// One line of the Approximate color notice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoticeLine {
+    /// What it says. ScreenGauge is in English only (WPC-293).
+    pub text: &'static str,
+    /// Where it goes: the line's height, starting at the text's left, after the sign.
+    pub line: Rect,
 }
 
 /// The color of the pixel under the cursor on the magnified view's strip (v1 spec WPC-296, Inspect): a swatch of it at

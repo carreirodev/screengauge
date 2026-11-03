@@ -1358,6 +1358,7 @@ mod tests {
                     },
                     second: None,
                 },
+                approximate_color: None,
             }),
             ..Shown::default()
         }
