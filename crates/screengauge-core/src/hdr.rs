@@ -1,4 +1,4 @@
-//! The HDR conversion (v1 spec WPC-296, Modules and Cores e HDR): with HDR on, Windows composes the desktop in 16-bit
+//! The HDR conversion (v1 spec WPC-296, Modules; Colors and HDR): with HDR on, Windows composes the desktop in 16-bit
 //! floating point scRGB, where 1.0 is 80 nits, and shows SDR content brightened to the monitor's SDR white level. This
 //! undoes it: each channel is divided by the SDR white level and encoded again as 8-bit sRGB by the sRGB curve, which
 //! WPC-289 measured exact where a 2.2 gamma misses dark tones by up to 9 levels. HDR content, brighter than SDR white

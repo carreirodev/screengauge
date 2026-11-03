@@ -1,9 +1,9 @@
 //! The capture behind the frozen screen: every monitor through DXGI Desktop Duplication, without the mouse pointer, one
 //! right after the other, and through GDI on a monitor where DXGI fails (v1 spec WPC-296, Frozen screen), with the
 //! place, scale and colors the session core receives with each photo. DXGI's image is in 8 bits on a monitor with HDR
-//! off, and in 16 bits converted by the monitor's SDR white level on one with HDR on (Cores e HDR), so the conversion
-//! happens once per call. Everything DXGI, Direct3D and GDI create for it is released before [`every_monitor`] returns,
-//! so the capture exists only during the call.
+//! off, and in 16 bits converted by the monitor's SDR white level on one with HDR on (Colors and HDR), so the
+//! conversion happens once per call. Everything DXGI, Direct3D and GDI create for it is released before
+//! [`every_monitor`] returns, so the capture exists only during the call.
 
 mod gdi;
 mod sdr_white_level;
@@ -107,7 +107,7 @@ struct Monitor {
 /// What one DXGI output gave.
 struct Grab {
     device: String,
-    /// HDR is on for the output's monitor.
+    /// HDR was on for the output's monitor: at the start of the photo, or for part of it when it was turned on or off.
     hdr: bool,
     image: windows::core::Result<Desktop>,
 }
@@ -119,7 +119,7 @@ struct Desktop {
     colors: Colors,
 }
 
-/// How an output's desktop image becomes a photo: the rule is per monitor (v1 spec WPC-296, Cores e HDR).
+/// How an output's desktop image becomes a photo: the rule is per monitor (v1 spec WPC-296, Colors and HDR).
 #[derive(Debug, Clone, PartialEq)]
 enum Path {
     /// HDR is off: the 8-bit image, with the colors the apps drew.
@@ -235,10 +235,16 @@ fn device_name(buffer: &[u16]) -> String {
 fn grab_every_output() -> windows::core::Result<Vec<Grab>> {
     Ok(duplicate_every_output()?
         .into_iter()
-        .map(|output| Grab {
-            device: output.device,
-            hdr: output.hdr,
-            image: output.duplication.and_then(Duplication::image),
+        .map(|output| {
+            let (image, hdr) = match output.duplication {
+                Ok(duplication) => duplication.image(),
+                Err(e) => (Err(e), output.hdr),
+            };
+            Grab {
+                device: output.device,
+                hdr,
+                image,
+            }
         })
         .collect())
 }
@@ -390,34 +396,61 @@ impl Duplication {
         })
     }
 
-    /// The output's current image. The duplication is released before this returns.
-    fn image(self) -> windows::core::Result<Desktop> {
-        match first_image(&self.gpu, &self.duplication, &self.path) {
+    /// The output's current image, and whether HDR was on for its monitor during the photo, which marks a GDI photo
+    /// taken in its place. The duplication is released before this returns.
+    fn image(self) -> (windows::core::Result<Desktop>, bool) {
+        let Duplication {
+            gpu,
+            output,
+            path,
+            duplication,
+        } = self;
+        let first = first_image(&gpu, &duplication, &path);
+        // Windows allows one duplication per output and process at a time, so the first goes before another is made.
+        drop(duplication);
+        let desktop = match first {
             // The duplication was lost, as when the display mode or the desktop changes, and a new one gets one more
-            // try. Windows allows one duplication per output and process at a time, so the lost one goes first.
-            Err(e) if e.code() == DXGI_ERROR_ACCESS_LOST => {
-                let Duplication {
-                    gpu,
-                    output,
-                    path,
-                    duplication,
-                } = self;
-                drop(duplication);
-                // Turning HDR on or off is one of the changes that lose the duplication, and the path chosen for the
-                // old mode would mark a brightened photo exact, or take AMD's wrong 16-bit one: the monitor goes to GDI.
-                // SAFETY: a plain query on a live output.
-                let now = unsafe { output.cast::<IDXGIOutput6>()?.GetDesc1() }?;
-                if is_hdr(now.ColorSpace) != path.hdr() {
-                    return Err(Error::new(
-                        E_FAIL,
-                        "HDR was turned on or off during the photo",
-                    ));
-                }
-                let again = Duplication::of(&gpu, output, path)?;
-                first_image(&again.gpu, &again.duplication, &again.path)
+            // try, unless HDR was turned on or off, which `settled` then tells.
+            Err(e)
+                if e.code() == DXGI_ERROR_ACCESS_LOST
+                    && hdr_now(&output).is_ok_and(|now| now == path.hdr()) =>
+            {
+                Duplication::of(&gpu, output.clone(), path.clone())
+                    .and_then(|again| first_image(&again.gpu, &again.duplication, &again.path))
             }
             first => first,
-        }
+        };
+        settled(desktop, path.hdr(), hdr_now(&output))
+    }
+}
+
+/// Whether HDR is on for `output`'s monitor now.
+fn hdr_now(output: &IDXGIOutput) -> windows::core::Result<bool> {
+    // SAFETY: a plain query on a live output.
+    let description = unsafe { output.cast::<IDXGIOutput6>()?.GetDesc1() }?;
+    Ok(is_hdr(description.ColorSpace))
+}
+
+/// A photo taken on a path chosen with HDR on or off (`chosen`), once HDR is read again after it (`now`), and whether
+/// HDR was on for the monitor during it. HDR turned on or off between choosing the path and the end of the photo,
+/// losing the duplication or not, leaves a path for the old mode, which would mark a brightened photo exact or take
+/// AMD's wrong 16-bit one (WPC-289): the monitor goes to GDI, marked as HDR on, since it was for part of the photo.
+fn settled(
+    desktop: windows::core::Result<Desktop>,
+    chosen: bool,
+    now: windows::core::Result<bool>,
+) -> (windows::core::Result<Desktop>, bool) {
+    match now {
+        Ok(now) if now == chosen => (desktop, chosen),
+        Ok(_) => (
+            Err(Error::new(
+                E_FAIL,
+                "HDR was turned on or off during the photo",
+            )),
+            true,
+        ),
+        // Unread, the photo's marks can't be trusted; a photo that had already failed keeps its own cause.
+        Err(e) => (desktop.and(Err(e)), chosen),
     }
 }
 
@@ -1068,5 +1101,79 @@ mod tests {
             panic!("{:?}", shots[0]);
         };
         assert!(gdi.message().contains("1920x1080"), "{gdi}");
+    }
+
+    fn desktop(colors: Colors) -> windows::core::Result<Desktop> {
+        Ok(Desktop {
+            image: marked(4, 4, 1),
+            colors,
+        })
+    }
+
+    #[test]
+    fn hdr_turned_on_during_the_photo_sends_the_monitor_to_gdi_as_hdr_on() {
+        // The path was chosen with HDR off, so its 8-bit photo of a now brightened desktop says exact.
+        let (image, hdr) = settled(desktop(Colors::Exact), false, Ok(true));
+        assert!(image.is_err());
+        assert!(hdr);
+    }
+
+    #[test]
+    fn hdr_turned_off_during_the_photo_sends_the_monitor_to_gdi_as_hdr_on() {
+        // HDR was on for part of the photo, and GDI's photo can't say which part.
+        let (image, hdr) = settled(desktop(Colors::Exact), true, Ok(false));
+        assert!(image.is_err());
+        assert!(hdr);
+    }
+
+    #[test]
+    fn hdr_as_the_path_was_chosen_keeps_the_photo() {
+        for chosen in [false, true] {
+            let (image, hdr) = settled(desktop(Colors::Exact), chosen, Ok(chosen));
+            assert_eq!(
+                image.map(|desktop| desktop.colors).ok(),
+                Some(Colors::Exact)
+            );
+            assert_eq!(hdr, chosen);
+        }
+    }
+
+    #[test]
+    fn hdr_unread_after_the_photo_sends_the_monitor_to_gdi_as_the_path_was_chosen() {
+        let unread = || Err(Error::new(E_FAIL, "GetDesc1 failed"));
+        let (image, hdr) = settled(desktop(Colors::Exact), true, unread());
+        assert_eq!(
+            image.map(|_| ()).err().map(|e| e.message()),
+            Some(String::from("GetDesc1 failed"))
+        );
+        assert!(hdr);
+        // A photo that had already failed keeps its own cause.
+        let lost = Err(Error::new(DXGI_ERROR_ACCESS_LOST, "lost"));
+        let (image, hdr) = settled(lost, false, unread());
+        assert_eq!(
+            image.map(|_| ()).err().map(|e| e.code()),
+            Some(DXGI_ERROR_ACCESS_LOST)
+        );
+        assert!(!hdr);
+    }
+
+    #[test]
+    fn a_failed_photo_while_hdr_was_turned_on_marks_gdis_photo_approximate() {
+        let (image, hdr) = settled(
+            Err(Error::new(DXGI_ERROR_ACCESS_LOST, "lost")),
+            false,
+            Ok(true),
+        );
+        let grabs = vec![Grab {
+            device: DISPLAY1.to_owned(),
+            hdr,
+            image,
+        }];
+        let monitors = [monitor(DISPLAY1, RIGHT, 168)];
+        let shots = one_per_monitor(&monitors, Ok(grabs), gdi_image);
+        let Shot::Gdi { photo, .. } = &shots[0] else {
+            panic!("{:?}", shots[0]);
+        };
+        assert_eq!(photo.colors, Colors::Approximate);
     }
 }

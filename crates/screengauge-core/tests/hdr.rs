@@ -1,4 +1,4 @@
-//! Layer 1 tests of the HDR conversion (v1 spec WPC-296, Cores e HDR; ticket WPC-327): a monitor's 16-bit desktop
+//! Layer 1 tests of the HDR conversion (v1 spec WPC-296, Colors and HDR; ticket WPC-327): a monitor's 16-bit desktop
 //! image, as DXGI hands it with HDR on, divided by the monitor's SDR white level and encoded again as 8-bit sRGB by the
 //! sRGB curve, with HDR content cut channel by channel to the sRGB range. The 16-bit values are made up here; whether
 //! Windows hands them is the hardware's business (WPC-289 measured it).
