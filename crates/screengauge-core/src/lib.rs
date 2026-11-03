@@ -6,5 +6,6 @@
 
 #![forbid(unsafe_code)]
 
+pub mod hdr;
 pub mod session;
 pub mod settings;

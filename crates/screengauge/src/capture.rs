@@ -1,12 +1,16 @@
-//! The capture behind the frozen screen: every monitor through DXGI Desktop Duplication, in 8 bits and without the
-//! mouse pointer, one right after the other, and through GDI on a monitor where DXGI fails (v1 spec WPC-296, Frozen
-//! screen), with the place, scale and HDR state the session core receives with each photo. Everything DXGI, Direct3D
-//! and GDI create for it is released before [`every_monitor`] returns, so the capture exists only during the call.
+//! The capture behind the frozen screen: every monitor through DXGI Desktop Duplication, without the mouse pointer, one
+//! right after the other, and through GDI on a monitor where DXGI fails (v1 spec WPC-296, Frozen screen), with the
+//! place, scale and colors the session core receives with each photo. DXGI's image is in 8 bits on a monitor with HDR
+//! off, and in 16 bits converted by the monitor's SDR white level on one with HDR on (Cores e HDR), so the conversion
+//! happens once per call. Everything DXGI, Direct3D and GDI create for it is released before [`every_monitor`] returns,
+//! so the capture exists only during the call.
 
 mod gdi;
+mod sdr_white_level;
 
 use std::time::{Duration, Instant};
 
+use screengauge_core::hdr::{self, SdrWhiteLevel};
 use screengauge_core::session::{Colors, Image, Photo, Rect, Scale};
 use windows::Win32::Foundation::{E_FAIL, HMODULE, LPARAM, RECT};
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
@@ -16,8 +20,9 @@ use windows::Win32::Graphics::Direct3D11::{
     ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
-    DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, DXGI_FORMAT_B8G8R8A8_UNORM,
-    DXGI_MODE_ROTATION_IDENTITY, DXGI_MODE_ROTATION_UNSPECIFIED, DXGI_SAMPLE_DESC,
+    DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, DXGI_COLOR_SPACE_TYPE, DXGI_FORMAT,
+    DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_MODE_ROTATION_IDENTITY,
+    DXGI_MODE_ROTATION_UNSPECIFIED, DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_NOT_FOUND, DXGI_ERROR_WAIT_TIMEOUT,
@@ -30,6 +35,7 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::core::{BOOL, Error, Interface};
 
+use self::sdr_white_level::SdrWhiteLevels;
 use crate::log;
 use crate::win32::struct_size;
 
@@ -103,7 +109,77 @@ struct Grab {
     device: String,
     /// HDR is on for the output's monitor.
     hdr: bool,
-    image: windows::core::Result<Image>,
+    image: windows::core::Result<Desktop>,
+}
+
+/// An output's desktop image as a photo's image, with how exact its colors are.
+#[derive(Debug)]
+struct Desktop {
+    image: Image,
+    colors: Colors,
+}
+
+/// How an output's desktop image becomes a photo: the rule is per monitor (v1 spec WPC-296, Cores e HDR).
+#[derive(Debug, Clone, PartialEq)]
+enum Path {
+    /// HDR is off: the 8-bit image, with the colors the apps drew.
+    Sdr,
+    /// HDR is on and its SDR white level was read: the 16-bit image converted by it, the exact HDR path.
+    Hdr(SdrWhiteLevel),
+    /// HDR is on but its SDR white level couldn't be read, for this reason: the 8-bit image, with Windows' brightening
+    /// in it, so its colors are approximate.
+    Brightened(Error),
+}
+
+impl Path {
+    /// The path of an output with HDR on or off. The 16-bit image is only for HDR on, because AMD's comes wrong with HDR
+    /// off (WPC-289), so `white`, which reads the SDR white level, is asked only then.
+    fn of(hdr: bool, white: impl FnOnce() -> windows::core::Result<SdrWhiteLevel>) -> Path {
+        if !hdr {
+            return Path::Sdr;
+        }
+        match white() {
+            Ok(white) => Path::Hdr(white),
+            Err(e) => Path::Brightened(e),
+        }
+    }
+
+    fn hdr(&self) -> bool {
+        !matches!(self, Path::Sdr)
+    }
+
+    /// The formats the duplication asks DXGI for, which converts the desktop to one of them when it's in none. B8G8R8A8
+    /// is always among them, as Microsoft recommends, and its image is then approximate on a monitor with HDR on.
+    fn formats(&self) -> &'static [DXGI_FORMAT] {
+        match self {
+            Path::Hdr(_) => &[DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_B8G8R8A8_UNORM],
+            Path::Sdr | Path::Brightened(_) => &[DXGI_FORMAT_B8G8R8A8_UNORM],
+        }
+    }
+
+    /// What becomes of a desktop image DXGI handed in `format`.
+    fn reading(&self, format: DXGI_FORMAT) -> windows::core::Result<Reading> {
+        match (self, format) {
+            (Path::Sdr, DXGI_FORMAT_B8G8R8A8_UNORM) => Ok(Reading::Copy(Colors::Exact)),
+            (Path::Hdr(_) | Path::Brightened(_), DXGI_FORMAT_B8G8R8A8_UNORM) => {
+                Ok(Reading::Copy(Colors::Approximate))
+            }
+            (Path::Hdr(white), DXGI_FORMAT_R16G16B16A16_FLOAT) => Ok(Reading::Convert(*white)),
+            _ => Err(Error::new(
+                E_FAIL,
+                format!("the desktop image came in format {}", format.0),
+            )),
+        }
+    }
+}
+
+/// How a desktop image is read into a photo's image.
+#[derive(Debug, PartialEq)]
+enum Reading {
+    /// 8 bits, copied as they are, with these colors.
+    Copy(Colors),
+    /// 16 bits, converted by this SDR white level: exact colors.
+    Convert(SdrWhiteLevel),
 }
 
 fn monitors() -> windows::core::Result<Vec<Monitor>> {
@@ -174,12 +250,25 @@ struct Output {
     duplication: windows::core::Result<Duplication>,
 }
 
+/// The SDR white level of `device`, read through `levels`, which are listed on the first monitor with HDR on of each
+/// call: none is read while HDR is off everywhere.
+fn white_level(
+    levels: &mut Option<windows::core::Result<SdrWhiteLevels>>,
+    device: &str,
+) -> windows::core::Result<SdrWhiteLevel> {
+    match levels.get_or_insert_with(SdrWhiteLevels::now) {
+        Ok(levels) => levels.of(device),
+        Err(e) => Err(e.clone()),
+    }
+}
+
 /// A duplication of every output attached to the desktop, on every adapter (the owner's two monitors are on two
 /// graphics cards), or why it couldn't be made.
 fn duplicate_every_output() -> windows::core::Result<Vec<Output>> {
     // SAFETY: no arguments; the factory is released when it drops.
     let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }?;
     let mut duplications = Vec::new();
+    let mut white_levels = None;
     for index in 0.. {
         // SAFETY: enumerating until DXGI says there is no adapter at `index`.
         let adapter = match unsafe { factory.EnumAdapters1(index) } {
@@ -202,8 +291,19 @@ fn duplicate_every_output() -> windows::core::Result<Vec<Output>> {
             if !description.AttachedToDesktop.as_bool() {
                 continue;
             }
+            let device = device_name(&description.DeviceName);
+            let hdr = is_hdr(description.ColorSpace);
+            let path = Path::of(hdr, || white_level(&mut white_levels, &device));
+            if let Path::Brightened(e) = &path {
+                log::failure(
+                    &format!(
+                        "capture: the SDR white level of {device}, so its colors are approximate"
+                    ),
+                    e,
+                );
+            }
             let duplication = match gpu.get_or_insert_with(|| Gpu::on(&adapter)) {
-                Ok(gpu) if is_upright(description.Rotation) => Duplication::of(gpu, output),
+                Ok(gpu) if is_upright(description.Rotation) => Duplication::of(gpu, output, path),
                 Ok(_) => Err(Error::new(
                     E_FAIL,
                     "the monitor is rotated, and DXGI gives its image unrotated",
@@ -211,14 +311,18 @@ fn duplicate_every_output() -> windows::core::Result<Vec<Output>> {
                 Err(e) => Err(e.clone()),
             };
             duplications.push(Output {
-                device: device_name(&description.DeviceName),
-                // Microsoft's documented test for HDR (research/hdr-screen-colors).
-                hdr: description.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020,
+                device,
+                hdr,
                 duplication,
             });
         }
     }
     Ok(duplications)
+}
+
+/// Whether HDR is on for an output in this color space: Microsoft's documented test (research/hdr-screen-colors).
+fn is_hdr(color_space: DXGI_COLOR_SPACE_TYPE) -> bool {
+    color_space == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020
 }
 
 /// A rotated monitor's desktop image comes in the monitor's native orientation, so that monitor goes to GDI, whose
@@ -267,47 +371,63 @@ impl Gpu {
 struct Duplication {
     gpu: Gpu,
     output: IDXGIOutput,
+    path: Path,
     duplication: IDXGIOutputDuplication,
 }
 
 impl Duplication {
-    /// Asks for B8G8R8A8, the 8-bit format; with HDR on, the 16-bit path comes with WPC-327.
-    fn of(gpu: &Gpu, output: IDXGIOutput) -> windows::core::Result<Duplication> {
+    /// Asks DXGI for the formats `path` takes.
+    fn of(gpu: &Gpu, output: IDXGIOutput, path: Path) -> windows::core::Result<Duplication> {
         // IDXGIOutput5 is there on every Windows 11.
         let output5: IDXGIOutput5 = output.cast()?;
         // SAFETY: the device was created on the adapter this output is connected to.
-        let duplication =
-            unsafe { output5.DuplicateOutput1(&gpu.device, 0, &[DXGI_FORMAT_B8G8R8A8_UNORM]) }?;
+        let duplication = unsafe { output5.DuplicateOutput1(&gpu.device, 0, path.formats()) }?;
         Ok(Duplication {
             gpu: gpu.clone(),
             output,
+            path,
             duplication,
         })
     }
 
     /// The output's current image. The duplication is released before this returns.
-    fn image(self) -> windows::core::Result<Image> {
-        match first_image(&self.gpu, &self.duplication) {
+    fn image(self) -> windows::core::Result<Desktop> {
+        match first_image(&self.gpu, &self.duplication, &self.path) {
             // The duplication was lost, as when the display mode or the desktop changes, and a new one gets one more
             // try. Windows allows one duplication per output and process at a time, so the lost one goes first.
             Err(e) if e.code() == DXGI_ERROR_ACCESS_LOST => {
                 let Duplication {
                     gpu,
                     output,
+                    path,
                     duplication,
                 } = self;
                 drop(duplication);
-                let again = Duplication::of(&gpu, output)?;
-                first_image(&again.gpu, &again.duplication)
+                // Turning HDR on or off is one of the changes that lose the duplication, and the path chosen for the
+                // old mode would mark a brightened photo exact, or take AMD's wrong 16-bit one: the monitor goes to GDI.
+                // SAFETY: a plain query on a live output.
+                let now = unsafe { output.cast::<IDXGIOutput6>()?.GetDesc1() }?;
+                if is_hdr(now.ColorSpace) != path.hdr() {
+                    return Err(Error::new(
+                        E_FAIL,
+                        "HDR was turned on or off during the photo",
+                    ));
+                }
+                let again = Duplication::of(&gpu, output, path)?;
+                first_image(&again.gpu, &again.duplication, &again.path)
             }
             first => first,
         }
     }
 }
 
-/// Waits for the duplication's first desktop image and reads it into memory. An error between acquiring a frame and
-/// releasing it leaves the frame to the duplication, which the caller drops right away.
-fn first_image(gpu: &Gpu, duplication: &IDXGIOutputDuplication) -> windows::core::Result<Image> {
+/// Waits for the duplication's first desktop image and reads it into memory as `path` says. An error between acquiring
+/// a frame and releasing it leaves the frame to the duplication, which the caller drops right away.
+fn first_image(
+    gpu: &Gpu,
+    duplication: &IDXGIOutputDuplication,
+    path: &Path,
+) -> windows::core::Result<Desktop> {
     let deadline = Instant::now() + FIRST_IMAGE_BUDGET;
     loop {
         let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
@@ -318,7 +438,7 @@ fn first_image(gpu: &Gpu, duplication: &IDXGIOutputDuplication) -> windows::core
                 // LastPresentTime 0: only the mouse pointer changed, and the frame may hold no desktop image yet.
                 let image = match resource {
                     Some(resource) if info.LastPresentTime != 0 => {
-                        Some(read(gpu, &resource.cast()?)?)
+                        Some(read(gpu, &resource.cast()?, path)?)
                     }
                     _ => None,
                 };
@@ -344,17 +464,13 @@ fn first_image(gpu: &Gpu, duplication: &IDXGIOutputDuplication) -> windows::core
     }
 }
 
-/// Copies the desktop texture to memory the processor can read, through a staging texture.
-fn read(gpu: &Gpu, texture: &ID3D11Texture2D) -> windows::core::Result<Image> {
+/// Copies the desktop texture to memory the processor can read, through a staging texture, and reads it as `path`
+/// says: an 8-bit image as it is, a 16-bit one converted.
+fn read(gpu: &Gpu, texture: &ID3D11Texture2D, path: &Path) -> windows::core::Result<Desktop> {
     let mut description = D3D11_TEXTURE2D_DESC::default();
     // SAFETY: fills a local.
     unsafe { texture.GetDesc(&mut description) };
-    if description.Format != DXGI_FORMAT_B8G8R8A8_UNORM {
-        return Err(Error::new(
-            E_FAIL,
-            format!("the desktop image came in format {}", description.Format.0),
-        ));
-    }
+    let reading = path.reading(description.Format)?;
     let staging_description = D3D11_TEXTURE2D_DESC {
         Width: description.Width,
         Height: description.Height,
@@ -386,42 +502,64 @@ fn read(gpu: &Gpu, texture: &ID3D11Texture2D) -> windows::core::Result<Image> {
         gpu.context
             .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
     }?;
-    let image = mapped_image(&mapped, description.Width, description.Height);
-    // SAFETY: unmaps what was mapped above, after `mapped_image` copied it.
+    let (width, height) = (description.Width, description.Height);
+    let desktop = match reading {
+        Reading::Copy(colors) => mapped_image(&mapped, width, height, 4, |rows, pitch| {
+            tight_rows(rows, pitch, count(width)?, count(height)?)
+                .and_then(|bgra| Image::new(width, height, bgra))
+        })
+        .map(|image| Desktop { image, colors }),
+        Reading::Convert(white) => mapped_image(&mapped, width, height, 8, |rows, pitch| {
+            hdr::convert(rows, pitch, width, height, white)
+        })
+        .map(|image| Desktop {
+            image,
+            colors: Colors::Exact,
+        }),
+    };
+    // SAFETY: unmaps what was mapped above, after `mapped_image` read it.
     unsafe { gpu.context.Unmap(&staging, 0) };
-    image
+    desktop
 }
 
-/// The mapped rows as an [`Image`].
+/// A size or count Windows gives in a u32, such as a width or height, as a usize. `None` never happens on x64, the only
+/// target ScreenGauge builds for.
+fn count(size: u32) -> Option<usize> {
+    usize::try_from(size).ok()
+}
+
+/// The mapped rows of a `width` by `height` texture of `pixel_size`-byte pixels, as `image` makes them an [`Image`],
+/// from the rows and the bytes between their starts. `image` gives `None` when the rows don't fill the image.
 fn mapped_image(
     mapped: &D3D11_MAPPED_SUBRESOURCE,
     width: u32,
     height: u32,
+    pixel_size: usize,
+    image: impl FnOnce(&[u8], usize) -> Option<Image>,
 ) -> windows::core::Result<Image> {
     let too_large = || Error::new(E_FAIL, "the desktop image is too large to address");
     let (columns, rows) = (
-        usize::try_from(width).map_err(|_| too_large())?,
-        usize::try_from(height).map_err(|_| too_large())?,
+        count(width).ok_or_else(too_large)?,
+        count(height).ok_or_else(too_large)?,
     );
     let pitch = usize::try_from(mapped.RowPitch).map_err(|_| too_large())?;
+    let row_length = columns.checked_mul(pixel_size).ok_or_else(too_large)?;
     // Every row but the last is `pitch` bytes long; the last may end right after its pixels.
     let length = match rows.checked_sub(1) {
         Some(before_last) => before_last
             .checked_mul(pitch)
-            .and_then(|start| start.checked_add(columns.checked_mul(4)?))
+            .and_then(|start| start.checked_add(row_length))
             .ok_or_else(too_large)?,
         None => 0,
     };
-    if mapped.pData.is_null() || pitch < columns * 4 {
+    if mapped.pData.is_null() || pitch < row_length {
         return Err(Error::new(E_FAIL, "Map returned no rows of that size"));
     }
-    // SAFETY: Map succeeded for a `width` by `height` B8G8R8A8 texture, so `pData` holds `rows` rows `pitch` bytes
-    // apart, each with `columns` pixels; the slice ends at the last pixel and is dropped before Unmap.
+    // SAFETY: Map succeeded for a `width` by `height` texture of `pixel_size`-byte pixels, so `pData` holds `rows` rows
+    // `pitch` bytes apart, each with `columns` pixels; the slice ends at the last pixel and is dropped before Unmap.
     let mapped_rows = unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>(), length) };
-    let bgra = tight_rows(mapped_rows, pitch, columns, rows)
-        .ok_or_else(|| Error::new(E_FAIL, "Map returned fewer rows than the image has"))?;
-    Image::new(width, height, bgra)
-        .ok_or_else(|| Error::new(E_FAIL, "the rows read don't fill the image"))
+    image(mapped_rows, pitch)
+        .ok_or_else(|| Error::new(E_FAIL, "Map returned fewer rows than the image has"))
 }
 
 /// Copies `rows` rows of `columns` BGRA pixels that start `pitch` bytes apart into rows with no gap, and makes every
@@ -462,14 +600,20 @@ fn one_per_monitor(
             // Approximate color notice says "HDR on". With HDR on, GDI's photo still measured exact (WPC-289); the spec
             // marks it approximate only because nothing promises that, so a missed mark is unlikely to hide a wrong color.
             let hdr = grab.as_ref().is_some_and(|grab| grab.hdr);
-            let dxgi_image = match grab {
-                Some(grab) => grab.image.and_then(|image| fits(monitor, image)),
+            let dxgi_desktop = match grab {
+                Some(grab) => grab.image.and_then(|desktop| {
+                    Ok(Desktop {
+                        image: fits(monitor, desktop.image)?,
+                        colors: desktop.colors,
+                    })
+                }),
                 None => Err(dxgi_failure
                     .clone()
                     .unwrap_or_else(|| Error::new(E_FAIL, "DXGI has no image of this monitor"))),
             };
-            match dxgi_image {
-                Ok(image) => Shot::Dxgi(photo(monitor, image, dxgi_colors(hdr))),
+            match dxgi_desktop {
+                // DXGI's colors are as the monitor's path read them (Path::reading).
+                Ok(desktop) => Shot::Dxgi(photo(monitor, desktop.image, desktop.colors)),
                 Err(dxgi) => match gdi(monitor).and_then(|image| fits(monitor, image)) {
                     Ok(image) => Shot::Gdi {
                         photo: photo(monitor, image, gdi_colors(hdr)),
@@ -517,17 +661,8 @@ fn photo(monitor: &Monitor, image: Image, colors: Colors) -> Photo {
     }
 }
 
-/// With HDR on, DXGI's 8-bit photo has Windows' brightening in it (WPC-289); undoing it comes with WPC-327.
-fn dxgi_colors(hdr: bool) -> Colors {
-    if hdr {
-        Colors::Approximate
-    } else {
-        Colors::Exact
-    }
-}
-
 /// GDI's photo is never the exact HDR path (v1 spec WPC-296, Colors and HDR): with HDR on, its colors are approximate,
-/// even once DXGI's are exact.
+/// even where DXGI's are exact.
 fn gdi_colors(hdr: bool) -> Colors {
     if hdr {
         Colors::Approximate
@@ -619,7 +754,10 @@ mod tests {
         Grab {
             device: device.to_owned(),
             hdr: false,
-            image: Ok(marked(width, height, mark)),
+            image: Ok(Desktop {
+                image: marked(width, height, mark),
+                colors: Colors::Exact,
+            }),
         }
     }
 
@@ -689,13 +827,79 @@ mod tests {
     }
 
     #[test]
-    fn a_monitor_with_hdr_on_gets_approximate_colors() {
-        let mut hdr_on = grab(DISPLAY2, 1920, 1080, 2);
-        hdr_on.hdr = true;
-        let grabs = vec![grab(DISPLAY1, 3840, 2160, 1), hdr_on];
-        let shots = one_per_monitor(&owners_monitors(), Ok(grabs), no_gdi);
+    fn a_dxgi_photo_keeps_the_colors_its_monitor_s_path_read() {
+        // Both monitors have HDR on: the first one's image was converted, the second one's came in 8 bits.
+        let mut converted = grab(DISPLAY1, 3840, 2160, 1);
+        converted.hdr = true;
+        let mut brightened = grab(DISPLAY2, 1920, 1080, 2);
+        brightened.hdr = true;
+        if let Ok(desktop) = &mut brightened.image {
+            desktop.colors = Colors::Approximate;
+        }
+        let shots = one_per_monitor(&owners_monitors(), Ok(vec![converted, brightened]), no_gdi);
         let colors: Vec<_> = seen(&shots).into_iter().map(|shot| shot.3).collect();
         assert_eq!(colors, [Colors::Exact, Colors::Approximate]);
+    }
+
+    /// An SDR white level of 240 nits.
+    fn white_240() -> SdrWhiteLevel {
+        SdrWhiteLevel::from_windows(3000).expect("a white level above zero")
+    }
+
+    #[test]
+    fn a_monitor_with_hdr_off_takes_8_bits_without_reading_its_sdr_white_level() {
+        // AMD's 16-bit image comes wrong with HDR off (WPC-289).
+        let path = Path::of(false, || panic!("the SDR white level was read"));
+        assert_eq!(path, Path::Sdr);
+        assert_eq!(path.formats(), [DXGI_FORMAT_B8G8R8A8_UNORM]);
+    }
+
+    #[test]
+    fn a_monitor_with_hdr_on_takes_16_bits_converted_by_its_sdr_white_level() {
+        let path = Path::of(true, || Ok(white_240()));
+        assert_eq!(path, Path::Hdr(white_240()));
+        // B8G8R8A8 stays in the list, as Microsoft recommends, should DXGI have no 16-bit image to give.
+        assert_eq!(
+            path.formats(),
+            [DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_B8G8R8A8_UNORM]
+        );
+    }
+
+    #[test]
+    fn a_monitor_with_hdr_on_whose_sdr_white_level_is_unknown_takes_8_bits() {
+        let unread = Error::new(E_FAIL, "no white level");
+        let path = Path::of(true, || Err(unread.clone()));
+        assert_eq!(path, Path::Brightened(unread));
+        assert_eq!(path.formats(), [DXGI_FORMAT_B8G8R8A8_UNORM]);
+    }
+
+    #[test]
+    fn colors_are_exact_with_hdr_off_or_when_the_16_bit_image_was_converted() {
+        // The exact path mark: a 16-bit image with the SDR white level read, or HDR off.
+        let brightened = Path::Brightened(Error::new(E_FAIL, "no white level"));
+        let readings = [
+            (Path::Sdr, DXGI_FORMAT_B8G8R8A8_UNORM),
+            (Path::Hdr(white_240()), DXGI_FORMAT_R16G16B16A16_FLOAT),
+            (Path::Hdr(white_240()), DXGI_FORMAT_B8G8R8A8_UNORM),
+            (brightened, DXGI_FORMAT_B8G8R8A8_UNORM),
+        ]
+        .map(|(path, format)| path.reading(format).ok());
+        assert_eq!(
+            readings,
+            [
+                Some(Reading::Copy(Colors::Exact)),
+                Some(Reading::Convert(white_240())),
+                Some(Reading::Copy(Colors::Approximate)),
+                Some(Reading::Copy(Colors::Approximate)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_16_bit_image_without_an_sdr_white_level_to_convert_by_is_refused() {
+        // DXGI hands only formats it was asked for, so this is DXGI going wrong, and the monitor goes to GDI.
+        let reading = Path::Sdr.reading(DXGI_FORMAT_R16G16B16A16_FLOAT);
+        assert!(reading.is_err(), "{reading:?}");
     }
 
     #[test]
@@ -819,15 +1023,21 @@ mod tests {
     #[test]
     #[ignore = "photographs the real screen, so it runs on the owner's computer, never in CI"]
     fn gdi_photographs_every_real_monitor_as_dxgi_does() {
+        // With HDR on, GDI's photo measured exact (WPC-289), so it checks DXGI's converted one, which must be exact.
         let monitors = monitors().expect("the monitors");
         let grabs = grab_every_output().expect("DXGI");
         for monitor in &monitors {
             let gdi = gdi::image(monitor.rect).expect("GDI's photo");
-            let dxgi = grabs
+            let grab = grabs
                 .iter()
                 .find(|grab| grab.device == monitor.device)
-                .and_then(|grab| grab.image.as_ref().ok())
-                .expect("DXGI's photo");
+                .expect("DXGI's output");
+            let Desktop {
+                image: dxgi,
+                colors,
+            } = grab.image.as_ref().expect("DXGI's photo");
+            println!("{}: HDR on {}, {colors:?} colors", monitor.device, grab.hdr);
+            assert_eq!(*colors, Colors::Exact, "{}", monitor.device);
             assert_eq!(
                 (gdi.width(), gdi.height()),
                 (dxgi.width(), dxgi.height()),

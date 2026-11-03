@@ -160,6 +160,10 @@ _Avoid_: normal content, standard content
 Video, games or pictures brighter or more saturated than any standard color, so they have no exact standard color to report.
 _Avoid_: HDR image, HDR video (both are only examples)
 
+**SDR white level**:
+How bright Windows shows the white of SDR content on a monitor with HDR on, which the user sets as "SDR content brightness" in Windows settings; ScreenGauge divides by it to undo the brightening.
+_Avoid_: SDR brightness, paper white
+
 **Approximate color**:
 Inspect's notice that the color shown may differ from the one the app drew, because HDR is on and ScreenGauge can't undo its brightening on that monitor.
 _Avoid_: wrong color, HDR warning
