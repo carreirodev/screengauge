@@ -674,7 +674,7 @@ fn fill(dc: HDC, shape: Shape) {
 
 /// Whether this thread is Per-Monitor V2, as ScreenGauge.exe's manifest makes it: only then are the monitors, the
 /// windows and the photos all in physical pixels.
-fn per_monitor_v2() -> bool {
+pub(super) fn per_monitor_v2() -> bool {
     // SAFETY: plain calls that compare two DPI awareness contexts.
     unsafe {
         AreDpiAwarenessContextsEqual(

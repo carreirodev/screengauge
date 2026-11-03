@@ -9,6 +9,8 @@ mod gdi;
 mod sdr_white_level;
 #[cfg(test)]
 mod self_check;
+#[cfg(test)]
+mod test_page;
 
 use std::time::{Duration, Instant};
 

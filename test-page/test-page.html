@@ -1,0 +1,119 @@
+<!doctype html>
+<!--
+  ScreenGauge's test page (ticket WPC-331): the hard cases to measure, drawn by Chrome, photographed on the owner's
+  monitors and kept in captures/ for the tests without a screen. README.md records how.
+
+  The page is a 1200 x 720 CSS px stage, 16 CSS px from the window's top-left corner, on a pure magenta (#FF00FF)
+  background. The capture program finds the stage as the one rectangle of that size, times the monitor's scale, with
+  magenta all around it, and keeps only the stage: anything outside it never reaches a capture. So:
+  - nothing on the stage is #FF00FF, and its edge pixels are white;
+  - every size and place on the stage is a whole number of CSS px, and the stage's own are multiples of 4, so at every
+    Windows scale (a multiple of 25%) the stage lands on whole physical pixels;
+  - no web font, image, animation, hover style or caret, so the page draws the same each time and needs no network.
+
+  Each case has an id, and its place and size on the stage are written in its own style, in CSS px from the stage's
+  top-left corner: this file is the list of cases. Places at odd values are on purpose, so their edges fall between
+  physical pixels at 125% and 175%.
+-->
+<html lang="en" translate="no">
+<head>
+<meta charset="utf-8">
+<!-- No translation offer: its bubble would cover the page. -->
+<meta name="google" content="notranslate">
+<title>ScreenGauge test page</title>
+<script>
+  // One physical pixel, in CSS px, for the hairline cases: 1 CSS px is 1.25 or 1.75 physical pixels at 125% and 175%.
+  document.documentElement.style.setProperty("--device-px", 1 / window.devicePixelRatio + "px");
+</script>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: #FF00FF;
+  }
+  #stage {
+    position: absolute;
+    left: 16px;
+    top: 16px;
+    width: 1200px;
+    height: 720px;
+    overflow: hidden;
+    background: #FFFFFF;
+    font-family: "Segoe UI", sans-serif;
+    color: #202020;
+  }
+  #stage div {
+    position: absolute;
+    box-sizing: border-box;
+  }
+  .text {
+    white-space: nowrap;
+    line-height: 1;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- Cards of known size. -->
+  <div id="card-200x120" style="left: 24px; top: 24px; width: 200px; height: 120px; background: #1E90FF"></div>
+  <!-- Two blue cards with a white strip of 24 CSS px between them. -->
+  <div id="card-gap-24-left" style="left: 248px; top: 24px; width: 96px; height: 120px; background: #1E90FF"></div>
+  <div id="card-gap-24-right" style="left: 368px; top: 24px; width: 96px; height: 120px; background: #1E90FF"></div>
+  <!-- Off the physical pixel grid at 125% and 175%, in place and in size. -->
+  <div id="card-75x45-offgrid" style="left: 489px; top: 29px; width: 75px; height: 45px; background: #1E90FF"></div>
+  <div id="card-rounded" style="left: 588px; top: 24px; width: 160px; height: 120px; background: #2E7D32; border-radius: 16px"></div>
+  <div id="card-outlined" style="left: 772px; top: 24px; width: 160px; height: 120px; background: #FFFFFF; border: 1px solid #D0D0D0"></div>
+  <!-- Little contrast with the white around it. -->
+  <div id="card-light-gray" style="left: 956px; top: 24px; width: 200px; height: 120px; background: #F3F3F3"></div>
+
+  <!-- Text with soft edges, in several sizes. -->
+  <div id="text-10" class="text" style="left: 24px; top: 168px; font-size: 10px">Soft edges at 10 px: The quick brown fox jumps over the lazy dog 0123456789</div>
+  <div id="text-12" class="text" style="left: 24px; top: 186px; font-size: 12px">Soft edges at 12 px: The quick brown fox jumps over the lazy dog 0123456789</div>
+  <div id="text-14" class="text" style="left: 24px; top: 206px; font-size: 14px">Soft edges at 14 px: The quick brown fox jumps over the lazy dog</div>
+  <div id="text-16" class="text" style="left: 24px; top: 230px; font-size: 16px">Soft edges at 16 px: The quick brown fox jumps over</div>
+  <div id="text-20" class="text" style="left: 24px; top: 258px; font-size: 20px">Soft edges at 20 px: The quick brown fox</div>
+  <div id="text-28" class="text" style="left: 24px; top: 290px; font-size: 28px">Soft edges at 28 px: Gauge</div>
+  <div id="text-40" class="text" style="left: 24px; top: 330px; font-size: 40px">Measure 1200 px</div>
+  <div id="text-64" class="text" style="left: 24px; top: 384px; font-size: 64px">24 × 180</div>
+
+  <div id="text-on-dark" style="left: 608px; top: 168px; width: 568px; height: 56px; background: #1E1E1E"></div>
+  <div id="text-on-dark-16" class="text" style="left: 624px; top: 176px; font-size: 16px; color: #FFFFFF">White text on a dark band at 16 px</div>
+  <div id="text-on-dark-12" class="text" style="left: 624px; top: 202px; font-size: 12px; color: #FFFFFF">White text on a dark band at 12 px</div>
+  <div id="text-red-20" class="text" style="left: 608px; top: 244px; font-size: 20px; color: #C62828">Red text at 20 px</div>
+  <div id="text-bold-14" class="text" style="left: 608px; top: 280px; font-size: 14px; font-weight: 700">Bold text at 14 px</div>
+  <div id="text-on-gray" style="left: 608px; top: 312px; width: 280px; height: 36px; background: #F3F3F3"></div>
+  <div id="text-on-gray-14" class="text" style="left: 620px; top: 323px; font-size: 14px; color: #605E5C">Gray text on light gray at 14 px</div>
+  <div id="text-shadow-28" class="text" style="left: 608px; top: 360px; font-size: 28px; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.35)">Text with a shadow</div>
+
+  <!-- Shadows. -->
+  <div id="shadow-small" style="left: 736px; top: 416px; width: 120px; height: 80px; background: #FFFFFF; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.12)"></div>
+  <div id="shadow-large" style="left: 896px; top: 416px; width: 120px; height: 80px; background: #FFFFFF; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25)"></div>
+  <div id="shadow-blue" style="left: 1056px; top: 416px; width: 120px; height: 80px; background: #1E90FF; box-shadow: 0 4px 12px rgba(30, 144, 255, 0.5)"></div>
+
+  <!-- Gradients. -->
+  <!-- Fades into the white around it at its right edge. -->
+  <div id="gradient-subtle" style="left: 24px; top: 480px; width: 360px; height: 64px; background: linear-gradient(to right, #F5F5F5, #FFFFFF)"></div>
+  <div id="gradient-strong" style="left: 24px; top: 568px; width: 360px; height: 64px; background: linear-gradient(to right, #1E90FF, #8A2BE2)"></div>
+  <div id="gradient-radial" style="left: 24px; top: 648px; width: 360px; height: 56px; background: radial-gradient(circle at center, #FFFFFF, #B0B0B0)"></div>
+  <div id="gradient-vertical" style="left: 408px; top: 480px; width: 64px; height: 152px; background: linear-gradient(to bottom, #FFFFFF, #C8C8C8)"></div>
+  <div id="gradient-under-card" style="left: 496px; top: 480px; width: 200px; height: 152px; background: linear-gradient(to bottom right, #E3F2FD, #90CAF9)"></div>
+  <div id="card-on-gradient" style="left: 548px; top: 528px; width: 96px; height: 56px; background: #1565C0"></div>
+
+  <!-- Lines of 1 pixel: 1 CSS px, and 1 physical pixel (--device-px). -->
+  <div id="line-h-css-black" style="left: 720px; top: 552px; width: 456px; height: 1px; background: #000000"></div>
+  <div id="line-h-css-offgrid" style="left: 720px; top: 571px; width: 456px; height: 1px; background: #000000"></div>
+  <div id="line-h-css-divider" style="left: 720px; top: 588px; width: 456px; height: 1px; background: #E5E5E5"></div>
+  <div id="line-h-device-black" style="left: 720px; top: 604px; width: 456px; height: var(--device-px); background: #000000"></div>
+  <div id="line-v-css-black" style="left: 744px; top: 624px; width: 1px; height: 72px; background: #000000"></div>
+  <div id="line-v-device-black" style="left: 776px; top: 624px; width: var(--device-px); height: 72px; background: #000000"></div>
+  <!-- Two lines of 1 CSS px with 3 CSS px of white between them. -->
+  <div id="lines-gap-3-left" style="left: 808px; top: 624px; width: 1px; height: 72px; background: #000000"></div>
+  <div id="lines-gap-3-right" style="left: 812px; top: 624px; width: 1px; height: 72px; background: #000000"></div>
+  <div id="box-css-outline" style="left: 848px; top: 624px; width: 160px; height: 72px; border: 1px solid #000000"></div>
+  <div id="box-device-outline" style="left: 1032px; top: 624px; width: 144px; height: 72px; border: var(--device-px) solid #808080"></div>
+
+</div>
+</body>
+</html>

@@ -101,25 +101,26 @@ fn read_all(stream: &IStream) -> windows::core::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// For tests: reading a PNG back, as a program pasting it would.
 #[cfg(test)]
-mod tests {
+pub mod read_back {
     use windows::Win32::Graphics::Imaging::{
-        GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, WICBitmapPaletteTypeCustom,
-        WICDecodeMetadataCacheOnDemand,
+        GUID_WICPixelFormat24bppBGR, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone,
+        WICBitmapPaletteTypeCustom, WICDecodeMetadataCacheOnDemand,
     };
 
-    use super::*;
+    use super::{factory, memory_stream};
 
     /// What a PNG decodes to, read back by WIC as a program pasting it would: its size, the pixel format the file holds,
     /// and every pixel as blue, green, red and alpha.
-    struct Decoded {
-        width: u32,
-        height: u32,
-        stored_as_24_bit_color: bool,
-        bgra: Vec<[u8; 4]>,
+    pub struct Decoded {
+        pub width: u32,
+        pub height: u32,
+        pub stored_as_24_bit_color: bool,
+        pub bgra: Vec<[u8; 4]>,
     }
 
-    fn decode(bytes: &[u8]) -> Decoded {
+    pub fn decode(bytes: &[u8]) -> Decoded {
         let wic = factory().expect("the WIC factory");
         let stream = memory_stream(Some(bytes)).expect("a stream");
         // SAFETY: a live stream holding a copy of `bytes`.
@@ -160,6 +161,12 @@ mod tests {
             bgra: bgra.as_chunks::<4>().0.to_vec(),
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_back::decode;
+    use super::*;
 
     /// An image of `width` × `height` whose pixels are each a different color, given as blue, green, red and a fourth
     /// byte of 0, as a capture may leave it.
