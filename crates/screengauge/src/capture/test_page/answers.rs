@@ -1,7 +1,8 @@
 //! The approved answers of the test page's captures (v1 spec WPC-296, test layer 1; ticket WPC-332): each case of
 //! `test-page/test-page.html`, measured with Dimensions and Bounds on the three captures in `test-page/captures/` at the
 //! default tolerance, through the session core as the tools measure the real screen, and the answer the owner approved
-//! for it once. Snip takes the same area as Bounds, so each Bounds case checks Snip's image too.
+//! for it once. Snip takes the same area as Bounds, so each Bounds case checks that Snip's image is the capture's
+//! pixels in the rectangle Bounds measures.
 //!
 //! A change of rule or of the default tolerance that changes an answer fails here, with every changed answer listed
 //! next to the approved one: the new answers go back to the owner, and only their approval writes them into the table.
@@ -83,12 +84,12 @@ fn every_case_of_the_test_page_gives_the_answer_the_owner_approved() {
 
 #[test]
 fn the_table_has_a_case_for_each_kind_the_page_draws() {
-    // 19 Dimensions cases and 36 Bounds cases: cards, text, shadows, gradients and 1-pixel lines (test-page/README.md).
+    // 19 Dimensions cases and 37 Bounds cases: cards, text, shadows, gradients and 1-pixel lines (test-page/README.md).
     let dimensions = CASES
         .iter()
         .filter(|case| matches!(case.gesture, Gesture::Dimensions(..)))
         .count();
-    assert_eq!((dimensions, CASES.len() - dimensions), (19, 36));
+    assert_eq!((dimensions, CASES.len() - dimensions), (19, 37));
 }
 
 /// The capture `name` as the photo of a monitor at `dpi` whose top left corner is the virtual screen's origin.
@@ -133,7 +134,8 @@ fn toolbar_monitor(page: &Photo) -> Photo {
     }
 }
 
-/// `css` CSS px of the stage at `dpi`, in physical pixels of the capture: whole pixels, rounded down.
+/// A point of the stage, `x` and `y` in CSS px, at `dpi`: the physical pixel of the capture it falls in, so rounded
+/// down.
 fn physical((x, y): (i32, i32), dpi: u32) -> Point {
     let dpi = i32::try_from(dpi).expect("a Windows DPI");
     Point {
@@ -187,16 +189,18 @@ fn answer(page: &Photo, gesture: &Gesture, dpi: u32) -> String {
         Gesture::Dimensions(mode, at) => dimensions(page, mode, physical(at, dpi)),
         Gesture::Bounds(from, to) => {
             let (from, to) = (physical(from, dpi), physical(to, dpi));
-            let bounds = bounds(page, from, to);
+            let (bounds, content) = bounds(page, from, to);
+            // Snip takes the same area: its image is the capture's pixels in the rectangle Bounds measures, and there is
+            // none where Bounds finds no content.
             let snip = snip(page, from, to);
-            // Snip takes the same area: its image is the size Bounds measures, and none where Bounds finds no content.
-            let wanted = bounds
-                .split_once(" at ")
-                .map_or("no image", |(size, _)| size);
+            let wanted = content.map(|content| crop(page, content));
             if snip == wanted {
                 bounds
             } else {
-                format!("{bounds}, but Snip takes {snip}")
+                let taken = snip.map_or("no image".to_owned(), |image| {
+                    format!("an image of {} x {}", image.width(), image.height())
+                });
+                format!("{bounds}, but Snip takes {taken} that isn't the capture's pixels there")
             }
         }
     }
@@ -226,7 +230,8 @@ fn drag(session: &mut Session, from: Point, to: Point) -> Vec<Effect> {
     session.handle(event(to, 1030, Input::Release))
 }
 
-fn bounds(page: &Photo, from: Point, to: Point) -> String {
+/// Bounds' answer for a drag from `from` to `to`, and the rectangle it pinned.
+fn bounds(page: &Photo, from: Point, to: Point) -> (String, Option<Rect>) {
     let mut session = open(page, Tool::Bounds, DimensionsMode::default());
     let effects = drag(&mut session, from, to);
     let copied = effects.iter().find_map(|effect| match effect {
@@ -238,7 +243,7 @@ fn bounds(page: &Photo, from: Point, to: Point) -> String {
         .pinned
         .last()
         .and_then(|measurement| measurement.content);
-    match (copied, pinned) {
+    let answer = match (copied, pinned) {
         (Some(text), Some(content)) => format!("{text} at {},{}", content.left, content.top),
         (None, None) => session
             .scene()
@@ -246,25 +251,44 @@ fn bounds(page: &Photo, from: Point, to: Point) -> String {
             .map_or("nothing", |notice| notice.message.text())
             .to_owned(),
         (copied, pinned) => format!("copied {copied:?} but pinned {pinned:?}"),
-    }
+    };
+    (answer, pinned)
 }
 
-/// The size of the image a Snip drag from `from` to `to` copies, as Bounds copies its size, or what it does instead.
-fn snip(page: &Photo, from: Point, to: Point) -> String {
+/// The pixels of `page` in `rect`, which lies on it, as an image of their own.
+fn crop(page: &Photo, rect: Rect) -> Image {
+    let width = usize::try_from(page.rect.width).expect("a small capture");
+    let (left, top) = (
+        usize::try_from(rect.left).expect("on the capture"),
+        usize::try_from(rect.top).expect("on the capture"),
+    );
+    let columns = usize::try_from(rect.width).expect("a small rectangle");
+    let rows = usize::try_from(rect.height).expect("a small rectangle");
+    let bgra = (top..top + rows)
+        .flat_map(|row| {
+            let start = (row * width + left) * 4;
+            page.image.bgra()[start..start + columns * 4]
+                .iter()
+                .copied()
+        })
+        .collect();
+    Image::new(rect.width, rect.height, bgra).expect("the pixels fill the image")
+}
+
+/// The image a Snip drag from `from` to `to` copies, if any.
+fn snip(page: &Photo, from: Point, to: Point) -> Option<Image> {
     let mut session = open(page, Tool::Snip, DimensionsMode::default());
-    let effects = drag(&mut session, from, to);
-    effects
-        .iter()
+    drag(&mut session, from, to)
+        .into_iter()
         .find_map(|effect| match effect {
-            Effect::CopyImage(image) => Some(format!("{} x {}", image.width(), image.height())),
+            Effect::CopyImage(image) => Some(image),
             _ => None,
         })
-        .unwrap_or_else(|| "no image".to_owned())
 }
 
 /// Every case, with the answers the owner approved at the default tolerance, 6, on 2026-11-03 (WPC-332). Each Bounds
 /// drag starts on the background around its element, except where its name says otherwise.
-const CASES: [Case; 55] = [
+const CASES: [Case; 56] = [
     Case {
         name: "gap-24 (white strip between two cards)",
         gesture: Gesture::Dimensions(DimensionsMode::Horizontal, (356, 84)),
@@ -553,6 +577,15 @@ const CASES: [Case; 55] = [
             "428 x 27 at 1092,312",
             "306 x 20 at 780,223",
             "245 x 16 at 624,178",
+        ],
+    },
+    Case {
+        name: "text-on-dark-12 (start on the dark band)",
+        gesture: Gesture::Bounds((612, 198), (1170, 220)),
+        answers: [
+            "321 x 21 at 1092,357",
+            "230 x 14 at 780,255",
+            "184 x 12 at 624,204",
         ],
     },
     Case {

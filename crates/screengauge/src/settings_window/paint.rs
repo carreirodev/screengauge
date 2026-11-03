@@ -1257,7 +1257,7 @@ mod tests {
     }
 
     #[test]
-    fn the_highest_tolerance_s_three_digits_fit_inside_the_number_s_box() {
+    fn the_three_digits_of_the_highest_tolerance_fit_inside_the_numbers_box() {
         // 100, the highest tolerance since WPC-332, is the widest number the box shows: its ink stays clear of the
         // gaps beside the box, at each of the owner's scales.
         for dpi in [96, 120, 168] {

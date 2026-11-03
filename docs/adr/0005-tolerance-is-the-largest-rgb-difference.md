@@ -4,7 +4,7 @@ A pixel counts as the same area as the reference color while none of its red, gr
 
 ## How it was calibrated
 
-The three captures in `test-page/captures/` (the AOC at 175%, the ARZOPA at 125% and 100%) were measured with Dimensions and Bounds at every tolerance from 0 to 255, case by case: 19 Dimensions cases and 36 Bounds cases on each capture, 165 answers in all.
+The three captures in `test-page/captures/` (the AOC at 175%, the ARZOPA at 125% and 100%) were measured with Dimensions and Bounds at every tolerance from 0 to 255, case by case: 19 Dimensions cases and 37 Bounds cases on each capture, 168 answers in all.
 
 - **Cards, lines, gaps and text don't decide it.** Chrome draws the page's exact colors, with no noise, so their answers are the same at every tolerance from 0 to about 46.
 - **The light cases set the top of the default.** The light gray card (`#F3F3F3` on white, 12 away) is lost from 12 up, the `gradient-subtle` that fades into white from 10, the `#E5E5E5` divider from 26, and the gray outline of `card-outlined` from 47.
@@ -13,7 +13,7 @@ The three captures in `test-page/captures/` (the AOC at 175%, the ARZOPA at 125%
 - **Gradients need more.** The test page's blue-to-purple gradient, crossed from its middle, needs 54, the card on a gradient 66, and the radial gradient is 79 from white at its darkest. 100 holds all of them; above it, only colors far apart would merge, such as the page's blue and white, 225 apart.
 - **The steps follow the two ranges.** Steps of 1 up to 10 keep the light cases' precision; steps of 5 above it cross the blue-to-purple gradient in 13 notches from the default, where steps of 1 would take 48.
 
-At 6, the 75 answers whose size the page itself sets (its CSS times the scale, each edge rounded to the nearest pixel as Chrome draws it) match it exactly. The other 90 only a capture can answer: text, shadows, gradients, 1-pixel borders and lines of 1 physical pixel. The owner approved all 165, which the tests in `crates/screengauge/src/capture/test_page/answers.rs` hold: a change of rule or of the default that changes one fails there, and the new answer goes back to the owner.
+At 6, the 75 answers whose size the page itself sets (its CSS times the scale, each edge rounded to the nearest pixel as Chrome draws it) match it exactly. The other 93 only a capture can answer: text, shadows, gradients, 1-pixel borders and lines of 1 physical pixel. The owner approved all 168 (the last 3, white text of 12 px on the dark band, after the review), which the tests in `crates/screengauge/src/capture/test_page/answers.rs` hold: a change of rule or of the default that changes one fails there, and the new answer goes back to the owner.
 
 ## Considered Options
 

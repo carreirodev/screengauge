@@ -205,7 +205,7 @@ impl Tolerance {
     /// One step higher, as a notch of the mouse wheel turned forward and Settings' + make it: the next of the steps
     /// above it. At `MAX` it stays.
     pub fn up(self) -> Tolerance {
-        let next = if self.0 < FINE_UP_TO {
+        let next = if self.0 < LAST_FINE_STEP {
             self.0 + 1
         } else {
             // The next multiple of the coarse step above it.
@@ -217,21 +217,22 @@ impl Tolerance {
     /// One step lower, as a notch of the mouse wheel turned back and Settings' − make it: the next of the steps below
     /// it. At `MIN` it stays.
     pub fn down(self) -> Tolerance {
-        let next = if self.0 <= FINE_UP_TO {
+        let next = if self.0 <= LAST_FINE_STEP {
             self.0.saturating_sub(1)
         } else {
             // The next multiple of the coarse step below it, and never below the last fine step.
-            ((self.0 - 1) / COARSE_STEP * COARSE_STEP).max(FINE_UP_TO)
+            ((self.0 - 1) / COARSE_STEP * COARSE_STEP).max(LAST_FINE_STEP)
         };
         Tolerance::new(next).unwrap_or(Tolerance::MIN)
     }
 }
 
-/// Up to this tolerance, a notch of the mouse wheel and Settings' − / + move it by 1, where the captures show light
-/// cards, faint shadows and subtle gradients being told apart (WPC-332).
-const FINE_UP_TO: u8 = 10;
+/// The last of the steps of 1: from 0 to it, a notch of the mouse wheel and Settings' − / + move the tolerance by 1,
+/// where the captures show light cards, faint shadows and subtle gradients being told apart (WPC-332). From it, + goes
+/// to 15.
+const LAST_FINE_STEP: u8 = 10;
 
-/// Above [`FINE_UP_TO`], a notch moves it by 5, to the next multiple of 5, so crossing a strong gradient takes few
+/// Above [`LAST_FINE_STEP`], a notch moves it by 5, to the next multiple of 5, so crossing a strong gradient takes few
 /// notches: 13 from the default across the test page's blue-to-purple gradient.
 const COARSE_STEP: u8 = 5;
 
