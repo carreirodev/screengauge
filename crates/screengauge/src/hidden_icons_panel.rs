@@ -45,7 +45,8 @@ fn open_panel_holding(point: POINT) -> Option<HWND> {
     let mut after = None;
     loop {
         // SAFETY: a valid class name and no window name; `after` is a window this loop found. No more windows of the
-        // class is how the loop ends.
+        // class is how the loop ends, and so does `after` closing since it was found: the search stops there, and the
+        // photo then has the panel in it, as with any failure of the trick.
         let panel = unsafe { FindWindowExW(None, after, CLASS, PCWSTR::null()) }.ok()?;
         if is_open(panel) && rect_of(panel).is_some_and(|rect| contains(&rect, point)) {
             return Some(panel);
