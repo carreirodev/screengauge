@@ -1,6 +1,6 @@
-//! The numeric conversions Win32 forces on us, each checked once here.
+//! The numeric conversions Win32 forces on us, each checked once here, and the small geometry its types need.
 
-use windows::Win32::Foundation::LPARAM;
+use windows::Win32::Foundation::{LPARAM, POINT, RECT};
 
 /// A struct's size for a `cbSize` field. Use it as `const { struct_size::<T>() }`, so the assert runs at
 /// compile time and the cast provably loses nothing.
@@ -23,4 +23,9 @@ pub fn signed_words(packed: usize) -> (i16, i16) {
         (packed as u16).cast_signed(),
         ((packed >> 16) as u16).cast_signed(),
     )
+}
+
+/// Whether `point` is one of `rect`'s pixels: Win32 rectangles leave out their right and bottom edges.
+pub fn contains(rect: &RECT, point: POINT) -> bool {
+    (rect.left..rect.right).contains(&point.x) && (rect.top..rect.bottom).contains(&point.y)
 }

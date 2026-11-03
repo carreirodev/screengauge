@@ -59,7 +59,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, Error, HSTRING, PCWSTR, w};
 
 use crate::theme::Mode;
-use crate::win32::{low_word, signed_words, struct_size};
+use crate::win32::{contains, low_word, signed_words, struct_size};
 use crate::{
     com, event, folder_picker, graphics, keyboard_hook, log, resident, settings_file, tray,
 };
@@ -675,10 +675,6 @@ fn cursor_in(hwnd: HWND) -> Option<POINT> {
         return None;
     }
     Some(point)
-}
-
-fn contains(rect: &RECT, point: POINT) -> bool {
-    (rect.left..rect.right).contains(&point.x) && (rect.top..rect.bottom).contains(&point.y)
 }
 
 /// What a click at `point` acts on, as the last paint drew it.

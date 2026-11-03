@@ -9,7 +9,7 @@
 
 use std::cell::{Cell, RefCell};
 
-use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM};
+use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{GetDpiForSystem, GetDpiForWindow, GetSystemMetricsForDpi};
 use windows::Win32::UI::Shell::{
@@ -23,7 +23,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{Error, PCWSTR, w};
 
 use crate::log;
-use crate::win32::{low_word, struct_size};
+use crate::win32::{low_word, signed_words, struct_size};
 
 /// What Windows sends the resident window for the icon's clicks. With version 4, the event (such as
 /// `WM_CONTEXTMENU` for a right click) is the low word of lParam.
@@ -298,6 +298,18 @@ fn fill(buffer: &mut [u16], text: &str) -> bool {
 /// and a second one that lands on the frozen screen, which by then covers the taskbar.
 pub fn is_call(lparam: LPARAM) -> bool {
     matches!(low_word(lparam), NIN_SELECT | NIN_KEYSELECT)
+}
+
+/// Where Windows says a `CALLBACK_MESSAGE` happened, from its wParam (version 4): the cursor for a click, the icon for
+/// the keyboard, for a call (`is_call`) as for a right click. A monitor left of or above the main one has negative
+/// coordinates. Measured in WPC-325, a right click on the taskbar gives the cursor within a pixel at 150%; in WPC-329,
+/// a left click on the icon inside the hidden icons panel gives a point inside the panel.
+pub fn anchor_of(wparam: WPARAM) -> POINT {
+    let (x, y) = signed_words(wparam.0);
+    POINT {
+        x: i32::from(x),
+        y: i32::from(y),
+    }
 }
 
 /// What names the icon to Windows: its window and ID.

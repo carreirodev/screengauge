@@ -32,8 +32,8 @@ use crate::settings_file::{self, SettingsFile};
 use crate::start_with_windows;
 use crate::win32::{low_word, struct_size};
 use crate::{
-    capture, clipboard, event, folder_picker, global_shortcut, graphics, log, png, save_as,
-    settings_window, snip_file, theme, tray, tray_menu,
+    capture, clipboard, event, folder_picker, global_shortcut, graphics, hidden_icons_panel, log,
+    png, save_as, settings_window, snip_file, theme, tray, tray_menu,
 };
 
 /// The resident window's class, which a copy opened again looks for to call the running copy.
@@ -131,7 +131,7 @@ pub fn run(
     }
     // At sign-in ScreenGauge starts hidden, its tools closed until a call (WPC-326).
     if started_by == StartedBy::User {
-        post_call(hwnd);
+        post_call(hwnd, None);
     }
     // After the call, so a notification from startup, such as the damaged settings file, never lands in its photo;
     // when the call opened the tools, it waits for them to close.
@@ -166,12 +166,12 @@ extern "system" fn window_proc(
             // Explorer sends this message and waits for the answer, so the call is posted and answered at once: the
             // photo is taken once the click is over, with only the icon's highlight left of it.
             if tray::is_call(lparam) {
-                post_call(hwnd);
+                post_call(hwnd, Some(wparam));
             }
             // A right click, or the menu key while the keyboard is on the icon, opens its menu (WPC-325). Explorer
             // waits for the answer, but the menu is modeless: it opens and the answer goes at once.
             if low_word(lparam) == WM_CONTEXTMENU {
-                open_tray_menu(hwnd, tray_menu::anchor_of(wparam));
+                open_tray_menu(hwnd, tray::anchor_of(wparam));
             }
             LRESULT(0)
         }
@@ -268,6 +268,13 @@ extern "system" fn window_proc(
             LRESULT(0)
         }
         _ if message == CALL.load(Ordering::Relaxed) => {
+            // A click on the tray icon inside the hidden icons panel leaves the panel open: it goes before the photo
+            // (WPC-329). Hidden here, not while Explorer waits for the icon's message to be answered. Only the tray
+            // icon's call hides it: through the global shortcut, a panel the user opened is in the photo like anything
+            // else open.
+            if let Some(anchor) = tray_anchor(wparam, lparam) {
+                hidden_icons_panel::hide_holding(anchor);
+            }
             on_call(hwnd, Input::Called);
             LRESULT(0)
         }
@@ -578,19 +585,28 @@ fn save_remembered(remembered: Remembered) {
     }
 }
 
-/// Posts the call to this copy's own resident window, which handles it once the message being handled is answered.
-fn post_call(resident: HWND) {
-    // SAFETY: our own window; the message carries nothing.
-    if let Err(e) = unsafe {
-        PostMessageW(
-            Some(resident),
-            CALL.load(Ordering::Relaxed),
-            WPARAM(0),
-            LPARAM(0),
-        )
-    } {
+/// Posts the call to this copy's own resident window, which handles it once the message being handled is answered. A
+/// call from the tray icon carries the icon's wParam, which says where it was clicked; startup's carries nothing.
+fn post_call(resident: HWND, from_tray: Option<WPARAM>) {
+    let (wparam, lparam) = from_tray.map_or((WPARAM(0), LPARAM(0)), tray_call);
+    let message = CALL.load(Ordering::Relaxed);
+    // SAFETY: our own window; the message carries two numbers.
+    if let Err(e) = unsafe { PostMessageW(Some(resident), message, wparam, lparam) } {
         log::failure("call: posting it", &e);
     }
+}
+
+/// The wParam of a `CALL` from the tray icon. Startup and a copy opened again post 0.
+const FROM_TRAY: usize = 1;
+
+/// The wParam and lParam of a `CALL` from the tray icon, whose own message had `anchor` for wParam.
+fn tray_call(anchor: WPARAM) -> (WPARAM, LPARAM) {
+    (WPARAM(FROM_TRAY), LPARAM(anchor.0.cast_signed()))
+}
+
+/// Where the tray icon was clicked, for a `CALL` from it (`tray_call`); `None` for any other call.
+fn tray_anchor(wparam: WPARAM, lparam: LPARAM) -> Option<POINT> {
+    (wparam.0 == FROM_TRAY).then(|| tray::anchor_of(WPARAM(lparam.0.cast_unsigned())))
 }
 
 /// For a copy opened while another runs: calls the running copy. Only the program the user just opened may bring a
@@ -722,6 +738,23 @@ mod tests {
         assert!(received, "the running copy received no call");
         // SAFETY: the test's own window, on the thread that created it.
         unsafe { DestroyWindow(running) }.expect("DestroyWindow");
+    }
+
+    #[test]
+    fn a_call_from_the_tray_icon_carries_where_it_was_clicked() {
+        // The icon's wParam for a click at (-1200, 2100), on a monitor left of the main one: x in the low word, y in
+        // the high word.
+        let (wparam, lparam) = tray_call(WPARAM(0x0834_FB50));
+        assert_eq!(
+            tray_anchor(wparam, lparam),
+            Some(POINT { x: -1200, y: 2100 })
+        );
+    }
+
+    #[test]
+    fn a_call_from_startup_or_a_copy_opened_again_carries_no_place() {
+        // What both post: nothing.
+        assert_eq!(tray_anchor(WPARAM(0), LPARAM(0)), None);
     }
 
     #[test]

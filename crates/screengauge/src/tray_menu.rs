@@ -98,21 +98,9 @@ pub fn register_class(instance: HINSTANCE) -> windows::core::Result<()> {
     Ok(())
 }
 
-/// Where Windows says a right click on the tray icon happened, from the wParam of its `WM_CONTEXTMENU` (version 4): the
-/// cursor for a click, the icon for the keyboard. A monitor left of or above the main one has negative coordinates.
-/// Windows documents coordinates only for the mouse messages; measured in WPC-325, a right click on the taskbar gives
-/// the cursor within a pixel at 150%.
-pub fn anchor_of(wparam: WPARAM) -> POINT {
-    let (x, y) = signed_words(wparam.0);
-    POINT {
-        x: i32::from(x),
-        y: i32::from(y),
-    }
-}
-
-/// Opens the menu for a click at `anchor`, in `mode`'s palette, at the scale of the click's monitor, with "Start with
-/// Windows" `checked` or not, and gives it the front, so a click anywhere else closes it. A menu already open closes
-/// first. The item chosen goes to `resident`.
+/// Opens the menu for a click at `anchor` (`tray::anchor_of`), in `mode`'s palette, at the scale of the click's
+/// monitor, with "Start with Windows" `checked` or not, and gives it the front, so a click anywhere else closes it. A
+/// menu already open closes first. The item chosen goes to `resident`.
 pub fn open(resident: HWND, anchor: POINT, mode: Mode, checked: bool) -> windows::core::Result<()> {
     close();
     let (work, dpi) = monitor_at(anchor)?;
