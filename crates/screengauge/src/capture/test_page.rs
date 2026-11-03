@@ -1,7 +1,6 @@
 //! The test page's captures (v1 spec WPC-296, test layer 1; ticket WPC-331): `test-page/test-page.html`, drawn by
 //! Chrome on the owner's monitors and photographed through ScreenGauge's own capture, cropped to the page alone, and
 //! kept in `test-page/captures/` for the tests without a screen. `test-page/README.md` records how they were taken.
-
 //!
 //! The capture program is the ignored test below, so neither CI nor the pre-commit hook runs it: neither has a real
 //! monitor. It opens a Chrome of its own, puts the page on every monitor in turn, and writes each monitor's capture.
@@ -33,7 +32,7 @@ use crate::png;
 const PAGE_WIDTH: u32 = 1200;
 const PAGE_HEIGHT: u32 = 720;
 /// Around the stage, pure magenta (#FF00FF), which nothing on the stage is: blue, green, red, as a photo's pixels are.
-const OUTSIDE: [u8; 3] = [0xFF, 0x00, 0xFF];
+const MAGENTA: [u8; 3] = [0xFF, 0x00, 0xFF];
 
 /// The page alone, cropped from `image`, the photo of a monitor at `scale` where Chrome shows it at 100% zoom: the one
 /// rectangle of the page's size at that scale with magenta all around it and none inside. Anything else is refused,
@@ -45,8 +44,8 @@ fn page_in(image: &Image, scale: Scale) -> Result<Image, String> {
             scale.dpi()
         )
     })?;
-    let (left, top) = find(image, width, height)?;
-    if let Some((x, y)) = first_outside(image, left, top, width, height) {
+    let (left, top) = find_page(image, width, height)?;
+    if let Some((x, y)) = first_magenta(image, left, top, width, height) {
         return Err(format!(
             "the page of {width} × {height} at ({left}, {top}) has magenta inside, at ({x}, {y}) of the photo, which \
              test-page.html never draws there"
@@ -67,7 +66,7 @@ fn page_size(scale: Scale) -> Option<(u32, u32)> {
 
 /// The top-left corner of the one `width` × `height` rectangle of `image` whose ring of the pixels just around it is
 /// all magenta, and whose own corner isn't.
-fn find(image: &Image, width: u32, height: u32) -> Result<(u32, u32), String> {
+fn find_page(image: &Image, width: u32, height: u32) -> Result<(u32, u32), String> {
     let (photo_width, photo_height) = (image.width(), image.height());
     let wanted = format!("page of {width} × {height} with magenta all around it");
     if photo_width < width + 2 || photo_height < height + 2 {
@@ -75,15 +74,15 @@ fn find(image: &Image, width: u32, height: u32) -> Result<(u32, u32), String> {
             "the photo, {photo_width} × {photo_height}, is too small for a {wanted}"
         ));
     }
-    let outside = |x, y| is_outside(image, x, y);
+    let magenta = |x, y| is_magenta(image, x, y);
     let mut found = Vec::new();
     for top in 1..photo_height - height {
         for left in 1..photo_width - width {
-            if outside(left - 1, top - 1)
-                && outside(left - 1, top)
-                && outside(left, top - 1)
-                && !outside(left, top)
-                && ringed(image, left, top, width, height)
+            if magenta(left - 1, top - 1)
+                && magenta(left - 1, top)
+                && magenta(left, top - 1)
+                && !magenta(left, top)
+                && ringed_by_magenta(image, left, top, width, height)
             {
                 found.push((left, top));
             }
@@ -100,14 +99,14 @@ fn find(image: &Image, width: u32, height: u32) -> Result<(u32, u32), String> {
 }
 
 /// Whether every pixel just around the `width` × `height` rectangle at (`left`, `top`) is magenta.
-fn ringed(image: &Image, left: u32, top: u32, width: u32, height: u32) -> bool {
+fn ringed_by_magenta(image: &Image, left: u32, top: u32, width: u32, height: u32) -> bool {
     let (right, bottom) = (left + width, top + height);
-    (left - 1..=right).all(|x| is_outside(image, x, top - 1) && is_outside(image, x, bottom))
-        && (top..bottom).all(|y| is_outside(image, left - 1, y) && is_outside(image, right, y))
+    (left - 1..=right).all(|x| is_magenta(image, x, top - 1) && is_magenta(image, x, bottom))
+        && (top..bottom).all(|y| is_magenta(image, left - 1, y) && is_magenta(image, right, y))
 }
 
 /// The first magenta pixel inside the `width` × `height` rectangle at (`left`, `top`), row by row, if any.
-fn first_outside(
+fn first_magenta(
     image: &Image,
     left: u32,
     top: u32,
@@ -116,12 +115,16 @@ fn first_outside(
 ) -> Option<(u32, u32)> {
     (top..top + height)
         .flat_map(|y| (left..left + width).map(move |x| (x, y)))
-        .find(|&(x, y)| is_outside(image, x, y))
+        .find(|&(x, y)| is_magenta(image, x, y))
 }
 
-fn is_outside(image: &Image, x: u32, y: u32) -> bool {
-    let [blue, green, red, _] = image.pixels()[pixel_index(image, x, y)];
-    [blue, green, red] == OUTSIDE
+fn is_magenta(image: &Image, x: u32, y: u32) -> bool {
+    bgr(image.pixels()[pixel_index(image, x, y)]) == MAGENTA
+}
+
+/// A pixel's blue, green and red, without the fourth byte, which says nothing.
+fn bgr([blue, green, red, _]: [u8; 4]) -> [u8; 3] {
+    [blue, green, red]
 }
 
 fn pixel_index(image: &Image, x: u32, y: u32) -> usize {
@@ -140,6 +143,46 @@ fn crop(image: &Image, left: u32, top: u32, width: u32, height: u32) -> Image {
         })
         .collect();
     Image::new(width, height, bgra).expect("whole rows of the crop's width")
+}
+
+/// `card-200x120` of test-page.html: its place and size on the stage in CSS px, and its color, blue, green, red.
+const BLUE_CARD: (u32, u32, u32, u32) = (24, 24, 200, 120);
+const BLUE: [u8; 3] = [0xFF, 0x90, 0x1E];
+const WHITE: [u8; 3] = [0xFF, 0xFF, 0xFF];
+
+/// Whether `page`, cropped at `scale`, shows what test-page.html draws where nothing else can be: every pixel of its
+/// edge white, and `card-200x120` exactly in place, every pixel blue, with white just around it. The magenta ring
+/// proves nothing covers the page's sides; this catches a window, tooltip or notification inside them that reaches the
+/// page's edge or its first card, and Chrome drawing the page at another size or in other colors.
+fn drawn_as_the_page(page: &Image, scale: Scale) -> Result<(), String> {
+    let (width, height) = (page.width(), page.height());
+    let color = |x, y| bgr(page.pixels()[pixel_index(page, x, y)]);
+    let edge = (0..width)
+        .flat_map(|x| [(x, 0), (x, height - 1)])
+        .chain((0..height).flat_map(|y| [(0, y), (width - 1, y)]));
+    if let Some((x, y)) = edge.into_iter().find(|&(x, y)| color(x, y) != WHITE) {
+        return Err(format!(
+            "the page's edge isn't white at ({x}, {y}): something covers the page"
+        ));
+    }
+    let physical = |css: u32| css * scale.dpi() / 96;
+    let (left, top, card_width, card_height) = BLUE_CARD;
+    let (left, top) = (physical(left), physical(top));
+    let (right, bottom) = (left + physical(card_width), top + physical(card_height));
+    for y in top - 1..=bottom {
+        for x in left - 1..=right {
+            let inside = (left..right).contains(&x) && (top..bottom).contains(&y);
+            let wanted = if inside { BLUE } else { WHITE };
+            if color(x, y) != wanted {
+                return Err(format!(
+                    "card-200x120 isn't blue from ({left}, {top}) to ({right}, {bottom}) with white around it: \
+                     ({x}, {y}) is {:02X?}",
+                    color(x, y)
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// A capture's file name: the monitor's resolution and its scale, such as `3840x2160-175.png`. `None` at a scale that
@@ -165,7 +208,7 @@ fn parse_file_name(name: &str) -> Option<(u32, u32, Scale)> {
 }
 
 /// The repository's `test-page` folder.
-fn folder() -> PathBuf {
+fn test_page_folder() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
@@ -206,7 +249,7 @@ impl Chrome {
             std::fs::remove_dir_all(&profile)
                 .expect("the last run's Chrome profile is removed, so the profile is new");
         }
-        let page = folder().join("test-page.html");
+        let page = test_page_folder().join("test-page.html");
         assert!(page.is_file(), "{} is missing", page.display());
         let url = format!(
             "file:///{}",
@@ -356,7 +399,9 @@ fn photograph_page(index: usize, monitor: &Monitor) -> Result<(Image, String), S
                 "the photo's colors are approximate, since HDR is on and its brightening couldn't be undone",
             ));
         }
-        match page_in(&photo.image, monitor.scale) {
+        let page = page_in(&photo.image, monitor.scale)
+            .and_then(|page| drawn_as_the_page(&page, monitor.scale).map(|()| page));
+        match page {
             Ok(page) if last.as_ref() == Some(&page) => return Ok((page, how)),
             Ok(page) => last = Some(page),
             Err(e) if Instant::now() >= deadline => {
@@ -394,11 +439,7 @@ fn write_capture(path: &Path, page: &Image) -> &'static str {
         .map(|bytes| pixels_of(&png::read_back::decode(&bytes)));
     let bytes = png::encode(page).expect("the page as a PNG");
     std::fs::write(path, bytes).expect("the capture is written");
-    let now: Vec<[u8; 3]> = page
-        .pixels()
-        .iter()
-        .map(|&[b, g, r, _]| [b, g, r])
-        .collect();
+    let now: Vec<[u8; 3]> = page.pixels().iter().copied().map(bgr).collect();
     match before {
         None => "new",
         Some(before) if before == now => "the same pixels as the file that was there",
@@ -408,7 +449,7 @@ fn write_capture(path: &Path, page: &Image) -> &'static str {
 
 /// A read-back PNG's pixels, as blue, green, red.
 fn pixels_of(decoded: &png::read_back::Decoded) -> Vec<[u8; 3]> {
-    decoded.bgra.iter().map(|&[b, g, r, _]| [b, g, r]).collect()
+    decoded.bgra.iter().copied().map(bgr).collect()
 }
 
 /// Chrome's version, from its file's version resource.
@@ -447,7 +488,7 @@ fn capture_the_test_page() {
         super::self_check::per_monitor_v2(),
         "the test program isn't Per-Monitor V2, so its pixels wouldn't be physical: the manifest didn't reach it"
     );
-    let captures = folder().join("captures");
+    let captures = test_page_folder().join("captures");
     std::fs::create_dir_all(&captures).expect("the captures folder");
     let mut chrome = Chrome::start();
     let window = chrome.window();
@@ -501,8 +542,6 @@ fn capture_the_test_page() {
 mod tests {
     use super::*;
 
-    const WHITE: [u8; 3] = [0xFF, 0xFF, 0xFF];
-
     /// A photo of `width` × `height`, all magenta, with a white page of `page` = (width, height) at `at`, its pixels
     /// varied so a crop off by one shows, and `then` applied to it as (x, y, blue-green-red) changes.
     fn photo(
@@ -511,7 +550,7 @@ mod tests {
         page: (u32, u32),
         then: &[(u32, u32, [u8; 3])],
     ) -> Image {
-        let mut pixels = vec![OUTSIDE; usize::try_from(width * height).expect("a small photo")];
+        let mut pixels = vec![MAGENTA; usize::try_from(width * height).expect("a small photo")];
         for y in 0..page.1 {
             for x in 0..page.0 {
                 let shade = u8::try_from((x * 7 + y * 3) % 200).expect("under 200");
@@ -534,8 +573,49 @@ mod tests {
 
     /// The pixel at (x, y) of `image`, as blue, green, red.
     fn at(image: &Image, x: u32, y: u32) -> [u8; 3] {
-        let [blue, green, red, _] = image.pixels()[index(image.width(), x, y)];
-        [blue, green, red]
+        bgr(image.pixels()[pixel_index(image, x, y)])
+    }
+
+    /// The page as test-page.html draws it at 125%, as far as [`drawn_as_the_page`] looks: white, with the blue card
+    /// `card-200x120` at (30, 30) and 250 × 150, moved down by `shift` rows, and `then` applied as (x, y, blue-green-red).
+    fn page_at_125(shift: u32, then: &[(u32, u32, [u8; 3])]) -> Image {
+        // Written out, not taken from BLUE: #1E90FF as blue, green, red.
+        let blue = [0xFF, 0x90, 0x1E];
+        let mut pixels = vec![WHITE; 1500 * 900];
+        for y in 30 + shift..180 + shift {
+            for x in 30..280 {
+                pixels[index(1500, x, y)] = blue;
+            }
+        }
+        for &(x, y, color) in then {
+            pixels[index(1500, x, y)] = color;
+        }
+        let bgra = pixels
+            .into_iter()
+            .flat_map(|[b, g, r]| [b, g, r, 0])
+            .collect();
+        Image::new(1500, 900, bgra).expect("the pixels fill the page")
+    }
+
+    #[test]
+    fn a_white_page_with_the_blue_card_in_place_is_drawn_as_the_page() {
+        assert_eq!(drawn_as_the_page(&page_at_125(0, &[]), at_125()), Ok(()));
+    }
+
+    #[test]
+    fn a_window_on_the_pages_edge_shows_as_not_white() {
+        // A notification or tooltip in the page's corner, inside the magenta ring, would leave its own colors there.
+        let covered = page_at_125(0, &[(1499, 899, [0x20, 0x20, 0x20])]);
+        let refused = drawn_as_the_page(&covered, at_125()).expect_err("a dark corner");
+        assert!(refused.contains("(1499, 899)"), "{refused}");
+    }
+
+    #[test]
+    fn a_blue_card_a_row_off_or_with_a_wrong_pixel_is_refused() {
+        assert!(drawn_as_the_page(&page_at_125(1, &[]), at_125()).is_err());
+        let spotted = page_at_125(0, &[(100, 100, [0xFF, 0x90, 0x1F])]);
+        let refused = drawn_as_the_page(&spotted, at_125()).expect_err("one wrong pixel");
+        assert!(refused.contains("card-200x120"), "{refused}");
     }
 
     fn at_125() -> Scale {
@@ -578,7 +658,7 @@ mod tests {
     #[test]
     fn magenta_inside_the_page_makes_it_refused() {
         // Nothing on the page is magenta, so a page with some isn't the page as test-page.html draws it.
-        let image = photo((1600, 1000), (20, 30), (1500, 900), &[(800, 500, OUTSIDE)]);
+        let image = photo((1600, 1000), (20, 30), (1500, 900), &[(800, 500, MAGENTA)]);
         let refused = page_in(&image, at_125()).expect_err("magenta inside");
         assert!(refused.contains("(800, 500)"), "{refused}");
     }
@@ -621,7 +701,7 @@ mod tests {
     #[test]
     fn the_repository_holds_the_three_captures_and_nothing_else() {
         // Only the page's captures may enter the public repository: a stray file could be a capture of anything.
-        let mut names: Vec<String> = std::fs::read_dir(folder().join("captures"))
+        let mut names: Vec<String> = std::fs::read_dir(test_page_folder().join("captures"))
             .expect("test-page/captures")
             .map(|entry| {
                 entry
@@ -642,7 +722,8 @@ mod tests {
         crate::com::ensure_started().expect("COM starts on a test thread");
         for name in CAPTURES {
             let (_, _, scale) = parse_file_name(name).expect("a capture's name");
-            let bytes = std::fs::read(folder().join("captures").join(name)).expect("the capture");
+            let bytes =
+                std::fs::read(test_page_folder().join("captures").join(name)).expect("the capture");
             let decoded = png::read_back::decode(&bytes);
             assert_eq!(
                 Some((decoded.width, decoded.height)),
@@ -653,9 +734,16 @@ mod tests {
                 decoded.stored_as_24_bit_color,
                 "{name}: opaque 24-bit color"
             );
+            let page = Image::new(
+                decoded.width,
+                decoded.height,
+                decoded.bgra.iter().flatten().copied().collect(),
+            )
+            .expect("the pixels fill the capture");
+            assert_eq!(drawn_as_the_page(&page, scale), Ok(()), "{name}");
             // Not one pixel of the magenta around the page: the crop kept the page alone.
             assert!(
-                !pixels_of(&decoded).contains(&OUTSIDE),
+                !pixels_of(&decoded).contains(&MAGENTA),
                 "{name} holds magenta, from outside the page"
             );
         }
@@ -663,7 +751,8 @@ mod tests {
 
     #[test]
     fn test_page_html_draws_the_stage_at_the_size_the_crop_looks_for() {
-        let html = std::fs::read_to_string(folder().join("test-page.html")).expect("the page");
+        let html =
+            std::fs::read_to_string(test_page_folder().join("test-page.html")).expect("the page");
         let stage = html
             .split_once("#stage {")
             .and_then(|(_, rest)| rest.split_once('}'))
@@ -684,7 +773,15 @@ mod tests {
             .expect("the page's body")
             .1
             .to_lowercase();
-        for magenta in ["ff00ff", "#f0f", "magenta", "fuchsia", "255, 0, 255"] {
+        for magenta in [
+            "ff00ff",
+            "#f0f",
+            "magenta",
+            "fuchsia",
+            "255, 0, 255",
+            "255,0,255",
+            "hsl(300",
+        ] {
             assert!(!body.contains(magenta), "the stage has {magenta}");
         }
     }

@@ -12,8 +12,8 @@
   - no web font, image, animation, hover style or caret, so the page draws the same each time and needs no network.
 
   Each case has an id, and its place and size on the stage are written in its own style, in CSS px from the stage's
-  top-left corner: this file is the list of cases. Places at odd values are on purpose, so their edges fall between
-  physical pixels at 125% and 175%.
+  top-left corner: this file is the list of cases. Places and sizes at odd values are on purpose: at 125% and 175% they
+  would fall between physical pixels, and the captures show where Chrome puts them instead.
 -->
 <html lang="en" translate="no">
 <head>
@@ -61,7 +61,7 @@
   <!-- Two blue cards with a white strip of 24 CSS px between them. -->
   <div id="card-gap-24-left" style="left: 248px; top: 24px; width: 96px; height: 120px; background: #1E90FF"></div>
   <div id="card-gap-24-right" style="left: 368px; top: 24px; width: 96px; height: 120px; background: #1E90FF"></div>
-  <!-- Off the physical pixel grid at 125% and 175%, in place and in size. -->
+  <!-- Off the physical pixel grid at 125% and 175%, in place and in size: Chrome snaps it to whole pixels. -->
   <div id="card-75x45-offgrid" style="left: 489px; top: 29px; width: 75px; height: 45px; background: #1E90FF"></div>
   <div id="card-rounded" style="left: 588px; top: 24px; width: 160px; height: 120px; background: #2E7D32; border-radius: 16px"></div>
   <div id="card-outlined" style="left: 772px; top: 24px; width: 160px; height: 120px; background: #FFFFFF; border: 1px solid #D0D0D0"></div>
