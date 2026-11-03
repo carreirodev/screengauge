@@ -31,8 +31,8 @@ const PAD: u32 = 6;
 const STRIP_TOP: u32 = 7;
 const STRIP_SIDE: u32 = 4;
 const STRIP_BOTTOM: u32 = 2;
-/// The height of one line of the strip, in tenths of a logical pixel: CSS's 12px text at a line height of 1.35.
-const LINE_TENTHS: u32 = 162;
+/// The height of one line of the strip, in hundredths of a logical pixel: CSS's 12px text at a line height of 1.35.
+const LINE_HUNDREDTHS: u32 = 1620;
 /// The room between X and Y when they share a line (the grid's `gap: 0 8px`).
 const COLUMN_GAP: u32 = 8;
 /// The room between the cursor's position and the color's row under it (the row's `margin-top: 5px`).
@@ -49,7 +49,8 @@ const NOTICE_LINE_HUNDREDTHS: u32 = 1485;
 const NOTICE_SIGN: u32 = 13;
 const NOTICE_SIGN_GAP: u32 = 5;
 /// What the notice says, a line each (the owner's choice in WPC-328).
-const NOTICE_TEXT: [&str; 2] = ["Approximate color", "(HDR on)"];
+const NOTICE_FIRST: &str = "Approximate color";
+const NOTICE_SECOND: &str = "(HDR on)";
 
 /// The lowest magnification with a grid between the enlarged pixels.
 const GRID_FROM: Magnification = Magnification::X8;
@@ -98,7 +99,7 @@ pub(super) fn magnified_view(
 
     let side = across.saturating_mul(factor);
     let inset = scaled(RING, dpi) + scaled(PAD, dpi);
-    let line = line_height(dpi);
+    let line = line_height(LINE_HUNDREDTHS, dpi);
     let lines = if stacked { 2 } else { 1 };
     let swatch_side = scaled(SWATCH, dpi);
     let color_lines = if second.is_some() { 2 } else { 1 };
@@ -107,9 +108,9 @@ pub(super) fn magnified_view(
     // The notice shows only on a monitor whose photo didn't come through the exact path (v1 spec WPC-296, Colors and
     // HDR): the photo's mark already says HDR is on there.
     let approximate = photo.colors == Colors::Approximate;
-    let notice_line = notice_line_height(dpi);
+    let notice_line = line_height(NOTICE_LINE_HUNDREDTHS, dpi);
     let notice_row = notice_line * 2;
-    let notice = if approximate {
+    let notice_height = if approximate {
         scaled(NOTICE_GAP, dpi) + notice_row
     } else {
         0
@@ -118,7 +119,7 @@ pub(super) fn magnified_view(
         + lines * line
         + scaled(COLOR_GAP, dpi)
         + row
-        + notice
+        + notice_height
         + scaled(STRIP_BOTTOM, dpi);
     let width = inset + side + inset;
     let height = inset + side + strip + inset;
@@ -205,11 +206,11 @@ pub(super) fn magnified_view(
             .saturating_add_unsigned(row)
             .saturating_add_unsigned(scaled(NOTICE_GAP, dpi));
         let sign_side = scaled(NOTICE_SIGN, dpi);
-        let beside = sign_side + scaled(NOTICE_SIGN_GAP, dpi);
-        let first = Rect {
-            left: text_left.saturating_add_unsigned(beside),
+        let after_sign = sign_side + scaled(NOTICE_SIGN_GAP, dpi);
+        let first_notice_line = Rect {
+            left: text_left.saturating_add_unsigned(after_sign),
             top,
-            width: text_width.saturating_sub(beside),
+            width: text_width.saturating_sub(after_sign),
             height: notice_line,
         };
         ApproximateColor {
@@ -221,14 +222,14 @@ pub(super) fn magnified_view(
             },
             lines: [
                 NoticeLine {
-                    text: NOTICE_TEXT[0],
-                    line: first,
+                    text: NOTICE_FIRST,
+                    line: first_notice_line,
                 },
                 NoticeLine {
-                    text: NOTICE_TEXT[1],
+                    text: NOTICE_SECOND,
                     line: Rect {
                         top: top.saturating_add_unsigned(notice_line),
-                        ..first
+                        ..first_notice_line
                     },
                 },
             ],
@@ -277,17 +278,10 @@ fn pixels_across(dpi: u32, magnification: Magnification) -> u32 {
     odd.max(FEWEST)
 }
 
-/// The height of a line of the strip on a monitor of `dpi`, in whole physical pixels, halves up.
-fn line_height(dpi: u32) -> u32 {
-    LINE_TENTHS.saturating_mul(dpi).saturating_add(480) / 960
-}
-
-/// The height of a line of the Approximate color notice on a monitor of `dpi`, in whole physical pixels, halves up.
-fn notice_line_height(dpi: u32) -> u32 {
-    NOTICE_LINE_HUNDREDTHS
-        .saturating_mul(dpi)
-        .saturating_add(4800)
-        / 9600
+/// The height of a line `hundredths` hundredths of a logical pixel tall on a monitor of `dpi`, in whole physical pixels,
+/// halves up.
+fn line_height(hundredths: u32, dpi: u32) -> u32 {
+    hundredths.saturating_mul(dpi).saturating_add(4800) / 9600
 }
 
 /// Where the panel, `size` physical pixels along one axis, starts on that axis, with the cursor at `cursor` on a monitor

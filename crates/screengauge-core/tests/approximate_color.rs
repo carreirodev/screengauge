@@ -6,11 +6,12 @@
 
 use std::time::Duration;
 
+use screengauge_core::session::toolbar;
 use screengauge_core::session::{
     ApproximateColor, Colors, Effect, Event, Held, Image, Input, LocalTime, MagnifiedView, Message,
-    NoticeLine, Opening, Photo, Point, Rect, Scale, Session,
+    NoticeLine, Opening, Photo, Point, Rect, Scale, Session, ToolbarButton,
 };
-use screengauge_core::settings::{Options, Remembered, Tool};
+use screengauge_core::settings::{Options, Remembered, Tool, ToolbarPlace};
 
 /// Windows' main monitor, Full HD, whose photo came through the exact path.
 const EXACT: Rect = Rect {
@@ -237,4 +238,28 @@ fn at_150_percent_every_size_of_the_notice_is_scaled_on_its_own() {
     assert_eq!(notice.lines[1].line, rect(2898, 829 + 22, 224, 22));
     // 11 + 264 + 11 + 2 × 24 + 8 + 2 × 24, then 6 + 2 × 22 for the notice, and 3 + 11.
     assert_eq!(view.panel.height, 454);
+}
+
+#[test]
+fn paused_on_the_toolbar_on_the_exact_monitor_the_view_and_its_notice_stay_on_the_approximate_one()
+{
+    // The tools opened on the exact monitor, so the toolbar is there. On it Inspect pauses, and the view stays where the
+    // cursor last was off it (the owner's choice in WPC-311): on the approximate monitor, whose color it still shows, so
+    // the notice stays with it.
+    let mut session = open(both(), Tool::Inspect, ON_EXACT);
+    session.handle(event(1000, ON_APPROXIMATE, Input::Move));
+    let before = view(&session);
+    assert!(before.approximate_color.is_some());
+    let (_, button) = toolbar::layout_on(EXACT, Scale::HUNDRED_PERCENT, ToolbarPlace::default())
+        .buttons
+        .into_iter()
+        .find(|(each, _)| *each == ToolbarButton::Tool(Tool::Snip))
+        .expect("every button has a place");
+    let on_toolbar = Point {
+        x: button.left + button.width.cast_signed() / 2,
+        y: button.top + button.height.cast_signed() / 2,
+    };
+    session.handle(event(1100, on_toolbar, Input::Move));
+    assert_eq!(session.scene().toolbar.monitor, 0);
+    assert_eq!(view(&session), before);
 }

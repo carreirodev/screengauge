@@ -4,14 +4,14 @@
 //! whose photo didn't come through the exact path, the Approximate color notice. Every rectangle comes from the session
 //! core's [`MagnifiedView`]; this only draws them onto the overlay's render target.
 //!
-//! The prototype's `drawMag` and its CSS (`.panel`, `.magframe`, `.magtag`, `.info`, `.sw`, `.hdr`) are the model. Where the
-//! core hands over a rectangle, it is used as it is; the rest of the sizes below are the prototype's, in logical
-//! pixels, which `scaled` turns into physical pixels for the monitor's scale, each one on its own.
+//! The prototype's `drawMag` and its CSS (`.panel`, `.magframe`, `.magtag`, `.info`, `.sw`, `.hdr`) are the
+//! model. Where the core hands over a rectangle, it is used as it is; the rest of the sizes below are the prototype's,
+//! in logical pixels, which `scaled` turns into physical pixels for the monitor's scale, each one on its own.
 
 use std::mem::ManuallyDrop;
 
 use screengauge_core::session::{
-    ApproximateColor, ColorText, Coordinate, MagnifiedView, PixelColor, Sign,
+    ApproximateColor, ColorText, Coordinate, MagnifiedView, NoticeLine, PixelColor, Rect, Sign,
 };
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::Win32::Graphics::Direct2D::{
@@ -41,9 +41,10 @@ const FRAME_RADIUS: u32 = 9;
 /// How much of the notice's shadow this panel casts. The notice's layers are fitted to a shadow box 15px tall (the
 /// notice's 31px less the spread of 8 on each side). This panel is up to 190 by 303 logical pixels (a frame of 176 or
 /// less, a strip of 113 at most, the position and the color on two lines each and the Approximate color notice's two
-/// under them), so its box is up to 174 by 287: as good as an edge, as far as a blur of sigma 14 (dark) or 13 (light) can tell. A box that tall casts a shadow stronger
-/// than the layers give at full strength, so they are made stronger, as the tolerance indicator's, a lower panel than
-/// the notice, makes them fainter (see `SHADOW_STRENGTH` in `tolerance`).
+/// under them), so its box is up to 174 by 287: as good as an edge, as far as a blur of sigma 14 (dark) or 13 (light)
+/// can tell. A box that tall casts a shadow stronger than the layers give at full strength, so they are made stronger,
+/// as the tolerance indicator's, a lower panel than the notice, makes them fainter (see `SHADOW_STRENGTH` in
+/// `tolerance`).
 ///
 /// Fitted by least squares, the layers laid over each other as Direct2D lays them, against CSS's true blur of the box
 /// (`0 10px 28px -8px` at .75 in the dark palette, `0 10px 26px -8px` at .45 in the light one, sigma half the blur),
@@ -534,15 +535,7 @@ impl Overlay {
     /// prototype's `.v`, and the one under it medium, its `.dm`.
     fn color(&self, color: &PixelColor) -> windows::core::Result<PlacedColor> {
         let place = |text: &ColorText, format: &IDWriteTextFormat| {
-            let typeset = self.typeset(&text.text, format)?;
-            let line = geometry::bounds(text.line)?;
-            let window = self.in_window(&line);
-            let baseline = typeset.baseline_in(window.top, px(line.bottom - line.top));
-            Ok::<_, Error>(PlacedText {
-                left: window.left,
-                top: baseline - typeset.baseline,
-                layout: typeset.layout,
-            })
+            self.placed_in(self.typeset(&text.text, format)?, text.line)
         };
         Ok(PlacedColor {
             swatch: self.shaped(
@@ -567,21 +560,28 @@ impl Overlay {
     /// figures.
     fn approximate(&self, notice: &ApproximateColor) -> windows::core::Result<PlacedApproximate> {
         let sign = self.in_window(&geometry::bounds(notice.sign)?);
-        let place = |index: usize| {
-            let line = &notice.lines[index];
-            let typeset = self.typeset_plain(line.text, &self.approximate_format)?;
-            let bounds = geometry::bounds(line.line)?;
-            let window = self.in_window(&bounds);
-            let baseline = typeset.baseline_in(window.top, px(bounds.bottom - bounds.top));
-            Ok::<_, Error>(PlacedText {
-                left: window.left,
-                top: baseline - typeset.baseline,
-                layout: typeset.layout,
-            })
+        let place = |line: &NoticeLine| {
+            self.placed_in(
+                self.typeset_plain(line.text, &self.approximate_format)?,
+                line.line,
+            )
         };
+        let [first, second] = &notice.lines;
         Ok(PlacedApproximate {
             sign: (sign.left, sign.top),
-            lines: [place(0)?, place(1)?],
+            lines: [place(first)?, place(second)?],
+        })
+    }
+
+    /// `typeset` in `line`, its baseline on a whole pixel where it centers the text in the line the way CSS does it.
+    fn placed_in(&self, typeset: Typeset, line: Rect) -> windows::core::Result<PlacedText> {
+        let bounds = geometry::bounds(line)?;
+        let window = self.in_window(&bounds);
+        let baseline = typeset.baseline_in(window.top, px(bounds.bottom - bounds.top));
+        Ok(PlacedText {
+            left: window.left,
+            top: baseline - typeset.baseline,
+            layout: typeset.layout,
         })
     }
 
