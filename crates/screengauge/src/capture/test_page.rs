@@ -28,6 +28,8 @@ use windows::core::{BOOL, PCWSTR, w};
 use super::{Monitor, Shot, every_shot, monitors};
 use crate::png;
 
+mod answers;
+
 /// The page's stage, in CSS px, as test-page.html sizes it.
 const PAGE_WIDTH: u32 = 1200;
 const PAGE_HEIGHT: u32 = 720;

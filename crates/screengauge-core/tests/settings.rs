@@ -65,7 +65,7 @@ fn a_new_file_holds_every_default_and_nothing_else() {
             "global_shortcut = Win + Shift + X",
             "start_with_windows = false",
             "theme = Automatic",
-            "default_tolerance = 2",
+            "default_tolerance = 6",
             "also_show_logical_pixels = true",
             "color_format = Both",
             "snip_destination = Clipboard",
@@ -136,7 +136,7 @@ fn unusable(key: &'static str, value: &str) -> Reset {
 fn a_wrong_value_goes_back_to_its_default_and_the_rest_stays() {
     let text = settings::write(&changed_everywhere())
         .replace("theme = Dark", "theme = Purple")
-        .replace("default_tolerance = 17", "default_tolerance = 51")
+        .replace("default_tolerance = 17", "default_tolerance = 101")
         .replace("magnification = 32", "magnification = 3");
     let read = read(&text);
 
@@ -149,7 +149,7 @@ fn a_wrong_value_goes_back_to_its_default_and_the_rest_stays() {
         read.resets,
         [
             unusable("theme", "Purple"),
-            unusable("default_tolerance", "51"),
+            unusable("default_tolerance", "101"),
             unusable("magnification", "3"),
         ]
     );
@@ -177,7 +177,7 @@ fn an_option_that_doesnt_exist_goes_back_to_its_default() {
 #[test]
 fn a_number_outside_its_limits_goes_back_to_its_default() {
     for line in [
-        "default_tolerance = 51",
+        "default_tolerance = 101",
         "default_tolerance = -1",
         "default_tolerance = 2.5",
         "magnification = 1",
@@ -204,7 +204,8 @@ fn the_limits_themselves_are_kept() {
         ToolbarPlace::new(1.0, 0.0).expect("shares")
     );
     assert_eq!(
-        settings::read(b"default_tolerance = 50").map(|read| read.stored.options.default_tolerance),
+        settings::read(b"default_tolerance = 100")
+            .map(|read| read.stored.options.default_tolerance),
         Ok(Tolerance::MAX)
     );
 }
@@ -444,15 +445,52 @@ fn a_folder_that_isnt_a_full_path_goes_back_to_its_default() {
     }
 }
 
+/// Every tolerance a notch of the mouse wheel or Settings' − / + steps through, from the lowest up (WPC-332): one by one
+/// up to 10, then five by five up to 100.
+fn steps() -> Vec<u8> {
+    (0..=10).chain((15..=100).step_by(5)).collect()
+}
+
 #[test]
-fn a_step_of_the_tolerance_is_one_and_stops_at_the_limits() {
-    // The step that a notch of the mouse wheel and Settings' − / + share (WPC-309), provisional until the calibration
-    // (WPC-332).
-    let two = Tolerance::default();
-    assert_eq!(two.up().get(), 3);
-    assert_eq!(two.down().get(), 1);
+fn the_tolerance_runs_from_0_to_100_and_starts_at_6() {
+    // Calibrated with the test page's captures and approved by the owner (WPC-332): the number is the difference of
+    // red, green or blue that Inspect shows.
+    assert_eq!(Tolerance::MIN.get(), 0);
+    assert_eq!(Tolerance::MAX.get(), 100);
+    assert_eq!(Tolerance::default().get(), 6);
+    assert_eq!(Tolerance::new(101), None);
+}
+
+#[test]
+fn a_step_up_is_one_up_to_10_then_five_and_stops_at_the_highest() {
+    let steps = steps();
+    for pair in steps.windows(2) {
+        let (from, to) = (tolerance(pair[0]), tolerance(pair[1]));
+        assert_eq!(from.up(), to, "up from {}", pair[0]);
+        assert_eq!(to.down(), from, "down from {}", pair[1]);
+    }
     assert_eq!(Tolerance::MAX.up(), Tolerance::MAX);
     assert_eq!(Tolerance::MIN.down(), Tolerance::MIN);
+}
+
+#[test]
+fn from_the_default_a_step_is_one_either_way() {
+    assert_eq!(Tolerance::default().up().get(), 7);
+    assert_eq!(Tolerance::default().down().get(), 5);
+}
+
+#[test]
+fn a_tolerance_between_two_steps_goes_to_the_next_step_either_way() {
+    // The settings file may hold any whole number from 0 to 100, such as 13: + takes it to 15 and − to 10, so every
+    // later step is on the same steps as the wheel's.
+    assert_eq!(tolerance(13).up().get(), 15);
+    assert_eq!(tolerance(13).down().get(), 10);
+    assert_eq!(tolerance(99).up(), Tolerance::MAX);
+    assert_eq!(tolerance(99).down().get(), 95);
+}
+
+fn tolerance(value: u8) -> Tolerance {
+    Tolerance::new(value).expect("within the limits")
 }
 
 #[test]
@@ -484,12 +522,12 @@ mod changes {
     #[test]
     fn minus_and_plus_step_the_default_tolerance_as_one_notch_of_the_wheel_does() {
         let mut options = Options::default();
-        assert_eq!(options.default_tolerance, tolerance(2));
+        assert_eq!(options.default_tolerance, tolerance(6));
         assert!(options.apply(Change::DefaultToleranceUp));
-        assert_eq!(options.default_tolerance, tolerance(2).up());
+        assert_eq!(options.default_tolerance, tolerance(6).up());
         assert!(options.apply(Change::DefaultToleranceDown));
         assert!(options.apply(Change::DefaultToleranceDown));
-        assert_eq!(options.default_tolerance, tolerance(2).down());
+        assert_eq!(options.default_tolerance, tolerance(6).down());
     }
 
     #[test]
@@ -580,7 +618,7 @@ mod changes {
         options.apply(Change::AlsoShowLogicalPixels(false));
         options.apply(Change::DefaultToleranceUp);
         let wanted = Options {
-            default_tolerance: tolerance(2).up(),
+            default_tolerance: tolerance(6).up(),
             also_show_logical_pixels: false,
             color_format: ColorFormat::Rgb,
             ..Options::default()

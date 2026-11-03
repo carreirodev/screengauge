@@ -52,4 +52,12 @@ Taken on 2026-11-03, on Windows 11 26H2 (build 26300), with Chrome **156.0.8078.
 
 Measured in the captures, Chrome put every card on whole physical pixels, with sharp edges and the page's exact colors (`#1E90FF` came out `#1E90FF`). For example, `card-200x120` is 250 × 150 at 125% and 350 × 210 at 175%. A 1 CSS px line is 1 physical pixel at 125% and 2 at 175%. A `*-device-*` line is 1 physical pixel at every scale.
 
+## The approved answers
+
+The captures calibrated the tolerance: the rule, its limits, its steps and its default, 6. ADR `docs/adr/0005-tolerance-is-the-largest-rgb-difference.md` records the numbers and the reasons (WPC-332).
+
+`crates/screengauge/src/capture/test_page/answers.rs` holds each case's answer at the default tolerance, on each capture, as the owner approved it on 2026-11-03: 19 Dimensions cases and 36 Bounds cases, 165 answers in all. The tests run every case through the session core, as the tools measure the real screen, and check that each Snip drag takes the same area as its Bounds drag. 75 of the answers are sizes the page itself sets, its CSS times the scale with each edge rounded to the nearest pixel, and match them exactly. The other 90 only a capture can answer: text, shadows, gradients, 1-pixel borders and lines of 1 physical pixel.
+
+When a change of rule or of the default tolerance changes an answer, the test fails and lists each changed answer next to the approved one. The new answers go back to the owner, and only the owner's approval writes them into the table.
+
 Only this page is ever captured here. Captures of other programs or websites never enter the repository, because it is public and such a capture could carry something personal or another company's.

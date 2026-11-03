@@ -1257,6 +1257,37 @@ mod tests {
     }
 
     #[test]
+    fn the_highest_tolerance_s_three_digits_fit_inside_the_number_s_box() {
+        // 100, the highest tolerance since WPC-332, is the widest number the box shows: its ink stays clear of the
+        // gaps beside the box, at each of the owner's scales.
+        for dpi in [96, 120, 168] {
+            let options = Options {
+                default_tolerance: screengauge_core::settings::Tolerance::MAX,
+                ..Options::default()
+            };
+            let page = drawn_with(Mode::Dark, dpi, &options, Pointer::default());
+            let minus = page.place_of(Control::ToleranceDown);
+            let plus = page.place_of(Control::ToleranceUp);
+            let inked: Vec<i32> = (minus.top..minus.bottom)
+                .flat_map(|y| (minus.right..plus.left).map(move |x| (x, y)))
+                .filter(|&(x, y)| near(page.at(x, y), controls::DARK.ink, 40))
+                .map(|(x, _)| x)
+                .collect();
+            let (first, last) = (
+                inked.iter().min().expect("ink"),
+                inked.iter().max().expect("ink"),
+            );
+            let gap = i32::try_from(scaled(controls::STEP_GAP, dpi)).expect("a small gap");
+            assert!(
+                *first > minus.right + gap && *last < plus.left - gap - 1,
+                "at {dpi} DPI the ink runs from {first} to {last}, the box from {} to {}",
+                minus.right + gap,
+                plus.left - gap - 1
+            );
+        }
+    }
+
+    #[test]
     fn plus_brightens_with_the_cursor_on_it_and_shrinks_while_held() {
         let dpi = 144;
         let options = Options::default();

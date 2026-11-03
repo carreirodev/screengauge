@@ -43,7 +43,7 @@ const STEP_RADIUS: u32 = 10;
 const NUMBER_WIDTH: u32 = 40;
 const NUMBER_HEIGHT: f32 = 14.0 * NORMAL_LINE + 10.0;
 const NUMBER_RADIUS: u32 = 8;
-const STEP_GAP: u32 = 6;
+pub(super) const STEP_GAP: u32 = 6;
 /// How much a held − or + shrinks (`.sbtn:active`).
 const PRESSED: f32 = 0.92;
 /// The number's size (`font: 700 14px`) and the sign's (`font: 700 16px/1`).

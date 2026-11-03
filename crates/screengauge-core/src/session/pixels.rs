@@ -42,9 +42,10 @@ pub(super) fn rgb([blue, green, red, _]: [u8; 4]) -> [u8; 3] {
 }
 
 /// A reference color with the tolerance it is compared at, which tells content from the same area: a pixel differs
-/// from it when one of its red, green or blue differs from the reference color's by more than three times the
-/// tolerance. The prototype's rule, provisional until the calibration (WPC-332). Worked out once, for the millions of
-/// pixels a drag of Bounds may compare with it at each move.
+/// from it when one of its red, green or blue differs from the reference color's by more than the tolerance. The
+/// calibration kept this rule over the sum of the three differences and over their distance, which told no case of
+/// the test page's captures better (WPC-332; ADR 0005). Worked out once, for the millions of pixels a drag of Bounds
+/// may compare with it at each move.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Reference {
     /// The lowest red, green and blue a pixel can have and still not differ.
@@ -56,8 +57,7 @@ pub(super) struct Reference {
 impl Reference {
     /// `color` as the reference color, compared at `tolerance`.
     pub(super) fn new(color: [u8; 3], tolerance: Tolerance) -> Reference {
-        // At most 150, as the highest tolerance is 50: a u8, kept from going past 255 all the same.
-        let limit = tolerance.get().saturating_mul(3);
+        let limit = tolerance.get();
         Reference {
             low: color.map(|channel| channel.saturating_sub(limit)),
             high: color.map(|channel| channel.saturating_add(limit)),

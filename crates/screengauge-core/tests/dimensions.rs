@@ -240,9 +240,9 @@ fn ramp() -> Photo {
 #[test]
 fn in_a_gradient_the_edge_is_the_first_pixel_too_far_from_the_reference_color_not_from_its_neighbor()
  {
-    // At the default tolerance, 2, a pixel counts as the same area while none of its red, green or blue is more than 6
-    // from the reference color's (provisional until the calibration, WPC-332). From gray 150, at column 150, the span
-    // runs from gray 144 to gray 156, 13 pixels, though no neighbor differs from the next by more than 1.
+    // At the default tolerance, 6, a pixel counts as the same area while none of its red, green or blue is more than 6
+    // from the reference color's (WPC-332). From gray 150, at column 150, the span runs from gray 144 to gray 156, 13
+    // pixels, though no neighbor differs from the next by more than 1.
     let session = open(vec![ramp()], DimensionsMode::Horizontal, at(150, 1000));
     assert_eq!(
         live(&session),

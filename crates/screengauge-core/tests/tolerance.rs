@@ -111,38 +111,38 @@ fn live_span(session: &Session) -> Option<Span> {
     session.scene().live.and_then(|live| live.horizontal)
 }
 
-// Spans from gray 150, by the provisional rule of WPC-332: a pixel counts as the same area while none of its red, green
-// or blue differs from the reference color's by more than three times the tolerance.
+// Spans from gray 150, by the rule the calibration kept (WPC-332): a pixel counts as the same area while none of its red,
+// green or blue differs from the reference color's by more than the tolerance.
 
-/// At the default tolerance, 2: gray 144 to gray 156.
-fn at_two() -> Span {
+/// At the default tolerance, 6: gray 144 to gray 156.
+fn at_six() -> Span {
     row(144, 156)
 }
 
-/// At 3: gray 141 to gray 159.
-fn at_three() -> Span {
-    row(141, 159)
+/// At 7, a notch forward: gray 143 to gray 157.
+fn at_seven() -> Span {
+    row(143, 157)
 }
 
 #[test]
 fn turning_the_wheel_forward_one_notch_raises_the_tolerance_and_dimensions_measures_again_at_once()
 {
     let mut session = open(options());
-    assert_eq!(live_span(&session), Some(at_two()));
+    assert_eq!(live_span(&session), Some(at_six()));
     session.handle(wheel(NOTCH, 1000));
-    assert_eq!(live_span(&session), Some(at_three()));
+    assert_eq!(live_span(&session), Some(at_seven()));
 }
 
-/// At 1: gray 147 to gray 153.
-fn at_one() -> Span {
-    row(147, 153)
+/// At 5, a notch back: gray 145 to gray 155.
+fn at_five() -> Span {
+    row(145, 155)
 }
 
 #[test]
 fn turning_the_wheel_back_one_notch_lowers_the_tolerance_and_dimensions_measures_again_at_once() {
     let mut session = open(options());
     session.handle(wheel(-NOTCH, 1000));
-    assert_eq!(live_span(&session), Some(at_one()));
+    assert_eq!(live_span(&session), Some(at_five()));
 }
 
 fn tolerance(value: u8) -> Tolerance {
@@ -161,7 +161,7 @@ fn the_indicator_shows_the_tolerance_the_wheel_set_where_the_cursor_is() {
     assert_eq!(
         indicator(&session),
         Some(ToleranceIndicator {
-            tolerance: tolerance(3),
+            tolerance: tolerance(7),
             at: GRAY_150,
             monitor: 0,
         })
@@ -261,10 +261,10 @@ fn a_precision_touchpads_small_turns_add_up_to_one_step_a_notch() {
     let mut session = open(options());
     for milliseconds in [1000, 1010, 1020] {
         session.handle(wheel(30, milliseconds));
-        assert_eq!(live_span(&session), Some(at_two()));
+        assert_eq!(live_span(&session), Some(at_six()));
     }
     session.handle(wheel(30, 1030));
-    assert_eq!(live_span(&session), Some(at_three()));
+    assert_eq!(live_span(&session), Some(at_seven()));
 }
 
 #[test]
@@ -273,7 +273,7 @@ fn two_notches_in_one_turn_are_two_steps() {
     session.handle(wheel(2 * NOTCH, 1000));
     assert_eq!(
         indicator(&session).map(|shown| shown.tolerance),
-        Some(tolerance(4))
+        Some(tolerance(8))
     );
 }
 
@@ -282,7 +282,7 @@ fn turning_the_other_way_starts_counting_again_so_its_first_notch_is_a_step() {
     let mut session = open(options());
     session.handle(wheel(60, 1000));
     session.handle(wheel(-NOTCH, 1010));
-    assert_eq!(live_span(&session), Some(at_one()));
+    assert_eq!(live_span(&session), Some(at_five()));
 }
 
 fn starting_at(default_tolerance: Tolerance) -> Options {
@@ -299,11 +299,12 @@ fn shown_tolerance(session: &Session) -> Option<Tolerance> {
 #[test]
 fn at_the_highest_tolerance_turning_forward_keeps_it_there_and_still_shows_it() {
     let mut session = open(starting_at(Tolerance::MAX));
-    // At the highest tolerance, the white beside the ramp counts as the same area as gray 150: the whole row.
-    assert_eq!(live_span(&session), Some(row(0, 1919)));
+    // At the highest tolerance, 100, the whole ramp counts as the same area as gray 150, and the white beside it, 105
+    // away, is the edge.
+    assert_eq!(live_span(&session), Some(row(100, 199)));
     session.handle(wheel(NOTCH, 1000));
     assert_eq!(shown_tolerance(&session), Some(Tolerance::MAX));
-    assert_eq!(live_span(&session), Some(row(0, 1919)));
+    assert_eq!(live_span(&session), Some(row(100, 199)));
 }
 
 #[test]
@@ -319,10 +320,7 @@ fn notches_past_a_limit_are_not_owed_so_the_first_notch_back_is_a_step() {
     let mut session = open(starting_at(Tolerance::MAX));
     session.handle(wheel(3 * NOTCH, 1000));
     session.handle(wheel(-NOTCH, 1010));
-    assert_eq!(
-        shown_tolerance(&session),
-        Tolerance::new(Tolerance::MAX.get() - 1)
-    );
+    assert_eq!(shown_tolerance(&session), Tolerance::new(95));
 }
 
 /// The session opened with `tool` active.
@@ -346,7 +344,7 @@ fn with_inspect_active_the_wheel_leaves_the_tolerance_alone() {
     assert_eq!(indicator(&session), None);
     // Back in Dimensions, it measures at the default tolerance.
     session.handle(event(GRAY_150, 1100, Input::KeyDown(Key::Digit1)));
-    assert_eq!(live_span(&session), Some(at_two()));
+    assert_eq!(live_span(&session), Some(at_six()));
 }
 
 #[test]
@@ -354,7 +352,7 @@ fn with_bounds_or_snip_active_the_wheel_changes_the_same_tolerance() {
     for tool in [Tool::Bounds, Tool::Snip] {
         let mut session = open_with(tool);
         session.handle(wheel(NOTCH, 1000));
-        assert_eq!(shown_tolerance(&session), Some(tolerance(3)), "{tool:?}");
+        assert_eq!(shown_tolerance(&session), Some(tolerance(7)), "{tool:?}");
     }
 }
 
@@ -369,8 +367,8 @@ fn a_pinned_measurement_keeps_what_it_measured_when_the_wheel_changes_the_tolera
         .iter()
         .map(|measurement| measurement.horizontal)
         .collect();
-    assert_eq!(pinned, [Some(at_two())]);
-    assert_eq!(live_span(&session), Some(at_three()));
+    assert_eq!(pinned, [Some(at_six())]);
+    assert_eq!(live_span(&session), Some(at_seven()));
 }
 
 /// A second Full HD monitor at 100%, right of the first, with its own ramp.
@@ -393,7 +391,7 @@ fn the_indicator_follows_the_cursor_onto_another_monitor() {
     assert_eq!(
         indicator(&session),
         Some(ToleranceIndicator {
-            tolerance: tolerance(3),
+            tolerance: tolerance(7),
             at: at(2100, 700),
             monitor: 1,
         })
@@ -432,13 +430,13 @@ fn closing_the_tools_any_way_keeps_nothing_of_the_tolerance_the_wheel_set() {
 
 #[test]
 fn the_next_call_starts_at_the_default_tolerance_in_settings() {
-    // A default other than the built-in one, as the settings file may hold: 5, so from gray 150 the span runs from gray
-    // 135 to gray 165, and after a notch forward, at 6, from gray 132 to gray 168.
-    let settings = starting_at(tolerance(5));
+    // A default other than the built-in one, as the settings file may hold: 15, so from gray 150 the span runs from
+    // gray 135 to gray 165, and after a notch forward, at 20, from gray 130 to gray 170.
+    let settings = starting_at(tolerance(15));
     let mut session = open(settings.clone());
     assert_eq!(live_span(&session), Some(row(135, 165)));
     session.handle(wheel(NOTCH, 1000));
-    assert_eq!(live_span(&session), Some(row(132, 168)));
+    assert_eq!(live_span(&session), Some(row(130, 170)));
     session.handle(event(GRAY_150, 1100, Input::KeyDown(Key::Esc)));
     let next = open(settings);
     assert_eq!(live_span(&next), Some(row(135, 165)));
@@ -460,7 +458,7 @@ fn while_a_precision_touchpad_keeps_turning_the_indicator_stays_though_no_notch_
     session.handle(event(GRAY_150, 3000, Input::Wake));
     assert_eq!(shown_tolerance(&session), Some(Tolerance::default()));
     session.handle(wheel(30, 3100));
-    assert_eq!(shown_tolerance(&session), Some(tolerance(3)));
+    assert_eq!(shown_tolerance(&session), Some(tolerance(7)));
     session.handle(event(GRAY_150, 3100 + INDICATOR, Input::Wake));
     assert_eq!(indicator(&session), None);
 }

@@ -418,13 +418,13 @@ const NOTCH: i32 = 120;
 
 #[test]
 fn the_wheel_in_the_middle_of_the_drag_changes_the_preview_at_once() {
-    // A faint panel above the button, 10 levels off the white: content at the default tolerance, whose limit is 6
-    // levels, and like the reference color two notches up, at 12.
+    // A faint panel above the button, 8 levels off the white: content at the default tolerance, 6, and like the
+    // reference color two notches up, at 8.
     let faint = monitor(
         AOC,
         168,
         &[
-            ([245, 245, 245], [950, 560, 1150, 580]),
+            ([247, 247, 247], [950, 560, 1150, 580]),
             (BUTTON_BLUE, [1000, 600, 1099, 639]),
         ],
     );
@@ -438,7 +438,7 @@ fn the_wheel_in_the_middle_of_the_drag_changes_the_preview_at_once() {
     let indicator = session.scene().tolerance_indicator.expect("the indicator");
     assert_eq!(
         (indicator.tolerance.get(), indicator.at),
-        (4, at(1200, 700))
+        (8, at(1200, 700))
     );
     // Letting go pins what the preview shows.
     let effects = session.handle(event(at(1200, 700), 1200, Input::Release));
@@ -612,14 +612,14 @@ fn switching_between_dimensions_and_bounds_keeps_the_photo_both_tools_pins_and_t
             AOC,
             168,
             &[
-                ([245, 245, 245], [950, 560, 1150, 580]),
+                ([247, 247, 247], [950, 560, 1150, 580]),
                 (BUTTON_BLUE, [1000, 600, 1099, 639]),
             ],
         );
         let photo = faint.clone();
         let mut session = open_as(Tool::Dimensions, vec![faint], at(1050, 620));
         let row = dimensions_pin(&mut session, 1000);
-        // Two notches in Dimensions raise the tolerance to 4, past the faint panel's 10 levels.
+        // Two notches in Dimensions raise the tolerance to 8, the faint panel's 8 levels.
         session.handle(event(at(1050, 620), 1100, Input::Wheel(NOTCH)));
         session.handle(event(at(1050, 620), 1150, Input::Wheel(NOTCH)));
         session.handle(event(at(900, 500), 1200, to_bounds.clone()));
@@ -634,7 +634,7 @@ fn switching_between_dimensions_and_bounds_keeps_the_photo_both_tools_pins_and_t
                 .scene()
                 .tolerance_indicator
                 .map(|shown| shown.tolerance.get()),
-            Some(4)
+            Some(8)
         );
         session.handle(event(at(1200, 700), 1400, Input::Release));
         session.handle(event(at(1050, 620), 1500, to_dimensions.clone()));
@@ -647,7 +647,7 @@ fn switching_between_dimensions_and_bounds_keeps_the_photo_both_tools_pins_and_t
                 .scene()
                 .tolerance_indicator
                 .map(|shown| shown.tolerance.get()),
-            Some(5)
+            Some(9)
         );
     }
 }
@@ -771,7 +771,7 @@ fn a_drag_goes_on_over_the_toolbar_which_neither_pauses_it_nor_reacts() {
             .scene()
             .tolerance_indicator
             .map(|shown| shown.tolerance.get()),
-        Some(3)
+        Some(7)
     );
     // Let go over the toolbar, the drag pins and copies, and the button under the cursor isn't clicked.
     let effects = session.handle(event(inspect, 1200, Input::Release));

@@ -35,7 +35,7 @@ The color a tool compares every pixel with to tell background from content: the 
 _Avoid_: background color, base color, sample color
 
 **Tolerance**:
-How much a pixel's color may differ from the reference color and still count as the same area.
+How much a pixel's red, green or blue may differ from the reference color's and still count as the same area, in the numbers Inspect shows: from 0 to 100, 6 by default (ADR 0005).
 _Avoid_: threshold, sensitivity, pixel difference
 
 **Tolerance indicator**:

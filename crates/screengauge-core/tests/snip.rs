@@ -440,9 +440,9 @@ fn the_arrows_move_the_cursor_without_the_button_too() {
 
 #[test]
 fn the_wheel_changes_the_tolerance_in_the_middle_of_a_drag_and_the_image_follows_it() {
-    // A faint gray card, 8 levels from the white: content at the default tolerance of 2, background at 3. A blue
+    // A faint gray card, 7 levels from the white: content at the default tolerance of 6, background at 7. A blue
     // square inside it stays content at both.
-    let faint = [247, 247, 247];
+    let faint = [248, 248, 248];
     let screen = monitor(
         AOC,
         96,

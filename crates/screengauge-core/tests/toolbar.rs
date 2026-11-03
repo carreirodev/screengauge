@@ -370,8 +370,8 @@ fn switching_keeps_the_frozen_screen() {
     }
 }
 
-/// The owner's monitors with a faint gray column at x = 4200 down the whole Full HD monitor, 15 below white on every
-/// channel: an edge at the default tolerance (2, so more than 6 counts), none from tolerance 5 up.
+/// The owner's monitors with a faint gray column at x = 4200 down the whole Full HD monitor, 10 below white on every
+/// channel: an edge at the default tolerance, 6, none from tolerance 10 up.
 fn with_a_faint_line() -> Vec<Photo> {
     let mut photos = owners_monitors();
     let full_hd = &photos[1];
@@ -379,7 +379,7 @@ fn with_a_faint_line() -> Vec<Photo> {
     let mut bgra = full_hd.image.bgra().to_vec();
     for row in 0..usize::try_from(ARZOPA.height).expect("a small monitor") {
         let at = (row * width + (4200 - 3840)) * 4;
-        bgra[at..at + 3].copy_from_slice(&[240, 240, 240]);
+        bgra[at..at + 3].copy_from_slice(&[245, 245, 245]);
     }
     photos[1] = Photo {
         image: Image::new(ARZOPA.width, ARZOPA.height, bgra).expect("the pixels fill the image"),
@@ -405,7 +405,7 @@ fn switching_keeps_the_tolerance_the_wheel_set() {
     let length = |session: &Session| session.scene().live.map(|live| live.label.physical.clone());
     // From the monitor's left side to just before the faint line.
     assert_eq!(length(&session).as_deref(), Some("360"));
-    // Four notches up: tolerance 6, and the faint line is no edge any more.
+    // Four notches up: tolerance 10, and the faint line is no edge any more.
     session.handle(event(cursor, 1000, Input::Wheel(4 * 120)));
     assert_eq!(length(&session).as_deref(), Some("1920"));
     for away in [Key::Digit2, Key::Digit3, Key::Digit4] {

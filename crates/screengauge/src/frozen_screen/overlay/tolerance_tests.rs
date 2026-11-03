@@ -285,7 +285,7 @@ fn the_bar_is_ten_segments_of_4_by_10_with_2_between_them_in_the_middle_of_the_l
     for mode in MODES {
         let panel_color = tokens(mode).panel_over(BACKGROUND);
         for dpi in SCALES {
-            for value in [2, 25, 50] {
+            for value in [6, 25, 100] {
                 let d = render_indicator(&canvas, mode, dpi, CURSOR, value);
                 let s = d.sizes();
                 let context = format!("{mode:?} at {dpi} DPI, tolerance {value}");
@@ -352,8 +352,16 @@ fn the_bar_lights_as_many_segments_in_the_accent_as_the_tolerance_asks_for_and_t
         let panel_color = t.panel_over(BACKGROUND);
         let faint = over(t.ink, 0.22, panel_color);
         for dpi in SCALES {
-            // The prototype's table: the tolerance, and how many segments are lit with a highest of 50.
-            for (value, lit) in [(0, 0), (2, 0), (3, 1), (25, 5), (47, 9), (48, 10), (50, 10)] {
+            // The tolerance, and how many segments are lit with a highest of 100 (WPC-332).
+            for (value, lit) in [
+                (0, 0),
+                (4, 0),
+                (6, 1),
+                (25, 3),
+                (94, 9),
+                (95, 10),
+                (100, 10),
+            ] {
                 let d = render_indicator(&canvas, mode, dpi, CURSOR, value);
                 let context = format!("{mode:?} at {dpi} DPI, tolerance {value}");
                 for index in 0..10 {
@@ -681,7 +689,7 @@ fn the_ink_has_its_full_strength_whatever_opacity_the_brush_was_left_at_and_leav
                     .typeset_plain("Tolerance", &overlay.word_format)
                     .expect("the word")
                     .width;
-                let number = text_width(overlay, "50", &overlay.number_format);
+                let number = text_width(overlay, "100", &overlay.number_format);
                 let bounds = geometry::bounds(MONITOR).expect("the monitor");
                 let copied = text_width(overlay, "Copied", &overlay.format);
                 found = Some((

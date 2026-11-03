@@ -631,8 +631,18 @@ mod tests {
 
     #[test]
     fn the_bar_lights_the_tolerances_share_of_the_highest_in_tenths() {
-        // The prototype's table, for a highest tolerance of 50 (provisional until the calibration, WPC-332).
-        for (value, lit) in [(0, 0), (2, 0), (3, 1), (25, 5), (47, 9), (48, 10), (50, 10)] {
+        // For the highest tolerance, 100 (WPC-332): a segment for each 10, from 5 up.
+        for (value, lit) in [
+            (0, 0),
+            (4, 0),
+            (5, 1),
+            (6, 1),
+            (15, 2),
+            (50, 5),
+            (94, 9),
+            (95, 10),
+            (100, 10),
+        ] {
             assert_eq!(lit_segments(tolerance(value)), lit, "tolerance {value}");
         }
     }
