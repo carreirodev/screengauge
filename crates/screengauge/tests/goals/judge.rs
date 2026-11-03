@@ -34,12 +34,10 @@ pub struct CpuWindow {
 }
 
 impl CpuWindow {
-    /// Milliseconds of processor time per minute of the window.
-    pub fn ms_per_minute(self) -> f64 {
-        if self.wall.is_zero() {
-            return 0.0;
-        }
-        self.cpu.as_secs_f64() * 1000.0 * 60.0 / self.wall.as_secs_f64()
+    /// Milliseconds of processor time per minute of the window; `None` for a window of no time, which says nothing.
+    pub fn ms_per_minute(self) -> Option<f64> {
+        (!self.wall.is_zero())
+            .then(|| self.cpu.as_secs_f64() * 1000.0 * 60.0 / self.wall.as_secs_f64())
     }
 }
 
@@ -48,6 +46,26 @@ pub const CALLS: usize = 10;
 
 /// A megabyte as Task Manager counts it.
 pub const MB: u64 = 1024 * 1024;
+
+// The limits of the spec's table (WPC-296, "Metas de velocidade e de consumo").
+const CALL_LIMIT: Duration = Duration::from_millis(250);
+const FIRST_CALL_LIMIT: Duration = Duration::from_secs(1);
+const HDR_CALL_ALLOWANCE: Duration = Duration::from_millis(100);
+const MEMORY_BEFORE_FIRST_CALL_LIMIT: u64 = 5 * MB;
+const MEMORY_IDLE_LIMIT: u64 = 80 * MB;
+const MEMORY_TOOLS_OPEN_LIMIT: u64 = 250 * MB;
+const HDR_MEMORY_ALLOWANCE: u64 = 100 * MB;
+/// Milliseconds of processor time per minute.
+const CPU_BEFORE_FIRST_CALL_LIMIT: f64 = 5.0;
+const CPU_AFTER_USE_LIMIT: f64 = 200.0;
+
+/// A count that fits an f64's 53 bits exactly, as a float: bytes of memory up to 8 petabytes, or processor cycles of
+/// a few weeks.
+// TODO: keep the counts whole until they are shown, so no cast is needed.
+pub fn exact_f64(count: u64) -> f64 {
+    debug_assert!(count < 1 << 53, "{count} doesn't fit an f64 exactly");
+    count as f64
+}
 
 /// What a goal, or one pass's value of it, came to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -133,94 +151,101 @@ pub fn judge(off: &Pass, on: Option<&Pass>) -> Vec<Row> {
         });
     };
 
-    let call_limit = Duration::from_millis(250);
     row(
         "Call to the toolbar",
         "global shortcut, median of calls 2 to 11, HDR off",
-        ms_text(call_limit),
-        time_cell(call_median(off), call_limit, true),
-        time_cell(call_median(on_pass), call_limit, false),
+        ms_text(CALL_LIMIT),
+        time_cell(call_median(off), CALL_LIMIT, true),
+        time_cell(call_median(on_pass), CALL_LIMIT, false),
     );
-    let first_limit = Duration::from_secs(1);
     row(
         "First call of the process, opening the exe",
         "from starting ScreenGauge.exe, as the Start menu does",
-        ms_text(first_limit),
-        time_cell(off.first_call_opening, first_limit, true),
-        time_cell(on_pass.first_call_opening, first_limit, true),
+        ms_text(FIRST_CALL_LIMIT),
+        time_cell(off.first_call_opening, FIRST_CALL_LIMIT, true),
+        time_cell(on_pass.first_call_opening, FIRST_CALL_LIMIT, true),
     );
     row(
         "First call of the process, by the shortcut",
         "first global shortcut after a start at sign-in",
-        ms_text(first_limit),
-        time_cell(off.first_call_shortcut, first_limit, true),
-        time_cell(on_pass.first_call_shortcut, first_limit, true),
+        ms_text(FIRST_CALL_LIMIT),
+        time_cell(off.first_call_shortcut, FIRST_CALL_LIMIT, true),
+        time_cell(on_pass.first_call_shortcut, FIRST_CALL_LIMIT, true),
     );
-    let hdr_time = Duration::from_millis(100);
     row(
         "Call with HDR on",
         "median with HDR on minus median with HDR off",
-        format!("+{}", ms_text(hdr_time)),
+        format!("+{}", ms_text(HDR_CALL_ALLOWANCE)),
         info(""),
         allowance(
             call_median(on_pass).zip(call_median(off)),
-            |(on, off)| on.saturating_sub(off) <= hdr_time,
+            |(on, off)| on.saturating_sub(off) <= HDR_CALL_ALLOWANCE,
             |(on, off)| signed_ms(on, off),
         ),
     );
     row(
         "Memory before the first call",
         "started at sign-in, no call",
-        mb_text(5 * MB),
-        memory_cell(off.memory_before_first_call, 5 * MB, true),
-        memory_cell(on_pass.memory_before_first_call, 5 * MB, true),
+        mb_text(MEMORY_BEFORE_FIRST_CALL_LIMIT),
+        memory_cell(
+            off.memory_before_first_call,
+            MEMORY_BEFORE_FIRST_CALL_LIMIT,
+            true,
+        ),
+        memory_cell(
+            on_pass.memory_before_first_call,
+            MEMORY_BEFORE_FIRST_CALL_LIMIT,
+            true,
+        ),
     );
     row(
         "Memory idle after use",
         "1 minute after the tools closed",
-        mb_text(80 * MB),
-        memory_cell(off.memory_idle_after_use, 80 * MB, true),
-        memory_cell(on_pass.memory_idle_after_use, 80 * MB, true),
+        mb_text(MEMORY_IDLE_LIMIT),
+        memory_cell(off.memory_idle_after_use, MEMORY_IDLE_LIMIT, true),
+        memory_cell(on_pass.memory_idle_after_use, MEMORY_IDLE_LIMIT, true),
     );
     row(
         "Memory idle after 100 calls",
         "1 minute after one run of 100 calls in a row",
-        mb_text(80 * MB),
-        memory_cell(off.memory_idle_after_100_calls, 80 * MB, true),
-        memory_cell(on_pass.memory_idle_after_100_calls, 80 * MB, true),
+        mb_text(MEMORY_IDLE_LIMIT),
+        memory_cell(off.memory_idle_after_100_calls, MEMORY_IDLE_LIMIT, true),
+        memory_cell(on_pass.memory_idle_after_100_calls, MEMORY_IDLE_LIMIT, true),
     );
     row(
         "Memory with the tools open",
         "highest reading while open, HDR off",
-        mb_text(250 * MB),
-        memory_cell(off.memory_tools_open, 250 * MB, true),
-        memory_cell(on_pass.memory_tools_open, 250 * MB, false),
+        mb_text(MEMORY_TOOLS_OPEN_LIMIT),
+        memory_cell(off.memory_tools_open, MEMORY_TOOLS_OPEN_LIMIT, true),
+        memory_cell(on_pass.memory_tools_open, MEMORY_TOOLS_OPEN_LIMIT, false),
     );
-    let hdr_memory = 100 * MB;
     row(
         "Memory with the tools open, HDR on",
         "highest with HDR on minus highest with HDR off",
-        format!("+{}", mb_text(hdr_memory)),
+        format!("+{}", mb_text(HDR_MEMORY_ALLOWANCE)),
         info(""),
         allowance(
             on_pass.memory_tools_open.zip(off.memory_tools_open),
-            |(on, off)| on.saturating_sub(off) <= hdr_memory,
+            |(on, off)| on.saturating_sub(off) <= HDR_MEMORY_ALLOWANCE,
             |(on, off)| signed_mb(on, off),
         ),
     );
     row(
         "Processor idle before the first call",
         "started at sign-in, no call",
-        "5.0 ms per minute".to_string(),
-        cpu_cell(off.cpu_idle_before_first_call, 5.0),
-        cpu_cell(on_pass.cpu_idle_before_first_call, 5.0),
+        per_minute_text(CPU_BEFORE_FIRST_CALL_LIMIT),
+        cpu_cell(off.cpu_idle_before_first_call, CPU_BEFORE_FIRST_CALL_LIMIT),
+        cpu_cell(
+            on_pass.cpu_idle_before_first_call,
+            CPU_BEFORE_FIRST_CALL_LIMIT,
+        ),
     );
     row(
         "Processor idle after use",
         "mean of the 10 minutes after the tools closed",
-        "200.0 ms per minute".to_string(),
-        cpu_cell(off.cpu_idle_after_use, 200.0),
-        cpu_cell(on_pass.cpu_idle_after_use, 200.0),
+        per_minute_text(CPU_AFTER_USE_LIMIT),
+        cpu_cell(off.cpu_idle_after_use, CPU_AFTER_USE_LIMIT),
+        cpu_cell(on_pass.cpu_idle_after_use, CPU_AFTER_USE_LIMIT),
     );
     rows
 }
@@ -267,17 +292,14 @@ fn memory_cell(value: Option<u64>, limit: u64, judged: bool) -> Cell {
 }
 
 fn cpu_cell(value: Option<CpuWindow>, limit: f64) -> Cell {
-    match value {
-        Some(window) => {
-            let per_minute = window.ms_per_minute();
-            limit_cell(
-                format!("{per_minute:.1} ms per minute"),
-                per_minute <= limit,
-                true,
-            )
-        }
+    match value.and_then(CpuWindow::ms_per_minute) {
+        Some(per_minute) => limit_cell(per_minute_text(per_minute), per_minute <= limit, true),
         None => not_measured(),
     }
+}
+
+pub fn per_minute_text(ms: f64) -> String {
+    format!("{ms:.1} ms per minute")
 }
 
 /// An HDR allowance: the two passes' values, whether they keep within it, and the difference shown. Exceeding it goes
@@ -314,8 +336,7 @@ fn signed_ms(on: Duration, off: Duration) -> String {
 
 /// Bytes in Task Manager's megabytes, with one decimal, as its Memory column shows them.
 pub fn mb_text(bytes: u64) -> String {
-    // Bytes of a process's memory fit an f64's 53 bits exactly up to 8 petabytes.
-    format!("{:.1} MB", bytes as f64 / MB as f64)
+    format!("{:.1} MB", exact_f64(bytes) / exact_f64(MB))
 }
 
 fn signed_mb(on: u64, off: u64) -> String {
@@ -446,14 +467,31 @@ mod tests {
 
     #[test]
     fn processor_time_is_counted_in_milliseconds_per_minute_of_the_window() {
-        assert_eq!(minutes(1250, 10).ms_per_minute(), 125.0);
+        assert_eq!(minutes(1250, 10).ms_per_minute(), Some(125.0));
         assert_eq!(
             CpuWindow {
                 cpu: ms(3),
                 wall: Duration::from_secs(90)
             }
             .ms_per_minute(),
-            2.0
+            Some(2.0)
+        );
+        // A window of no time says nothing, so the goal isn't met by it.
+        let empty = CpuWindow {
+            cpu: ms(0),
+            wall: Duration::ZERO,
+        };
+        assert_eq!(empty.ms_per_minute(), None);
+        let rows = judge(
+            &Pass {
+                cpu_idle_after_use: Some(empty),
+                ..good_pass()
+            },
+            Some(&good_pass()),
+        );
+        assert_eq!(
+            row(&rows, "Processor idle after use").verdict,
+            Verdict::NotMeasured
         );
     }
 

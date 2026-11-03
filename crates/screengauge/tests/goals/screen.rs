@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use screengauge_core::session::{Point, Rect};
 use screengauge_core::settings::{Key, Shortcut};
-use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WAIT_FAILED, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_TRANSITIONS_FORCEDISABLED, DwmFlush, DwmSetWindowAttribute,
 };
@@ -34,7 +34,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, PCWSTR, w};
 
-use crate::struct_size;
+use crate::{struct_size, wide_text};
 
 /// Makes this thread see physical pixels on every monitor, as ScreenGauge does (Per-Monitor V2).
 pub fn see_physical_pixels() -> Result<(), String> {
@@ -84,13 +84,8 @@ fn describe(monitor: HMONITOR) -> Result<Monitor, String> {
     unsafe { GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut unused) }
         .map_err(|e| format!("GetDpiForMonitor: {e}"))?;
     let r = info.monitorInfo.rcMonitor;
-    let length = info
-        .szDevice
-        .iter()
-        .position(|&c| c == 0)
-        .unwrap_or(info.szDevice.len());
     Ok(Monitor {
-        device: String::from_utf16_lossy(&info.szDevice[..length]),
+        device: wide_text(&info.szDevice),
         rect: Rect {
             left: r.left,
             top: r.top,
@@ -111,9 +106,16 @@ pub fn wait(duration: Duration) {
         if left.is_zero() {
             return;
         }
-        let ms = u32::try_from(left.as_millis()).unwrap_or(u32::MAX);
+        // Waits past 49 days are cut to the longest Windows takes; the loop waits again.
+        let ms = u32::try_from(left.as_millis()).unwrap_or(u32::MAX - 1);
         // SAFETY: no handles; it returns on a message for this thread or after `ms`.
-        unsafe { MsgWaitForMultipleObjects(None, false, ms, QS_ALLINPUT) };
+        let woke = unsafe { MsgWaitForMultipleObjects(None, false, ms, QS_ALLINPUT) };
+        if woke == WAIT_FAILED {
+            panic!(
+                "MsgWaitForMultipleObjects failed: {}",
+                windows::core::Error::from_thread()
+            );
+        }
     }
 }
 
@@ -439,4 +441,18 @@ fn send(inputs: &[INPUT]) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_shortcut_s_key_is_pressed_by_its_virtual_key() {
+        // The virtual-key codes Windows documents: 'X' is 0x58, '7' is 0x37, F1 is 0x70 and F12 0x7B.
+        assert_eq!(virtual_key(Key::Letter('X')), Ok(VIRTUAL_KEY(0x58)));
+        assert_eq!(virtual_key(Key::Digit(7)), Ok(VIRTUAL_KEY(0x37)));
+        assert_eq!(virtual_key(Key::Function(1)), Ok(VIRTUAL_KEY(0x70)));
+        assert_eq!(virtual_key(Key::Function(12)), Ok(VIRTUAL_KEY(0x7B)));
+    }
 }

@@ -11,12 +11,17 @@
 //!
 //! `cargo test -p screengauge --release --test goals -- --ignored --nocapture --test-threads=1`
 //!
-//! It measures `target/release/ScreenGauge.exe`, the one this command builds; `SCREENGAUGE_EXE` names another one, such
-//! as the exe an installer put in place. `SCREENGAUGE_GOALS_QUICK=1` shortens every wait to try the routine itself; such
-//! a run is never a release result, and it always ends failed.
+//! Before a version, `SCREENGAUGE_EXE` names the very file to be published. Rust builds don't come out byte for byte
+//! the same, and this command builds its own `target/release/ScreenGauge.exe` with the tests' extra Windows features,
+//! so without it the routine measures that build of the same code, and says so. `SCREENGAUGE_GOALS_QUICK=1` shortens
+//! every wait to try the routine itself; such a run is never a release result, and it always ends failed.
 //!
-//! It measures calls by the global shortcut only. The 250 ms goal holds for the tray icon, the Start menu and the hidden
-//! icons panel too; those stay on the manual list before each version (layer 4).
+//! Its calls are by the global shortcut, besides the first call that opening the exe makes. The 250 ms goal holds for
+//! the tray icon, the Start menu and the hidden icons panel too; those stay on the manual list before each version
+//! (layer 4).
+//!
+//! It puts HDR, the settings file and ScreenGauge back as they were however it ends, unless its process is killed: then
+//! turn HDR back in Windows' Settings and exit ScreenGauge from its tray icon.
 
 mod app;
 mod appearance;
@@ -35,7 +40,7 @@ use windows::Win32::System::WindowsProgramming::QueryThreadCycleTime;
 
 use app::App;
 use appearance::Read;
-use judge::{CALLS, CpuWindow, Pass};
+use judge::{CALLS, CpuWindow, Pass, exact_f64};
 
 /// The stage's color, magenta, which the toolbar never draws in either theme.
 const STAGE_COLOR: [u8; 3] = [0xFF, 0x00, 0xFF];
@@ -52,14 +57,28 @@ const HOLD_OPEN: Duration = Duration::from_millis(1500);
 const MEMORY_EVERY: Duration = Duration::from_millis(10);
 /// How many calls read the memory with the tools open, apart from the timed ones.
 const MEMORY_CALLS: usize = 3;
+/// How long the routine rests between two reads of the pixels while it waits for the toolbar.
+const READ_EVERY: Duration = Duration::from_millis(1);
 /// How long ScreenGauge gets to make its resident window after starting.
 const START_WAIT: Duration = Duration::from_secs(10);
 
-/// A struct's size for a `cbSize` field. Used as `const { struct_size::<T>() }`, the assert runs at compile time.
+/// A struct's size for a `cbSize` field. Used as `const { struct_size::<T>() }`, the assert runs at compile time. It
+/// mirrors `src/win32.rs`'s, which a test can't reach: ScreenGauge is a program, with no library.
 pub const fn struct_size<T>() -> u32 {
     let size = size_of::<T>();
     assert!(size <= u32::MAX as usize);
     size as u32
+}
+
+/// Text Windows wrote into a buffer of UTF-16, up to its first 0.
+pub fn wide_text(buffer: &[u16]) -> String {
+    let length = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+    String::from_utf16_lossy(&buffer[..length])
+}
+
+/// A size in pixels as a coordinate.
+fn signed(pixels: u32) -> Result<i32, String> {
+    i32::try_from(pixels).map_err(|e| format!("{pixels} pixels as a coordinate: {e}"))
 }
 
 /// The waits of the spec's conditions, or a run's shortened ones.
@@ -139,15 +158,15 @@ fn run() -> Result<(), String> {
         .ok_or("the toolbar crosses every row and column the cursor could go to")?;
     let tools = layout.tools;
     let patch_rect = Rect {
-        left: tools.left + i32::try_from(tools.width / 2).map_err(|e| e.to_string())? - 1,
-        top: tools.top + i32::try_from(tools.height / 2).map_err(|e| e.to_string())? - 1,
+        left: tools.left + signed(tools.width / 2)? - 1,
+        top: tools.top + signed(tools.height / 2)? - 1,
         width: 3,
         height: 3,
     };
     let margin = toolbar::scaled(24, monitor.dpi);
     let stage_rect = Rect {
-        left: layout.toolbar.left - i32::try_from(margin).map_err(|e| e.to_string())?,
-        top: layout.toolbar.top - i32::try_from(margin).map_err(|e| e.to_string())?,
+        left: layout.toolbar.left - signed(margin)?,
+        top: layout.toolbar.top - signed(margin)?,
         width: layout.toolbar.width + 2 * margin,
         height: layout.toolbar.height + 2 * margin,
     };
@@ -157,6 +176,11 @@ fn run() -> Result<(), String> {
         println!("QUICK RUN: every wait is shortened, so this is NOT a release result.");
     }
     describe_exe(&exe)?;
+    if std::env::var_os("SCREENGAUGE_EXE").is_none() {
+        println!(
+            "    the test build's exe: before a version, name the file to be published in SCREENGAUGE_EXE"
+        );
+    }
     for m in &monitors {
         println!(
             "monitor {}: {}x{} at ({}, {}), {}%{}",
@@ -176,8 +200,9 @@ fn run() -> Result<(), String> {
     let displays = hdr::displays()?;
     for d in &displays {
         println!(
-            "display {}: HDR {}",
+            "display {} ({}): HDR {}",
             d.name,
+            d.device,
             match (d.supported, d.on) {
                 (false, _) => "not available",
                 (true, true) => "on now",
@@ -205,6 +230,7 @@ fn run() -> Result<(), String> {
     let mut rig = Rig {
         exe,
         shortcut: stored.options.global_shortcut,
+        device: monitor.device.clone(),
         stage: screen::Stage::new(STAGE_COLOR)?,
         stage_rect,
         patch: screen::Patch::new(patch_rect)?,
@@ -216,7 +242,10 @@ fn run() -> Result<(), String> {
 
     let mut off = Pass::default();
     let mut on = Pass::default();
-    let any_hdr = displays.iter().any(|d| d.supported);
+    // The calls open on the main monitor, so the pass with HDR on needs HDR there.
+    let any_hdr = displays
+        .iter()
+        .any(|d| d.device == monitor.device && d.supported);
     let mut failure = rig.pass(false, &mut off).err();
     if failure.is_none() && any_hdr {
         failure = rig.pass(true, &mut on).err();
@@ -227,7 +256,7 @@ fn run() -> Result<(), String> {
     println!("\n== Goals of WPC-286\n");
     print!("{}", judge::report(&rows));
     if !any_hdr {
-        println!("No monitor can turn HDR on, so the pass with HDR on didn't run.");
+        println!("The main monitor can't turn HDR on, so the pass with HDR on didn't run.");
     }
     println!(
         "Took {:.1} minutes.",
@@ -254,6 +283,8 @@ fn run() -> Result<(), String> {
 struct Rig {
     exe: PathBuf,
     shortcut: Shortcut,
+    /// The main monitor, where the calls open.
+    device: String,
     stage: screen::Stage,
     stage_rect: Rect,
     patch: screen::Patch,
@@ -274,12 +305,23 @@ impl Rig {
         let name = if hdr_on { "HDR on" } else { "HDR off" };
         self.log(&format!("--- pass with {name}"));
         hdr::set_all(hdr_on)?;
+        let main_on = hdr::displays()?
+            .iter()
+            .any(|d| d.device == self.device && d.on);
+        if main_on != hdr_on {
+            return Err(format!(
+                "HDR is {} on the main monitor, where the calls open, for the pass with {name}",
+                if main_on { "on" } else { "off" }
+            ));
+        }
 
         // The first call, by opening the exe, as the Start menu does.
+        // The toolbar opens on the cursor's monitor.
+        screen::put_cursor(self.cursor)?;
         self.show_stage()?;
         let at = Instant::now();
         let app = App::start(&self.exe, false)?;
-        let opening = self.watch(at, CALL_WAIT)?;
+        let opening = self.watch(at, CALL_WAIT).map_err(|e| shown(&app, &e))?;
         pass.first_call_opening = Some(opening);
         self.log(&format!(
             "first call, opening the exe: {}",
@@ -294,27 +336,36 @@ impl Rig {
         let mut app = App::start(&self.exe, true)?;
         app.wait_until_resident(START_WAIT)?;
         screen::wait(self.waits.settle_after_start);
-        let window = self.cpu_window(&app, self.waits.idle_before_first_call, None)?;
-        pass.cpu_idle_before_first_call = Some(window.0);
+        let idle = self.idle(&app, self.waits.idle_before_first_call, None)?;
+        pass.cpu_idle_before_first_call = Some(idle.cpu);
         let memory = app.private_working_set()?;
         pass.memory_before_first_call = Some(memory);
         self.log(&format!(
-            "idle before the first call: {:.2} ms per minute, {}",
-            window.0.ms_per_minute(),
+            "idle before the first call: {}, {}",
+            per_minute(idle.cpu),
             judge::mb_text(memory)
         ));
 
+        // Each timed call reads the memory once the toolbar has settled, after its time is taken; the highest counts
+        // with the untimed calls'.
         self.show_stage()?;
-        let first = self.call(&app)?;
+        let (first, memory) = self.call(&app)?;
         pass.first_call_shortcut = Some(first);
+        let mut highest = memory;
         self.log(&format!(
-            "first call, by the shortcut: {}",
-            judge::ms_text(first)
+            "first call, by the shortcut: {}; {} with the toolbar shown",
+            judge::ms_text(first),
+            judge::mb_text(memory)
         ));
         for n in 2..=CALLS + 1 {
-            let time = self.call(&app)?;
+            let (time, memory) = self.call(&app)?;
             pass.calls.push(time);
-            self.log(&format!("call {n}: {}", judge::ms_text(time)));
+            highest = highest.max(memory);
+            self.log(&format!(
+                "call {n}: {}; {} with the toolbar shown",
+                judge::ms_text(time),
+                judge::mb_text(memory)
+            ));
         }
         if let Some(median) = judge::median(&pass.calls) {
             self.log(&format!(
@@ -323,7 +374,6 @@ impl Rig {
                 judge::ms_text(median)
             ));
         }
-        let mut highest = 0;
         for _ in 0..MEMORY_CALLS {
             let (peak, settled) = self.memory_call(&app)?;
             highest = highest.max(peak);
@@ -336,18 +386,18 @@ impl Rig {
         pass.memory_tools_open = Some(highest);
 
         self.stage.hide();
-        let (window, memory) = self.cpu_window(
+        let idle = self.idle(
             &app,
             self.waits.idle_after_use,
             Some(self.waits.memory_after),
         )?;
-        pass.memory_idle_after_use = memory;
-        pass.cpu_idle_after_use = Some(window);
+        pass.memory_idle_after_use = idle.memory;
+        pass.cpu_idle_after_use = Some(idle.cpu);
         self.log(&format!(
-            "idle after use: {:.1} ms per minute; memory after {:?}: {}",
-            window.ms_per_minute(),
+            "idle after use: {}; memory after {:?}: {}",
+            per_minute(idle.cpu),
             self.waits.memory_after,
-            memory.map_or("not read".to_string(), judge::mb_text)
+            idle.memory.map_or("not read".to_string(), judge::mb_text)
         ));
 
         self.show_stage()?;
@@ -398,7 +448,11 @@ impl Rig {
                 None if at > within => {
                     return Err(format!("no toolbar on screen within {within:?}"));
                 }
-                _ => screen::pump(),
+                _ => {
+                    // A breath between reads, so reading the screen doesn't crowd out the composition it waits for.
+                    std::thread::sleep(READ_EVERY);
+                    screen::pump();
+                }
             }
         }
         appearance::appeared_at(&reads, self.stage.color).ok_or_else(|| {
@@ -406,15 +460,17 @@ impl Rig {
         })
     }
 
-    /// One call by the global shortcut, timed to the toolbar on screen, then closed.
-    fn call(&mut self, app: &App) -> Result<Duration, String> {
+    /// One call by the global shortcut, timed to the toolbar on screen, then closed: its time, and the memory read
+    /// once the toolbar settled.
+    fn call(&mut self, app: &App) -> Result<(Duration, u64), String> {
         screen::put_cursor(self.cursor)?;
         self.stage_still_shown()?;
         let at = screen::press(self.shortcut)?;
-        let time = self.watch(at, CALL_WAIT)?;
+        let time = self.watch(at, CALL_WAIT).map_err(|e| shown(app, &e))?;
+        let memory = app.private_working_set()?;
         app.close_tools(CLOSE_WAIT)?;
         screen::wait(GAP);
-        Ok(time)
+        Ok((time, memory))
     }
 
     /// One call that reads the memory from the shortcut on while the tools stay open, then closes them: the highest
@@ -448,13 +504,13 @@ impl Rig {
         }
     }
 
-    /// The processor time `app` used over `length`, and its memory `memory_at` into it.
-    fn cpu_window(
+    /// The processor time `app` used over `length` with nothing asked of it, and its memory `memory_at` into it.
+    fn idle(
         &self,
         app: &App,
         length: Duration,
         memory_at: Option<Duration>,
-    ) -> Result<(CpuWindow, Option<u64>), String> {
+    ) -> Result<Idle, String> {
         let start = Instant::now();
         let (cycles, times) = (app.cycles()?, app.times()?);
         let mut memory = None;
@@ -465,9 +521,8 @@ impl Rig {
         screen::wait(length.saturating_sub(start.elapsed()));
         let (cycles_end, times_end) = (app.cycles()?, app.times()?);
         let wall = start.elapsed();
-        // Cycles of a few minutes fit an f64's 53 bits exactly.
-        let used = (cycles_end - cycles) as f64;
-        let window = CpuWindow {
+        let used = exact_f64(cycles_end - cycles);
+        let cpu = CpuWindow {
             cpu: Duration::from_secs_f64(used / self.tsc_hz),
             wall,
         };
@@ -475,11 +530,23 @@ impl Rig {
             "  {:.1} s: {:.0} cycles = {:.2} ms; Windows' process times, in steps of 15.6 ms, say {} ms",
             wall.as_secs_f64(),
             used,
-            window.cpu.as_secs_f64() * 1000.0,
+            cpu.cpu.as_secs_f64() * 1000.0,
             (times_end - times).as_millis()
         ));
-        Ok((window, memory))
+        Ok(Idle { cpu, memory })
     }
+}
+
+/// What a stretch of idle time measured.
+struct Idle {
+    cpu: CpuWindow,
+    memory: Option<u64>,
+}
+
+fn per_minute(window: CpuWindow) -> String {
+    window
+        .ms_per_minute()
+        .map_or("a window of no time".to_string(), judge::per_minute_text)
 }
 
 /// The processor's cycle counter's rate, which QueryProcessCycleTime counts in: the counter's ticks over half a second
@@ -490,8 +557,16 @@ fn tsc_hz() -> f64 {
     let (start, cycles) = (Instant::now(), read());
     std::thread::sleep(Duration::from_millis(500));
     let (elapsed, ticks) = (start.elapsed(), read() - cycles);
-    // Half a second of cycles fits an f64's 53 bits exactly.
-    ticks as f64 / elapsed.as_secs_f64()
+    exact_f64(ticks) / elapsed.as_secs_f64()
+}
+
+/// `failure`, with how many frozen screen windows `app` shows: none means the call didn't open the tools, and some
+/// mean they opened where the pixels aren't read, such as on another monitor.
+fn shown(app: &App, failure: &str) -> String {
+    format!(
+        "{failure}; ScreenGauge shows {} frozen screen window(s)",
+        app.frozen_screens().len()
+    )
 }
 
 /// How long the check of the cycle counter spins.
@@ -512,8 +587,7 @@ fn cycle_clock_check(tsc_hz: f64) -> Result<Duration, String> {
         std::hint::spin_loop();
     }
     let (wall, used) = (start.elapsed(), cycles()? - before);
-    // A few hundred million cycles fit an f64's 53 bits exactly.
-    let counted = Duration::from_secs_f64(used as f64 / tsc_hz);
+    let counted = Duration::from_secs_f64(exact_f64(used) / tsc_hz);
     let ratio = counted.as_secs_f64() / wall.as_secs_f64();
     if !(0.9..=1.05).contains(&ratio) {
         return Err(format!(

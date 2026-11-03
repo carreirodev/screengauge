@@ -7,22 +7,23 @@ use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{FILETIME, HANDLE, HWND, LPARAM, WPARAM};
+use windows::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::System::ProcessStatus::{
     GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX2,
 };
-use windows::Win32::System::Threading::GetProcessTimes;
+use windows::Win32::System::Threading::{GetProcessTimes, WaitForSingleObject};
 use windows::Win32::System::WindowsProgramming::QueryProcessCycleTime;
 use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FindWindowExW, GetClassNameW, GetWindowThreadProcessId, IsWindowVisible,
     PostMessageW, WM_CLOSE, WM_KEYDOWN,
 };
-use windows::core::{BOOL, PCWSTR, w};
+use windows::core::{BOOL, HSTRING, PCWSTR};
 
 use crate::{screen, struct_size};
 
 /// The resident window's class (`resident.rs`), never shown: ScreenGauge runs while it exists.
-const RESIDENT: PCWSTR = w!("ScreenGauge.Resident");
+const RESIDENT: &str = "ScreenGauge.Resident";
 /// The frozen screen's windows' class (`frozen_screen.rs`), one per monitor while the tools are open.
 const FROZEN_SCREEN: &str = "ScreenGauge.FrozenScreen";
 
@@ -32,12 +33,14 @@ const EXIT_WAIT: Duration = Duration::from_secs(10);
 /// A ScreenGauge.exe this routine started.
 pub struct App {
     child: Child,
+    /// Whether the routine already closed it, so dropping it has nothing left to do.
+    closed: bool,
 }
 
 /// Whether any ScreenGauge runs now, this routine's or not.
 pub fn any_running() -> bool {
-    // SAFETY: a static class name and no window name.
-    unsafe { FindWindowExW(None, None, RESIDENT, PCWSTR::null()) }.is_ok()
+    // SAFETY: a class name that lives through the call, and no window name.
+    unsafe { FindWindowExW(None, None, &HSTRING::from(RESIDENT), PCWSTR::null()) }.is_ok()
 }
 
 impl App {
@@ -50,7 +53,10 @@ impl App {
         let child = command
             .spawn()
             .map_err(|e| format!("starting {}: {e}", exe.display()))?;
-        Ok(App { child })
+        Ok(App {
+            child,
+            closed: false,
+        })
     }
 
     fn handle(&self) -> HANDLE {
@@ -61,12 +67,33 @@ impl App {
         self.child.id()
     }
 
+    /// Fails once the process has ended: a ScreenGauge that crashed uses no processor and frees its memory, and must
+    /// never read as one meeting its idle goals.
+    fn running(&self) -> Result<(), String> {
+        // SAFETY: the child's handle is open while `self` lives; a wait of 0 ms only asks whether it has ended.
+        let state = unsafe { WaitForSingleObject(self.handle(), 0) };
+        if state == WAIT_TIMEOUT {
+            Ok(())
+        } else if state == WAIT_OBJECT_0 {
+            Err("ScreenGauge exited on its own while it was measured".to_string())
+        } else {
+            Err(format!(
+                "waiting on ScreenGauge's process returned {}",
+                state.0
+            ))
+        }
+    }
+
     /// Waits for the resident window, which ScreenGauge makes once it has read its settings and before it registers
     /// the global shortcut; `pump` keeps this thread's windows answering meanwhile.
     pub fn wait_until_resident(&mut self, within: Duration) -> Result<(), String> {
         let deadline = Instant::now() + within;
         while self.windows(ClassName::Resident).is_empty() {
-            if let Some(status) = self.child.try_wait().map_err(|e| e.to_string())? {
+            if let Some(status) = self
+                .child
+                .try_wait()
+                .map_err(|e| format!("asking whether ScreenGauge exited: {e}"))?
+            {
                 return Err(format!("ScreenGauge exited at start, {status}"));
             }
             if Instant::now() > deadline {
@@ -81,6 +108,7 @@ impl App {
 
     /// The private working set, in bytes: what Task Manager's Memory column shows.
     pub fn private_working_set(&self) -> Result<u64, String> {
+        self.running()?;
         let mut counters = PROCESS_MEMORY_COUNTERS_EX2 {
             cb: const { struct_size::<PROCESS_MEMORY_COUNTERS_EX2>() },
             ..Default::default()
@@ -95,12 +123,14 @@ impl App {
             )
         }
         .map_err(|e| format!("GetProcessMemoryInfo: {e}"))?;
-        u64::try_from(counters.PrivateWorkingSetSize).map_err(|e| e.to_string())
+        u64::try_from(counters.PrivateWorkingSetSize)
+            .map_err(|e| format!("the private working set doesn't fit 64 bits: {e}"))
     }
 
     /// The processor cycles every thread of the process has used, kernel and user: exact, unlike the process's times,
     /// which Windows counts in steps of 15.6 ms.
     pub fn cycles(&self) -> Result<u64, String> {
+        self.running()?;
         let mut cycles = 0;
         // SAFETY: the child's handle is open while `self` lives, and `cycles` is a u64 for the call to fill.
         unsafe { QueryProcessCycleTime(self.handle(), &mut cycles) }
@@ -110,6 +140,7 @@ impl App {
 
     /// The process's kernel and user time as Windows counts it, in steps of the clock tick: a check on the cycle counts.
     pub fn times(&self) -> Result<Duration, String> {
+        self.running()?;
         let (mut created, mut exited, mut kernel, mut user) = (
             FILETIME::default(),
             FILETIME::default(),
@@ -168,8 +199,16 @@ impl App {
     }
 
     fn close_and_wait(&mut self) -> Result<(), String> {
-        if self.child.try_wait().map_err(|e| e.to_string())?.is_some() {
+        if self.closed {
             return Ok(());
+        }
+        self.closed = true;
+        if let Some(status) = self
+            .child
+            .try_wait()
+            .map_err(|e| format!("asking whether ScreenGauge exited: {e}"))?
+        {
+            return Err(format!("ScreenGauge had exited on its own, {status}"));
         }
         for hwnd in self.windows(ClassName::Resident) {
             // SAFETY: posting to a window of another process; the message carries nothing.
@@ -178,7 +217,11 @@ impl App {
         }
         let deadline = Instant::now() + EXIT_WAIT;
         loop {
-            if let Some(status) = self.child.try_wait().map_err(|e| e.to_string())? {
+            if let Some(status) = self
+                .child
+                .try_wait()
+                .map_err(|e| format!("asking whether ScreenGauge exited: {e}"))?
+            {
                 return if status.success() {
                     Ok(())
                 } else {
@@ -187,7 +230,9 @@ impl App {
             }
             if Instant::now() > deadline {
                 // Stopping it leaves a ghost tray icon until the mouse passes over it, but never a ScreenGauge running.
-                self.child.kill().map_err(|e| e.to_string())?;
+                self.child
+                    .kill()
+                    .map_err(|e| format!("stopping ScreenGauge: {e}"))?;
                 return Err(format!(
                     "ScreenGauge didn't exit within {EXIT_WAIT:?} of WM_CLOSE, so it was stopped"
                 ));
@@ -231,7 +276,7 @@ enum ClassName {
 impl ClassName {
     fn text(self) -> &'static str {
         match self {
-            ClassName::Resident => "ScreenGauge.Resident",
+            ClassName::Resident => RESIDENT,
             ClassName::FrozenScreen => FROZEN_SCREEN,
         }
     }
@@ -253,6 +298,7 @@ extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let mut name = [0u16; 64];
         // SAFETY: `name` is a buffer of its own length.
         let length = unsafe { GetClassNameW(hwnd, &mut name) };
+        // 0 when the window closed since EnumWindows listed it: it is no window of ScreenGauge's any more.
         let length = usize::try_from(length).unwrap_or(0);
         if String::from_utf16_lossy(&name[..length]) == search.class {
             search.found.push(hwnd);

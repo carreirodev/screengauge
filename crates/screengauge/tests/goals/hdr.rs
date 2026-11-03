@@ -4,17 +4,18 @@
 use std::time::Duration;
 
 use windows::Win32::Devices::Display::{
-    DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
-    DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_DEVICE_INFO_SET_ADVANCED_COLOR_STATE,
-    DISPLAYCONFIG_DEVICE_INFO_TYPE, DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO, DISPLAYCONFIG_MODE_INFO,
-    DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE,
-    DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE_0, DISPLAYCONFIG_TARGET_DEVICE_NAME,
-    DisplayConfigGetDeviceInfo, DisplayConfigSetDeviceInfo, GetDisplayConfigBufferSizes,
-    QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
+    DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO, DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+    DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME, DISPLAYCONFIG_DEVICE_INFO_HEADER,
+    DISPLAYCONFIG_DEVICE_INFO_SET_ADVANCED_COLOR_STATE, DISPLAYCONFIG_DEVICE_INFO_TYPE,
+    DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
+    DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE, DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE_0,
+    DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, DisplayConfigGetDeviceInfo,
+    DisplayConfigSetDeviceInfo, GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS,
+    QueryDisplayConfig,
 };
 use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, LUID, WIN32_ERROR};
 
-use crate::{screen, struct_size};
+use crate::{screen, struct_size, wide_text};
 
 /// How long the screen takes to settle after HDR turns on or off: it repaints for a few seconds (WPC-327).
 pub const SETTLE: Duration = Duration::from_secs(8);
@@ -24,8 +25,13 @@ pub const SETTLE: Duration = Duration::from_secs(8);
 pub struct Display {
     adapter: LUID,
     id: u32,
+    /// The monitor's own name, such as "U27B3A".
     pub name: String,
+    /// Windows' name for the monitor, such as `\\.\DISPLAY1`, as the monitors' list gives it.
+    pub device: String,
+    /// Whether it can turn HDR on.
     pub supported: bool,
+    /// Whether HDR is on.
     pub on: bool,
 }
 
@@ -46,16 +52,23 @@ pub fn displays() -> Result<Vec<Display>, String> {
             // SAFETY: the header names its own struct's type and size.
             let code = unsafe { DisplayConfigGetDeviceInfo(&mut name.header) };
             check(code, "target name")?;
-            let friendly = &name.monitorFriendlyDeviceName;
-            let length = friendly
-                .iter()
-                .position(|&c| c == 0)
-                .unwrap_or(friendly.len());
+            let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+                header: header::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>(
+                    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                    path.sourceInfo.adapterId,
+                    path.sourceInfo.id,
+                ),
+                ..Default::default()
+            };
+            // SAFETY: the header names its own struct's type and size.
+            let code = unsafe { DisplayConfigGetDeviceInfo(&mut source.header) };
+            check(code, "source name")?;
             let (supported, on) = state(adapter, id)?;
             Ok(Display {
                 adapter,
                 id,
-                name: String::from_utf16_lossy(&friendly[..length]),
+                name: wide_text(&name.monitorFriendlyDeviceName),
+                device: wide_text(&source.viewGdiDeviceName),
                 supported,
                 on,
             })
@@ -75,9 +88,20 @@ fn state(adapter: LUID, id: u32) -> Result<(bool, bool), String> {
     // SAFETY: the header names its own struct's type and size.
     let code = unsafe { DisplayConfigGetDeviceInfo(&mut info.header) };
     check(code, "advanced color info")?;
-    // SAFETY: every bit pattern of the union is a valid u32. Bit 0 is advancedColorSupported, bit 1 advancedColorEnabled.
+    // SAFETY: every bit pattern of the union is a valid u32.
     let bits = unsafe { info.Anonymous.value };
-    Ok((bits & 1 != 0, bits & 2 != 0))
+    Ok(hdr_state(bits))
+}
+
+/// Whether a monitor can turn HDR on, and whether it is on, from its advanced color bits: bit 0 is
+/// advancedColorSupported, bit 1 advancedColorEnabled, bit 2 wideColorEnforced. Windows also enables advanced color
+/// on an SDR monitor for its automatic color management, and then enforces wide color: that monitor shows no HDR.
+fn hdr_state(bits: u32) -> (bool, bool) {
+    let (supported, enabled, wide_color_enforced) = (bits & 1 != 0, bits & 2 != 0, bits & 4 != 0);
+    (
+        supported && !wide_color_enforced,
+        enabled && !wide_color_enforced,
+    )
 }
 
 /// Turns HDR on or off on `display`, and checks that Windows did.
@@ -209,4 +233,18 @@ fn check(code: i32, what: &str) -> Result<(), String> {
     WIN32_ERROR(code.cast_unsigned())
         .ok()
         .map_err(|e| format!("DisplayConfig, {what}: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_sdr_monitor_with_windows_color_management_shows_no_hdr() {
+        // HDR off, HDR on, and an SDR monitor whose advanced color is Windows' automatic color management.
+        assert_eq!(hdr_state(0b001), (true, false));
+        assert_eq!(hdr_state(0b011), (true, true));
+        assert_eq!(hdr_state(0b111), (false, false));
+        assert_eq!(hdr_state(0b000), (false, false));
+    }
 }
