@@ -7,6 +7,8 @@
 
 mod gdi;
 mod sdr_white_level;
+#[cfg(test)]
+mod self_check;
 
 use std::time::{Duration, Instant};
 
@@ -48,15 +50,22 @@ const WAIT_MS: u32 = 100;
 /// DXGI couldn't photograph. A monitor neither path photographs comes back as `None`, so the session core keeps the
 /// tools closed (all or nothing), and both failures go to the log. Only failing to list the monitors fails the call.
 pub fn every_monitor() -> windows::core::Result<Vec<Option<Photo>>> {
-    let monitors = monitors()?;
-    let shots = one_per_monitor(&monitors, grab_every_output(), |monitor| {
-        gdi::image(monitor.rect)
-    });
+    let (monitors, shots) = every_shot()?;
     Ok(monitors
         .iter()
         .zip(shots)
         .map(|(monitor, shot)| shot.into_photo(&monitor.device))
         .collect())
+}
+
+/// The monitors, in the order Windows lists them, each with its shot: what [`every_monitor`] takes, with the path that
+/// took each photo still on it, for the self-check to report.
+fn every_shot() -> windows::core::Result<(Vec<Monitor>, Vec<Shot>)> {
+    let monitors = monitors()?;
+    let shots = one_per_monitor(&monitors, grab_every_output(), |monitor| {
+        gdi::image(monitor.rect)
+    });
+    Ok((monitors, shots))
 }
 
 /// One monitor's photo and the path that took it, or why neither path could.
