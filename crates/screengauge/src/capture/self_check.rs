@@ -18,7 +18,9 @@ use screengauge_core::session::{
 };
 use screengauge_core::settings::{DimensionsMode, Options, Remembered, Tool};
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows::Win32::Graphics::Dwm::DwmFlush;
+use windows::Win32::Graphics::Dwm::{
+    DWMWA_TRANSITIONS_FORCEDISABLED, DwmFlush, DwmSetWindowAttribute,
+};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, ClientToScreen, CreateSolidBrush, DeleteObject, EndPaint, FillRect, HDC,
     PAINTSTRUCT, UpdateWindow,
@@ -34,14 +36,15 @@ use windows::Win32::UI::WindowsAndMessaging::{
     UnregisterClassW, WM_ERASEBKGND, WM_PAINT, WNDCLASSEXW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     WS_EX_TOPMOST, WS_POPUP,
 };
-use windows::core::{Error, PCWSTR, w};
+use windows::core::{BOOL, Error, PCWSTR, w};
 
 use super::{Monitor, Shot, every_shot, fits, gdi, monitors, photo};
 use crate::win32::{self, struct_size};
 
-/// The card's client area, in physical pixels: the same on every monitor.
+/// The card's client area, in physical pixels: the same on every monitor, and big enough for its shapes up to 500%,
+/// Windows' highest scale.
 const CARD_WIDTH: u32 = 600;
-const CARD_HEIGHT: u32 = 400;
+const CARD_HEIGHT: u32 = 520;
 /// The card's background, red, green, blue.
 const WHITE: [u8; 3] = [0xFF, 0xFF, 0xFF];
 
@@ -53,6 +56,9 @@ struct Shape {
     rect: Rect,
     /// Red, green, blue.
     color: [u8; 3],
+    /// Its width and height in logical pixels, for a shape drawn to a size in logical pixels: what its label's logical
+    /// pixels must round to.
+    logical: Option<(u32, u32)>,
 }
 
 /// The shapes on a card painted at `dpi`: one of a fixed size in physical pixels, and one of a fixed size in logical
@@ -69,8 +75,9 @@ fn shapes(dpi: u32) -> [Shape; 2] {
                 height: 200,
             },
             color: [0x1E, 0x90, 0xFF],
+            logical: None,
         },
-        // Below the blue one, and inside the card up to 300%: 300 × 150 from row 240.
+        // Below the blue one, and inside the card up to 500%: 500 × 250 from row 240.
         Shape {
             name: "orange, 100 × 50 logical px",
             rect: Rect {
@@ -80,6 +87,7 @@ fn shapes(dpi: u32) -> [Shape; 2] {
                 height,
             },
             color: [0xFF, 0x8C, 0x00],
+            logical: Some((100, 50)),
         },
     ]
 }
@@ -153,8 +161,8 @@ impl fmt::Display for Check {
     }
 }
 
-/// Checks one path's photos of every monitor against the cards painted on them: for each card, the photo's scale, every
-/// pixel, and each shape as Dimensions measures it in Cross mode with the cursor at its center. `photos` are in the order
+/// Checks one path's photos of every monitor against the cards painted on them: for each card, every pixel, and each
+/// shape as Dimensions measures and labels it in Cross mode with the cursor at its center. `photos` are in the order
 /// Windows lists the monitors, `None` for a monitor the path couldn't photograph. The checks come back per card.
 fn check_photos(photos: Vec<Option<Photo>>, cards: &[Card]) -> Vec<Vec<Check>> {
     let mut checks: Vec<Vec<Check>> = cards
@@ -193,27 +201,16 @@ fn check_photos(photos: Vec<Option<Photo>>, cards: &[Card]) -> Vec<Vec<Check>> {
     checks
 }
 
-/// The scale and pixel checks of one card's photo.
+/// The pixel check of one card's photo. The photo's scale needs no check of its own: the labels' logical pixels show it.
 fn photo_checks(photo: Option<&Photo>, card: Card) -> Vec<Check> {
-    let Some(photo) = photo else {
-        return vec![Check::new(
+    match photo {
+        Some(photo) => vec![identical_check(photo, card)],
+        None => vec![Check::new(
             "photo",
             false,
             "this path took no photo of the monitor",
-        )];
-    };
-    vec![
-        Check::new(
-            "scale",
-            photo.scale.dpi() == card.dpi,
-            format!(
-                "the photo says {} DPI, the card was painted at {}",
-                photo.scale.dpi(),
-                card.dpi
-            ),
-        ),
-        identical_check(photo, card),
-    ]
+        )],
+    }
 }
 
 /// Whether every pixel of the card in the photo is the color painted there.
@@ -298,7 +295,8 @@ fn session_at(session: &mut Session, at: Point) -> Result<Measurement, String> {
         .ok_or_else(|| format!("Dimensions measured nothing at ({}, {})", at.x, at.y))
 }
 
-/// Whether `measured` is the whole of `shape`, on the card's monitor.
+/// Whether `measured` is the whole of `shape`, on the card's monitor, and its label says so: the physical pixels exactly,
+/// and the logical ones at the card's scale, to the tenth the label shows them.
 fn measure_check(
     measured: Result<Measurement, String>,
     card: Card,
@@ -324,24 +322,56 @@ fn measure_check(
             },
         }),
     );
-    let passed =
-        measured.monitor == card.monitor && (measured.horizontal, measured.vertical) == expected;
+    let label = &measured.label;
+    let passed = measured.monitor == card.monitor
+        && (measured.horizontal, measured.vertical) == expected
+        && label.physical == format!("{} × {}", rect.width, rect.height)
+        && logical_label_fits(label.logical.as_deref(), shape, card.dpi);
+    let shown = match &label.logical {
+        Some(logical) => format!("{} | {logical}", label.physical),
+        None => label.physical.clone(),
+    };
     let found = match (measured.horizontal, measured.vertical) {
         (Some(horizontal), Some(vertical)) => format!(
-            "{} × {} from ({}, {}), label \"{}\"; expected {} × {} from ({}, {})",
+            "{} × {} from ({}, {}), label \"{shown}\"; expected {} × {} from ({}, {}) at {} DPI",
             horizontal.length(),
             vertical.length(),
             horizontal.first.x,
             vertical.first.y,
-            measured.label.physical,
             rect.width,
             rect.height,
             rect.left,
-            rect.top
+            rect.top,
+            card.dpi
         ),
         _ => format!("not a Cross measurement: {measured:?}"),
     };
     Check::new(what, passed, found)
+}
+
+/// Whether a label's logical pixels are the shape's physical width and height at `dpi`, each to the tenth, and, for a
+/// shape drawn to a size in logical pixels, round to that size. At 100% the label has none.
+fn logical_label_fits(logical: Option<&str>, shape: Shape, dpi: u32) -> bool {
+    let Some(logical) = logical else {
+        return dpi == 96;
+    };
+    let lengths: Vec<Option<f64>> = logical
+        .split(" × ")
+        .map(|length| length.parse().ok())
+        .collect();
+    let [Some(width), Some(height)] = lengths[..] else {
+        return false;
+    };
+    let at_scale = |physical: u32| f64::from(physical) * 96.0 / f64::from(dpi);
+    // The label rounds to the tenth: half a tenth off at most, and a hair more for the float.
+    let to_the_tenth = |shown: f64, physical: u32| (shown - at_scale(physical)).abs() <= 0.051;
+    let drawn = shape.logical.is_none_or(|(w, h)| {
+        (width - f64::from(w)).abs() < 0.5 && (height - f64::from(h)).abs() < 0.5
+    });
+    dpi != 96
+        && to_the_tenth(width, shape.rect.width)
+        && to_the_tenth(height, shape.rect.height)
+        && drawn
 }
 
 /// The pixel at the center of `rect`, rounded up and left.
@@ -462,6 +492,17 @@ impl Windows {
                 )
             }?;
             shown.windows.push(window);
+            // Shown at once, as the tray menu is: a fade the photo caught would fail a correct screen.
+            let no_fade = BOOL::from(true);
+            // SAFETY: the window just made; the value outlives the call, which reads exactly its size.
+            unsafe {
+                DwmSetWindowAttribute(
+                    window,
+                    DWMWA_TRANSITIONS_FORCEDISABLED,
+                    (&raw const no_fade).cast(),
+                    const { struct_size::<BOOL>() },
+                )
+            }?;
             // SAFETY: the window was just made on this thread. ShowWindow returns whether it was visible, not an error.
             unsafe {
                 let _ = ShowWindow(window, SW_SHOWNOACTIVATE);
@@ -592,6 +633,7 @@ fn paint(window: HWND) {
             height: CARD_HEIGHT,
         },
         color: WHITE,
+        logical: None,
     };
     for shape in std::iter::once(whole).chain(shapes(dpi)) {
         fill(dc, shape);
@@ -669,6 +711,12 @@ fn report(
     windows: &[Check],
     time: &Check,
 ) -> (String, usize) {
+    // A monitor missing from any list would get fewer checks, and could pass with none.
+    assert_eq!(windows.len(), monitors.len(), "a card window per monitor");
+    for section in sections {
+        assert_eq!(section.how.len(), monitors.len(), "{}", section.name);
+        assert_eq!(section.checks.len(), monitors.len(), "{}", section.name);
+    }
     let mut text = String::new();
     let mut total = 0;
     let mut failed = 0;
@@ -688,12 +736,10 @@ fn report(
             rect.top,
             monitor.scale.dpi()
         ));
-        if let Some(check) = windows.get(index) {
-            add(&mut text, "  ", check);
-        }
+        add(&mut text, "  ", &windows[index]);
         for section in sections {
             text.push_str(&format!("  {}: {}\n", section.name, section.how[index]));
-            for check in section.checks.get(index).into_iter().flatten() {
+            for check in &section.checks[index] {
                 add(&mut text, "    ", check);
             }
         }
@@ -785,7 +831,7 @@ mod tests {
             Card {
                 monitor: 1,
                 left: -700,
-                top: 100,
+                top: 40,
                 dpi: 120,
             },
         ]
@@ -839,15 +885,14 @@ mod tests {
         assert_eq!(
             found,
             [
-                "the photo says 168 DPI, the card was painted at 168",
-                "240000 of 240000 pixels as painted",
-                "300 × 200 from (200, 180), label \"300 × 200\"; expected 300 × 200 from (200, 180)",
-                "175 × 88 from (200, 400), label \"175 × 88\"; expected 175 × 88 from (200, 400)",
+                "312000 of 312000 pixels as painted",
+                "300 × 200 from (200, 180), label \"300 × 200 | 171.4 × 114.3\"; expected 300 × 200 from (200, 180) at 168 DPI",
+                "175 × 88 from (200, 400), label \"175 × 88 | 100 × 50.3\"; expected 175 × 88 from (200, 400) at 168 DPI",
             ]
         );
         assert_eq!(
-            checks[1][3].found,
-            "125 × 63 from (-680, 340), label \"125 × 63\"; expected 125 × 63 from (-680, 340)"
+            checks[1][2].found,
+            "125 × 63 from (-680, 280), label \"125 × 63 | 100 × 50.4\"; expected 125 × 63 from (-680, 280) at 120 DPI"
         );
     }
 
@@ -870,12 +915,12 @@ mod tests {
         );
         // Each shape's first and last column differ on every one of its rows: 2 × 200 + 2 × 88.
         assert_eq!(
-            checks[0][1].found,
-            "576 of 240000 pixels differ; the first at (200, 180) is #FFFFFF where #1E90FF was painted"
+            checks[0][0].found,
+            "576 of 312000 pixels differ; the first at (200, 180) is #FFFFFF where #1E90FF was painted"
         );
         assert_eq!(
-            checks[0][2].found,
-            "300 × 200 from (201, 180), label \"300 × 200\"; expected 300 × 200 from (200, 180)"
+            checks[0][1].found,
+            "300 × 200 from (201, 180), label \"300 × 200 | 171.4 × 114.3\"; expected 300 × 200 from (200, 180) at 168 DPI"
         );
         assert_eq!(failed(&checks[1]), Vec::<&str>::new());
     }
@@ -893,8 +938,8 @@ mod tests {
         assert_eq!(failed(&checks[0]), Vec::<&str>::new());
         assert_eq!(failed(&checks[1]), ["identical to the screen"]);
         assert_eq!(
-            checks[1][1].found,
-            "1 of 240000 pixels differ; the first at (-500, 450) is #FFFFFE where #FFFFFF was painted"
+            checks[1][0].found,
+            "1 of 312000 pixels differ; the first at (-500, 450) is #FFFFFE where #FFFFFF was painted"
         );
     }
 
@@ -920,17 +965,43 @@ mod tests {
             ]
         );
         assert_eq!(
-            checks[0][2].found,
+            checks[0][1].found,
             "the session refused the photos: monitor 1 has no photo"
         );
     }
 
     #[test]
-    fn a_photo_at_another_scale_fails_the_scale() {
+    fn a_photo_at_another_scale_than_the_card_fails_both_labels() {
+        // The photo says 150% where the card was painted at 175%: the spans are right, their logical pixels aren't.
         let mut photos = photos(&cards());
         photos[0].as_mut().expect("the main monitor's photo").scale =
             Scale::from_dpi(144).expect("150%");
         let checks = check_photos(photos, &cards());
-        assert_eq!(failed(&checks[0]), ["scale"]);
+        assert_eq!(
+            failed(&checks[0]),
+            [
+                "measures blue, 300 × 200 physical px",
+                "measures orange, 100 × 50 logical px"
+            ]
+        );
+        assert_eq!(
+            checks[0][1].found,
+            "300 × 200 from (200, 180), label \"300 × 200 | 200 × 133.3\"; expected 300 × 200 from (200, 180) at 168 DPI"
+        );
+        assert_eq!(failed(&checks[1]), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn at_100_percent_the_labels_have_no_logical_pixels_and_pass() {
+        let main = Card {
+            dpi: 96,
+            ..cards()[0]
+        };
+        let checks = check_photos(vec![Some(photo(MAIN, 96, &[main]))], &[main]);
+        assert_eq!(failed(&checks[0]), Vec::<&str>::new(), "{checks:#?}");
+        assert_eq!(
+            checks[0][2].found,
+            "100 × 50 from (200, 400), label \"100 × 50\"; expected 100 × 50 from (200, 400) at 96 DPI"
+        );
     }
 }
