@@ -81,7 +81,7 @@ fn who_started() -> StartedBy {
     match package::activation_kind() {
         Ok(None) => by_arguments,
         Ok(Some(kind)) => {
-            let started = started_in_package(by_arguments, Some(kind));
+            let started = started_in_package(by_arguments, kind);
             // In DebugView, the one trace of how a start at sign-in went (WPC-336).
             log::note(&format!(
                 "started {started:?}: its arguments say {by_arguments:?}, Windows says {kind:?}"
@@ -96,12 +96,11 @@ fn who_started() -> StartedBy {
     }
 }
 
-/// Who started the Store copy, from its arguments (`started_by`) and how Windows says it started the package's app
-/// (`kind`), should it say. The startup task's start is at sign-in, whether or not Windows passed the manifest's
-/// `--sign-in` along with it.
-fn started_in_package(by_arguments: StartedBy, kind: Option<ActivationKind>) -> StartedBy {
+/// Who started the Store copy, from its arguments (`started_by`) and how Windows says it started it (`kind`). The
+/// startup task's start is at sign-in, whether or not Windows passed the manifest's `--sign-in` along with it.
+fn started_in_package(by_arguments: StartedBy, kind: ActivationKind) -> StartedBy {
     match (by_arguments, kind) {
-        (StartedBy::User, Some(ActivationKind::StartupTask)) => StartedBy::SignIn,
+        (StartedBy::User, ActivationKind::StartupTask) => StartedBy::SignIn,
         _ => by_arguments,
     }
 }
@@ -164,12 +163,12 @@ mod tests {
     fn the_store_copy_started_by_its_startup_task_starts_as_at_sign_in_even_without_the_flag() {
         let opened = started_by(args(&["ScreenGauge.exe"]));
         assert_eq!(
-            started_in_package(opened, Some(ActivationKind::StartupTask)),
+            started_in_package(opened, ActivationKind::StartupTask),
             StartedBy::SignIn
         );
         let flagged = started_by(args(&["ScreenGauge.exe", "--sign-in"]));
         assert_eq!(
-            started_in_package(flagged, Some(ActivationKind::StartupTask)),
+            started_in_package(flagged, ActivationKind::StartupTask),
             StartedBy::SignIn
         );
     }
@@ -178,12 +177,14 @@ mod tests {
     fn the_store_copy_opened_from_the_start_menu_or_for_a_click_starts_as_its_arguments_say() {
         let opened = started_by(args(&["ScreenGauge.exe"]));
         assert_eq!(
-            started_in_package(opened, Some(ActivationKind::Launch)),
+            started_in_package(opened, ActivationKind::Launch),
             StartedBy::User
         );
-        assert_eq!(started_in_package(opened, None), StartedBy::User);
         let clicked = started_by(args(&["ScreenGauge.exe", "-Embedding", "-Embedding"]));
-        assert_eq!(started_in_package(clicked, None), StartedBy::Click);
+        assert_eq!(
+            started_in_package(clicked, ActivationKind::Launch),
+            StartedBy::Click
+        );
     }
 
     #[test]

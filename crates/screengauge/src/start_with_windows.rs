@@ -62,7 +62,7 @@ pub fn turn(on: bool) -> windows::core::Result<()> {
         AppCopy::Store => {
             let task = startup_task()?;
             if on {
-                // A packaged desktop app's request shows no dialog; Windows answers with the task's new state, which
+                // The Store copy's request shows no dialog; Windows answers with the task's new state, which
                 // `click` reads again.
                 task.RequestEnableAsync()?.join()?;
                 Ok(())

@@ -4,7 +4,7 @@ The Microsoft Store copy of ScreenGauge is this MSIX package (WPC-334). It holds
 
 - keeps its settings file in the package's own folder, `%LOCALAPPDATA%\Packages\WPCSolutions.ScreenGauge_8rc0q4yanedb4\LocalState`, which Windows deletes when the package is uninstalled. It never uses the installer copy's `%LOCALAPPDATA%\ScreenGauge`: Windows would let the package open and change a file already there (WPC-289);
 - writes nothing in the registry for its Windows notifications. The manifest declares their activator, with a class of the Store copy's own, and their header shows the package's name and icon;
-- starts with Windows from the package's startup task, never from the installer copy's `Run` value (WPC-336). The manifest declares the task off; "Start with Windows" in Settings or the tray menu enables or disables it, and Task Manager and Settings > Apps > Startup list it as ScreenGauge. Windows runs the task only once the package's app has been opened at least once.
+- starts with Windows from the package's startup task, never from the installer copy's `Run` value (WPC-336). The manifest declares the task off; "Start with Windows" in Settings or the tray menu enables or disables it, and Task Manager and Settings > Apps > Startup list it as ScreenGauge. Windows runs the task only once the Store copy has been opened at least once.
 
 | File | What it does |
 | --- | --- |
