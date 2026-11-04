@@ -6,6 +6,7 @@ use std::path::Path;
 use screengauge_core::settings::{DefaultFolder, Folder, Options, SnipDestination};
 
 use super::*;
+use crate::settings_window::layout::Span;
 use crate::settings_window::snip_card;
 
 const LONG_PATH: &str =

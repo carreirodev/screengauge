@@ -59,6 +59,13 @@ pub const FOOTER_LINE: f32 = 12.0 * 1.3;
 /// Between the footer's texts on the left (`.sfoot`'s `gap`).
 pub const FOOTER_GAP: u32 = 7;
 
+/// "Check for updates"' line under the footer's texts (`.ustat`): it starts 3 above the footer's bottom
+/// (`margin-top: -3px`), holds one line of the footer's text, and leaves 11 below it (`padding-bottom`). 23.6 tall in
+/// all, 24 in whole pixels. Between its sign and its texts is `gap: 6px`.
+const STATUS: u32 = 24;
+pub const STATUS_ABOVE: u32 = 3;
+pub const STATUS_GAP: u32 = 6;
+
 /// The blocks of options, in the order the spec gives them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Block {
@@ -277,6 +284,27 @@ pub fn place_row(row: Row, grown: &[Grown]) -> PlacedRow {
     }
 }
 
+/// `page`, with "Check for updates"' line under the footer while `status` shows one: the footer and the page are
+/// `STATUS` taller, and the window with them.
+pub fn with_status(page: Page, status: bool) -> Page {
+    if !status {
+        return page;
+    }
+    Page {
+        footer: Span {
+            top: page.footer.top,
+            bottom: page.footer.bottom + STATUS,
+        },
+        height: page.height + STATUS,
+        ..page
+    }
+}
+
+/// Where "Check for updates"' line starts: 3 above the bottom of the footer's texts' room.
+pub fn status_line(footer: Span) -> u32 {
+    footer.top + FOOTER - STATUS_ABOVE
+}
+
 /// The page, laid out, with the rows `grown` taller while their messages show.
 pub fn page(grown: &[Grown]) -> Page {
     let mut top = PADDING;
@@ -319,6 +347,21 @@ mod tests {
             (measured..measured + 2.0).contains(&height),
             "{height} for the {measured} measured"
         );
+    }
+
+    #[test]
+    fn check_for_updates_line_grows_the_footer_and_the_page_by_24_and_only_while_it_shows() {
+        let page = page(&[]);
+        assert_eq!(with_status(page.clone(), false), page);
+        let shown = with_status(page.clone(), true);
+        assert_eq!(shown.height, page.height + 24);
+        assert_eq!(shown.footer.top, page.footer.top);
+        assert_eq!(shown.footer.bottom, shown.height);
+        assert_eq!(shown.blocks, page.blocks);
+        // The line starts 3 above where the footer ended without it, and its text's line and 11 below fit under it.
+        let line = status_line(shown.footer);
+        assert_eq!(line, page.footer.bottom - 3);
+        assert!(f64::from(line) + f64::from(FOOTER_LINE) + 11.0 <= f64::from(shown.height));
     }
 
     #[test]

@@ -4,10 +4,8 @@
 
 use screengauge_core::session::{Point, Sign};
 use windows::Win32::Foundation::RECT;
-use windows::Win32::Graphics::Direct2D::Common::{D2D1_FIGURE_BEGIN_HOLLOW, D2D1_FIGURE_END_OPEN};
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
-    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1RenderTarget,
+    D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1RenderTarget,
 };
 
 use super::floating;
@@ -34,9 +32,6 @@ const REACH: u32 = 14;
 const BELOW: u32 = 18;
 /// How near the monitor's right and top sides the notice may come before it moves to the other side of the cursor.
 const EDGE: u32 = 4;
-
-/// The sign is drawn in the 24 by 24 units of its prototype, and scaled to `SIGN` pixels.
-const SIGN_UNITS: f32 = 24.0;
 
 /// The panel around a text `text_width` pixels wide: the border, the padding, the sign, a gap and the text.
 pub fn size(text_width: i32, dpi: u32) -> Size {
@@ -118,9 +113,8 @@ impl Overlay {
         Ok(())
     }
 
-    /// The sign with its top left corner at (`left`, `top`) in the window: the check mark in the accent's color, or the
-    /// exclamation mark in a circle in the warning's. Both are strokes with round caps and joins, as in the prototype,
-    /// in a box of 24 units that is `SIGN` logical pixels wide.
+    /// The sign with its top left corner at (`left`, `top`) in the window, `SIGN` logical pixels wide: the check mark
+    /// in the accent's color, or the exclamation mark in a circle in the warning's.
     pub(super) fn draw_sign(
         &self,
         target: &ID2D1RenderTarget,
@@ -128,62 +122,16 @@ impl Overlay {
         left: f32,
         top: f32,
     ) -> windows::core::Result<()> {
-        let unit = px(scaled(SIGN, self.dpi)) / SIGN_UNITS;
-        // A point given in the sign's units.
-        let at = |x: f32, y: f32| dot(left + x * unit, top + y * unit).point;
-        // SAFETY: a drawing call on a live render target. Out of BeginDraw and EndDraw, Direct2D only fails the frame
-        // at EndDraw.
-        unsafe { target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };
-        match sign {
-            Sign::Ok => {
-                // SAFETY: no arguments.
-                let path = unsafe { self.factory.CreatePathGeometry() }?;
-                // SAFETY: no arguments.
-                let sink = unsafe { path.Open() }?;
-                // SAFETY: the points are plain values, and the figure is begun, extended and ended in order on the
-                // sink this function opened and closes below.
-                unsafe {
-                    sink.BeginFigure(at(5.0, 12.5), D2D1_FIGURE_BEGIN_HOLLOW);
-                    sink.AddLine(at(9.5, 17.0));
-                    sink.AddLine(at(19.0, 7.5));
-                    sink.EndFigure(D2D1_FIGURE_END_OPEN);
-                }
-                // SAFETY: closes the sink opened above, once.
-                unsafe { sink.Close() }?;
-                // SAFETY: a drawing call on a live render target with arguments that outlive it; as above.
-                unsafe {
-                    target.DrawGeometry(&path, &self.surfaces.accent, 3.0 * unit, &self.stroke);
-                }
-            }
-            Sign::Alert => {
-                let width = 2.4 * unit;
-                let circle = D2D1_ELLIPSE {
-                    point: at(12.0, 12.0),
-                    radiusX: 9.5 * unit,
-                    radiusY: 9.5 * unit,
-                };
-                // SAFETY: drawing calls on a live render target with arguments that outlive them; as above.
-                unsafe {
-                    target.DrawEllipse(&circle, &self.surfaces.warn, width, &self.stroke);
-                    target.DrawLine(
-                        at(12.0, 7.0),
-                        at(12.0, 13.0),
-                        &self.surfaces.warn,
-                        width,
-                        &self.stroke,
-                    );
-                    // The dot is a line a hundredth of a unit long: its round caps make it a dot as wide as the stroke.
-                    target.DrawLine(
-                        at(12.0, 17.0),
-                        at(12.01, 17.0),
-                        &self.surfaces.warn,
-                        width,
-                        &self.stroke,
-                    );
-                }
-            }
-        }
-        Ok(())
+        let brush = match sign {
+            Sign::Ok => &self.surfaces.accent,
+            Sign::Alert => &self.surfaces.warn,
+        };
+        let pen = crate::sign::Pen {
+            target,
+            factory: &self.factory,
+            stroke: &self.stroke,
+        };
+        crate::sign::draw(&pen, brush, sign, left, top, px(scaled(SIGN, self.dpi)))
     }
 }
 

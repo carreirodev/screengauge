@@ -38,10 +38,9 @@ use screengauge_core::session::{
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_CAP_STYLE_ROUND,
-    D2D1_DASH_STYLE_SOLID, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_LINE_JOIN_ROUND, D2D1_ROUNDED_RECT,
-    D2D1_STROKE_STYLE_PROPERTIES, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1Factory,
-    ID2D1RenderTarget, ID2D1RoundedRectangleGeometry, ID2D1SolidColorBrush, ID2D1StrokeStyle,
+    D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_DRAW_TEXT_OPTIONS_NONE,
+    D2D1_ROUNDED_RECT, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1Factory, ID2D1RenderTarget,
+    ID2D1RoundedRectangleGeometry, ID2D1SolidColorBrush, ID2D1StrokeStyle,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_FEATURE, DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, DWRITE_FONT_WEIGHT,
@@ -234,17 +233,7 @@ impl Overlay {
         }?;
         // SAFETY: no arguments; the factory comes back as an owned interface.
         let factory = unsafe { target.GetFactory() }?;
-        let round = D2D1_STROKE_STYLE_PROPERTIES {
-            startCap: D2D1_CAP_STYLE_ROUND,
-            endCap: D2D1_CAP_STYLE_ROUND,
-            dashCap: D2D1_CAP_STYLE_ROUND,
-            lineJoin: D2D1_LINE_JOIN_ROUND,
-            miterLimit: 1.0,
-            dashStyle: D2D1_DASH_STYLE_SOLID,
-            dashOffset: 0.0,
-        };
-        // SAFETY: `round` outlives the call, which keeps nothing of it; a solid line has no dashes to give.
-        let stroke = unsafe { factory.CreateStrokeStyle(&round, None) }?;
+        let stroke = crate::sign::round_stroke(&factory)?;
         Ok(Overlay {
             // #22d3ee, the same cyan whatever the Windows theme.
             cyan: brush(0x22, 0xd3, 0xee)?,

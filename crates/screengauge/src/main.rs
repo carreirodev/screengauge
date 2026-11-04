@@ -27,6 +27,7 @@ mod resident;
 mod save_as;
 mod settings_file;
 mod settings_window;
+mod sign;
 mod single_instance;
 mod snip_file;
 mod start_with_windows;
@@ -37,6 +38,7 @@ mod test_folder;
 mod theme;
 mod tray;
 mod tray_menu;
+mod update_check;
 mod win32;
 
 use std::process::ExitCode;

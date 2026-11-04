@@ -3,7 +3,8 @@
 //! opening it again brings the same window to the front. Its title bar is Windows' own, dark in the dark theme, and
 //! follows the theme at once when it changes, from Settings or, in Automatic, from Windows (WPC-321); below
 //! it, ScreenGauge draws one page that the user can't resize: the blocks' cards with their rows, and the footer with
-//! the version and the link to the project's page. Its X closes only the window, and ScreenGauge keeps running.
+//! the version, the link to the project's page and "Check for updates" (`updates`, WPC-335). Its X closes only the
+//! window, and ScreenGauge keeps running.
 //!
 //! A click on a control changes the option at once, in the settings file too, with no Save or Cancel (WPC-320). The Snip's
 //! "Change…", and its switch turned on with no folder kept, open Windows' folder window over this one (WPC-322). Like
@@ -15,6 +16,7 @@
 //! most, and nothing holds a borrow of it across a call that may send the window a message.
 
 mod controls;
+mod footer;
 mod layout;
 mod paint;
 mod recorder;
@@ -22,6 +24,7 @@ mod recorder_field;
 mod row_message;
 mod snip_card;
 mod start_with_windows_row;
+mod updates;
 
 use std::cell::{Cell, RefCell};
 
@@ -62,9 +65,11 @@ use crate::theme::Mode;
 use crate::win32::{contains, low_word, signed_words, struct_size};
 use crate::{
     com, event, folder_picker, graphics, keyboard_hook, log, resident, settings_file, tray,
+    update_check,
 };
 pub use controls::dpi_scale;
 use controls::{Control, Pointer};
+use footer::Link;
 pub use paint::{background, palette, write};
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.Settings");
@@ -107,7 +112,7 @@ thread_local! {
 /// What a click in the page can act on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Hit {
-    Link,
+    Link(Link),
     Control(Control),
 }
 
@@ -347,9 +352,9 @@ fn monitor_at(cursor: screengauge_core::session::Point) -> windows::core::Result
 }
 
 /// The window's whole size at `dpi`, title bar and frame included, for the page's 560 logical pixels wide and its height
-/// inside, taller while a message shows under a row's label.
+/// inside, taller while a message shows under a row's label, and while "Check for updates" says something.
 fn window_size(dpi: u32) -> windows::core::Result<SIZE> {
-    window_size_with(dpi, &grown())
+    window_size_with(dpi, &grown(), updates::status().is_some())
 }
 
 /// The messages under rows' labels, while they show: the global shortcut's and "Start with Windows"'.
@@ -368,14 +373,22 @@ fn grown() -> Vec<layout::Grown> {
         .collect()
 }
 
-/// The window's whole size at `dpi` for the page grown as `grown` says.
-fn window_size_with(dpi: u32, grown: &[layout::Grown]) -> windows::core::Result<SIZE> {
+/// The window's whole size at `dpi` for the page grown as `grown` says, with "Check for updates"' line when `status`.
+fn window_size_with(
+    dpi: u32,
+    grown: &[layout::Grown],
+    status: bool,
+) -> windows::core::Result<SIZE> {
     let too_large = || Error::new(E_FAIL, "the page is too large for a window");
     let mut rect = RECT {
         left: 0,
         top: 0,
         right: i32::try_from(scaled(layout::WIDTH, dpi)).map_err(|_| too_large())?,
-        bottom: i32::try_from(scaled(layout::page(grown).height, dpi)).map_err(|_| too_large())?,
+        bottom: i32::try_from(scaled(
+            layout::with_status(layout::page(grown), status).height,
+            dpi,
+        ))
+        .map_err(|_| too_large())?,
     };
     // SAFETY: adjusts a local.
     unsafe { AdjustWindowRectExForDpi(&mut rect, STYLE, false, EX_STYLE, dpi) }?;
@@ -447,7 +460,8 @@ fn kept_inside(top: i32, height: i32, work: RECT) -> i32 {
     }
 }
 
-/// Sizes the window for the page as it is now, where it is: a message under a row's label came or went. The top stays
+/// Sizes the window for the page as it is now, where it is: a message under a row's label, or "Check for updates"'
+/// line, came or went. The top stays
 /// where it is, and the window grows or shrinks at the bottom.
 fn follow_page(hwnd: HWND) {
     // SAFETY: our own window.
@@ -522,7 +536,8 @@ extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_SETCURSOR
-            if low_word(lparam) == HTCLIENT && hit_at(cursor_in(hwnd)) == Some(Hit::Link) =>
+            if low_word(lparam) == HTCLIENT
+                && matches!(hit_at(cursor_in(hwnd)), Some(Hit::Link(_))) =>
         {
             // SAFETY: a system cursor, shared.
             match unsafe { LoadCursorW(None, IDC_HAND) } {
@@ -628,10 +643,15 @@ extern "system" fn window_proc(
             recorder::on_hook_ended(hwnd, wparam);
             LRESULT(0)
         }
+        updates::CHECKED => {
+            updates::on_checked(hwnd);
+            LRESULT(0)
+        }
         WM_DESTROY => {
             // The keyboard goes back to Windows at once.
             recorder::close();
             start_with_windows_row::close();
+            updates::close();
             WINDOW.set(None);
             drop(TARGET.take());
             DRAWN.set(None);
@@ -658,7 +678,7 @@ fn client_point(lparam: LPARAM) -> POINT {
     }
 }
 
-/// Where the cursor is now, in the window's client pixels. `None` when Windows can't say, which is never on the link.
+/// Where the cursor is now, in the window's client pixels. `None` when Windows can't say, which is never on a link.
 fn cursor_in(hwnd: HWND) -> Option<POINT> {
     let mut point = POINT::default();
     // SAFETY: fills a local.
@@ -682,8 +702,8 @@ fn hit_at(point: Option<POINT>) -> Option<Hit> {
     let point = point?;
     DRAWN.with_borrow(|drawn| {
         let drawn = drawn.as_ref()?;
-        if contains(&drawn.link, point) {
-            return Some(Hit::Link);
+        if let Some(&(link, _)) = drawn.links.iter().find(|(_, place)| contains(place, point)) {
+            return Some(Hit::Link(link));
         }
         drawn
             .controls
@@ -696,7 +716,7 @@ fn hit_at(point: Option<POINT>) -> Option<Hit> {
 fn control_at(point: Option<POINT>) -> Option<Control> {
     match hit_at(point)? {
         Hit::Control(control) => Some(control),
-        Hit::Link => None,
+        Hit::Link(_) => None,
     }
 }
 
@@ -729,7 +749,11 @@ fn track_leave(hwnd: HWND) {
 /// Does what a click on `hit` does.
 fn act(hwnd: HWND, hit: Hit) {
     match hit {
-        Hit::Link => open_project_page(hwnd),
+        Hit::Link(Link::ProjectPage) => open_address(hwnd, PROJECT_PAGE, "the project page"),
+        Hit::Link(Link::CheckForUpdates) => updates::click(hwnd),
+        Hit::Link(Link::Download) => {
+            open_address(hwnd, update_check::RELEASES_PAGE, "the releases page");
+        }
         Hit::Control(Control::ShortcutField) => recorder::click_field(hwnd),
         Hit::Control(Control::ShortcutReset) => recorder::click_reset(hwnd),
         Hit::Control(Control::StartWithWindows) => start_with_windows_row::click(Some(hwnd)),
@@ -837,15 +861,15 @@ fn invalidate(hwnd: HWND) {
     }
 }
 
-/// Opens the project's page in the browser the user chose in Windows. A failure is only logged: the window stays as
-/// it is.
-fn open_project_page(hwnd: HWND) {
+/// Opens `address`, `what` for the log, in the program Windows has for it: a web page in the browser the user chose,
+/// the Store's page in the Microsoft Store. A failure is only logged: the window stays as it is.
+fn open_address(hwnd: HWND, address: &str, what: &str) {
     if let Err(e) = com::ensure_started() {
-        log::failure("Settings: starting COM for the project page", &e);
+        log::failure(&format!("Settings: starting COM for {what}"), &e);
         return;
     }
-    let page = HSTRING::from(PROJECT_PAGE);
-    // SAFETY: the strings outlive the call. Windows hands the address to the browser.
+    let page = HSTRING::from(address);
+    // SAFETY: the strings outlive the call. Windows hands the address to the program that opens it.
     let opened = unsafe {
         ShellExecuteW(
             Some(hwnd),
@@ -861,7 +885,7 @@ fn open_project_page(hwnd: HWND) {
     let code = opened.0 as isize;
     if code <= 32 {
         log::failure(
-            "Settings: opening the project page",
+            &format!("Settings: opening {what}"),
             &format!("ShellExecuteW returned {code}"),
         );
     }
@@ -907,12 +931,13 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
         start_with_windows: start_with_windows_row::is_on(),
         messages: messages(),
         grown: grown(),
+        update: updates::status(),
     };
     let pointer = Pointer {
         over: OVER.get(),
         held: match PRESSED.get() {
             Some(Hit::Control(control)) => Some(control),
-            Some(Hit::Link) | None => None,
+            Some(Hit::Link(_)) | None => None,
         },
     };
     let surface = paint::Surface {
@@ -966,10 +991,16 @@ mod tests {
         // The spec's 672 logical pixels of room: 1080 / 1.5 less the taskbar's 48.
         let work = full_hd_work_area(144);
         assert_eq!(work.bottom - work.top, 1008);
-        let size = window_size(144).expect("a size for 150%");
-        let corner = centered(work, size);
-        assert!(corner.y >= work.top, "{corner:?}");
-        assert!(corner.y + size.cy <= work.bottom, "{size:?} at {corner:?}");
+        // With "Check for updates"' line under the footer too.
+        for status in [false, true] {
+            let size = window_size_with(144, &[], status).expect("a size for 150%");
+            let corner = centered(work, size);
+            assert!(corner.y >= work.top, "{status}: {corner:?}");
+            assert!(
+                corner.y + size.cy <= work.bottom,
+                "{status}: {size:?} at {corner:?}"
+            );
+        }
     }
 
     #[test]
@@ -1005,7 +1036,7 @@ mod tests {
         // Full HD at 150%: 672 logical pixels of work area, the window centered there at its usual height.
         let dpi = 144;
         let work = full_hd_work_area(dpi);
-        let corner = centered(work, window_size_with(dpi, &[]).expect("a size"));
+        let corner = centered(work, window_size_with(dpi, &[], false).expect("a size"));
         // The widest field there is, and the longest message: it wraps on the most lines.
         let widest = Shortcut::new(
             Modifiers {
@@ -1028,7 +1059,7 @@ mod tests {
                 .expect("the room"),
         };
         let grown = message.growth(&fonts).expect("the growth");
-        let size = window_size_with(dpi, &[grown]).expect("a size");
+        let size = window_size_with(dpi, &[grown], false).expect("a size");
         assert!(
             corner.y + size.cy > work.bottom,
             "the grown window would reach under the taskbar: {size:?} at {corner:?}, {grown:?}"

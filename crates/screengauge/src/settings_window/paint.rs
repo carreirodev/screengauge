@@ -1,8 +1,8 @@
 //! Settings drawn onto any Direct2D render target at 96 DPI, so a test can render it on a bitmap and count pixels: the
 //! window's background, each block's heading and card, the rows with their labels, notes, messages (`row_message`) and
-//! controls (`controls`, `recorder_field`), the Snip's card (`snip`), and the footer with the version, the license and
-//! the "Project page" link. The colors are the prototype's theme tokens for `#settings` (WPC-279), where the `oklch`
-//! ones are converted to sRGB; the sizes come from `layout`, scaled for the monitor's `dpi`.
+//! controls (`controls`, `recorder_field`), the Snip's card (`snip`), and the footer (`footer`). The colors are
+//! the prototype's theme tokens for `#settings` (WPC-279), where the `oklch` ones are converted to sRGB; the sizes
+//! come from `layout`, scaled for the monitor's `dpi`.
 
 use screengauge_core::session::Point;
 use screengauge_core::session::toolbar::scaled;
@@ -27,7 +27,8 @@ use windows::core::{Error, Interface};
 use super::controls::{
     self, COLOR_FORMATS, Control, Label, LabelKind, Laid, Pointer, THEMES, dpi_scale,
 };
-use super::layout::{self, Grown, Page, Row, Span};
+use super::footer::{self, Link, Status};
+use super::layout::{self, Grown, Page, Row};
 use super::recorder_field::{self, View};
 use super::row_message::{self, Message};
 use super::snip_card;
@@ -38,16 +39,8 @@ use crate::theme::Mode;
 
 mod snip;
 
-/// The footer's left text: the version this exe was built as, and the license.
-pub const VERSION: &str = concat!("Version ", env!("CARGO_PKG_VERSION"));
-pub const LICENSE: &str = "Open source (MIT)";
-pub const LINK: &str = "Project page";
-
 /// The headings' letter spacing (`letter-spacing: .09em`), as a fraction of their size.
 const HEADING_SPACING: f32 = 0.09;
-
-/// How far below the baseline the link's underline starts (`text-underline-offset: 2px`).
-const UNDERLINE_OFFSET: u32 = 2;
 
 /// One mode's colors.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -96,19 +89,19 @@ pub fn palette(mode: Mode) -> &'static Palette {
 }
 
 /// A text laid out on one line, and where it goes.
-struct Placed {
+pub(super) struct Placed {
     layout: IDWriteTextLayout,
-    left: f32,
+    pub left: f32,
     /// The top of its layout box, set so the baseline falls on a whole pixel.
-    top: f32,
-    width: f32,
-    baseline: f32,
+    pub top: f32,
+    pub width: f32,
+    pub baseline: f32,
 }
 
-/// What a click can act on, as drawn: the "Project page" link and each part of a control, in the target's pixels.
+/// What a click can act on, as drawn: the footer's links and each part of a control, in the target's pixels.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Drawn {
-    pub link: RECT,
+    pub links: Vec<(Link, RECT)>,
     pub controls: Vec<(Control, RECT)>,
 }
 
@@ -124,7 +117,8 @@ pub struct Surface<'a> {
 }
 
 /// What Settings shows apart from the options: the global shortcut recorder's field, whether "Start with Windows" is on
-/// as Windows says, and the messages under rows' labels with how much each grows its row, while they show.
+/// as Windows says, the messages under rows' labels with how much each grows its row, while they show, and what "Check
+/// for updates"' line says, from its click on.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Shown {
     pub recorder: View,
@@ -132,6 +126,7 @@ pub struct Shown {
     pub start_with_windows: bool,
     pub messages: Vec<Message>,
     pub grown: Vec<Grown>,
+    pub update: Option<Status>,
 }
 
 /// Draws Settings on `on`, with `options` as they are now, the controls reacting to `pointer`, and what `shown` says,
@@ -145,14 +140,17 @@ pub fn draw(
     let palette = palette(on.mode);
     // The page grows while a message shows under a row's label, and the blocks below move down with it. The Snip's
     // card is shorter without its note, and the window as tall as the page with it.
-    let page = snip_card::fitted(layout::page(&shown.grown), snip_card::note_shown(options));
+    let page = layout::with_status(
+        snip_card::fitted(layout::page(&shown.grown), snip_card::note_shown(options)),
+        shown.update.is_some(),
+    );
     let height = px(scaled(page.height, on.dpi));
     let width = px(on.width);
     background(on.target, palette, width, height)?;
     cards(on.target, on.fonts, palette, &page, on.dpi, width)?;
     let controls = Rows::new(on, palette)?.draw(options, pointer, shown, &page)?;
-    let link = footer(on.target, on.fonts, palette, page.footer, on.dpi, width)?;
-    Ok(Drawn { link, controls })
+    let links = footer::draw(on, palette, page.footer, shown.update)?;
+    Ok(Drawn { links, controls })
 }
 
 /// What the rows are drawn with.
@@ -607,79 +605,8 @@ fn cards(
     Ok(())
 }
 
-/// The footer's line, the version and the license on the left, and the link on the right, which comes back.
-fn footer(
-    target: &ID2D1RenderTarget,
-    fonts: &Fonts,
-    palette: &Palette,
-    span: Span,
-    dpi: u32,
-    width: f32,
-) -> windows::core::Result<RECT> {
-    let edge = solid_brush(target, palette.edge)?;
-    let dim = solid_brush(target, palette.dim)?;
-    let link = solid_brush(target, palette.link)?;
-    let top = px(scaled(span.top, dpi));
-    let border = px(scaled(1, dpi).max(1));
-    let rule = D2D_RECT_F {
-        left: 0.0,
-        top,
-        right: width,
-        bottom: top + border,
-    };
-    // SAFETY: drawing calls on a live render target, with arguments that outlive them. The rule is on whole pixels.
-    unsafe {
-        target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-        target.FillRectangle(&rule, &edge);
-        target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-    }
-    let size = px(scaled(layout::FOOTER_TEXT, dpi));
-    let format = fonts.text_format(DWRITE_FONT_WEIGHT_NORMAL, size)?;
-    // The texts' line starts below the rule and the padding.
-    let line = top + border + px(scaled(layout::FOOTER_ABOVE, dpi));
-    let line_height = layout::FOOTER_LINE * dpi_scale(dpi);
-    let gap = px(scaled(layout::FOOTER_GAP, dpi));
-    let side = px(scaled(layout::SIDE, dpi));
-    let mut left = side;
-    for words in [VERSION, "·", LICENSE] {
-        let placed = place(text(fonts, words, &format, None)?, left, line, line_height)?;
-        draw_text(target, &placed, &dim);
-        left = (placed.left + placed.width + gap).round();
-    }
-    let layout = text(fonts, LINK, &format, None)?;
-    let width_of_link = width_of(&layout)?;
-    let placed = place(
-        layout,
-        // Down to a whole pixel, so the link never reaches into the margin.
-        (width - side - width_of_link).floor(),
-        line,
-        line_height,
-    )?;
-    draw_text(target, &placed, &link);
-    // The underline is 1 pixel thick up to 175% and grows with the scale beyond, as a browser rounds it.
-    let underline_top = placed.top + placed.baseline + px(scaled(UNDERLINE_OFFSET, dpi));
-    let underline = D2D_RECT_F {
-        left: placed.left,
-        top: underline_top,
-        right: placed.left + placed.width,
-        bottom: underline_top + px((dpi / 96).max(1)),
-    };
-    // SAFETY: drawing calls on a live render target, with arguments that outlive them.
-    unsafe {
-        target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-        target.FillRectangle(&underline, &link);
-        target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-    }
-    Ok(RECT {
-        left: whole(placed.left),
-        top: whole(line.floor()),
-        right: whole((placed.left + placed.width).ceil()),
-        bottom: whole((line + line_height).ceil()),
-    })
-}
-
 /// `words` laid out on one line in `format`, spaced as a heading when `spacing` gives its font size.
-fn text(
+pub(super) fn text(
     fonts: &Fonts,
     words: &str,
     format: &IDWriteTextFormat,
@@ -714,7 +641,7 @@ fn text(
     Ok(layout)
 }
 
-fn width_of(layout: &IDWriteTextLayout) -> windows::core::Result<f32> {
+pub(super) fn width_of(layout: &IDWriteTextLayout) -> windows::core::Result<f32> {
     let mut metrics = DWRITE_TEXT_METRICS::default();
     // SAFETY: fills a local.
     unsafe { layout.GetMetrics(&mut metrics) }?;
@@ -723,7 +650,7 @@ fn width_of(layout: &IDWriteTextLayout) -> windows::core::Result<f32> {
 
 /// `layout` with its left side at `left`, centered in a line of `line_height` from `line` down, as CSS centers a text
 /// in its line box, with the baseline moved to the nearest whole pixel so the letters stay crisp.
-fn place(
+pub(super) fn place(
     layout: IDWriteTextLayout,
     left: f32,
     line: f32,
@@ -745,7 +672,7 @@ fn place(
     })
 }
 
-fn draw_text(target: &ID2D1RenderTarget, placed: &Placed, brush: &ID2D1SolidColorBrush) {
+pub(super) fn draw_text(target: &ID2D1RenderTarget, placed: &Placed, brush: &ID2D1SolidColorBrush) {
     write(target, &placed.layout, placed.left, placed.top, brush);
 }
 
@@ -770,7 +697,7 @@ pub fn write(
 
 /// A whole number of pixels as the float Direct2D takes. Sizes here are a few thousand pixels at most, far below 2^24,
 /// up to which `f32` holds every whole number.
-fn px(pixels: u32) -> f32 {
+pub(super) fn px(pixels: u32) -> f32 {
     debug_assert!(pixels < 1 << 24, "{pixels} pixels");
     pixels as f32
 }
@@ -778,7 +705,7 @@ fn px(pixels: u32) -> f32 {
 /// A position already rounded to a whole number of pixels, as Windows takes a rectangle. Positions in the window are a
 /// few thousand pixels at most, far inside `i32`.
 // TODO: place the link in whole pixels without going through a float, so no float comes back to `i32` here.
-fn whole(position: f32) -> i32 {
+pub(super) fn whole(position: f32) -> i32 {
     debug_assert!(
         position.fract() == 0.0 && position.abs() < 1e6,
         "{position}"
@@ -814,14 +741,15 @@ mod tests {
     use crate::settings_window::row_message::Text;
     use crate::settings_window::start_with_windows_row;
 
+    mod footer;
     mod snip;
 
-    /// The page as drawn, as rows of [r, g, b] pixels, where the link went and where the controls' parts are, and the
+    /// The page as drawn, as rows of [r, g, b] pixels, where the links went and where the controls' parts are, and the
     /// page as a PNG, for a look at it.
     struct Picture {
         width: usize,
         pixels: Vec<[u8; 3]>,
-        link: RECT,
+        links: Vec<(Link, RECT)>,
         controls: Vec<(Control, RECT)>,
         /// The page as a PNG would hold it: its height, and its pixels in blue, green, red and alpha.
         height: u32,
@@ -829,6 +757,15 @@ mod tests {
     }
 
     impl Picture {
+        /// Where `link` is.
+        fn link(&self, link: Link) -> RECT {
+            self.links
+                .iter()
+                .find(|(drawn, _)| *drawn == link)
+                .map(|&(_, place)| place)
+                .unwrap_or_else(|| panic!("{link:?} isn't drawn"))
+        }
+
         /// Where `control` is.
         fn place_of(&self, control: Control) -> RECT {
             self.controls
@@ -864,6 +801,7 @@ mod tests {
             start_with_windows: false,
             messages: Vec::new(),
             grown: Vec::new(),
+            update: None,
         }
     }
 
@@ -881,7 +819,8 @@ mod tests {
         shown: &Shown,
     ) -> Picture {
         let width = scaled(layout::WIDTH, dpi);
-        let height = scaled(layout::page(&shown.grown).height, dpi);
+        let page = layout::with_status(layout::page(&shown.grown), shown.update.is_some());
+        let height = scaled(page.height, dpi);
         let _com = Com::start();
         {
             // SAFETY: COM is started for this thread.
@@ -945,7 +884,7 @@ mod tests {
                 width: usize::try_from(width).expect("a small bitmap"),
                 // Blue, green, red and alpha; every pixel of the page is opaque.
                 pixels,
-                link: drawn.link,
+                links: drawn.links,
                 controls: drawn.controls,
                 height,
                 bgra: bytes,
@@ -1579,10 +1518,12 @@ mod tests {
                 );
             }
             assert!(
-                (grown.link.top - still.link.top - moved).abs() <= 1,
+                (grown.link(Link::ProjectPage).top - still.link(Link::ProjectPage).top - moved)
+                    .abs()
+                    <= 1,
                 "{dpi}: the footer's link {:?} -> {:?}",
-                still.link,
-                grown.link
+                still.link(Link::ProjectPage),
+                grown.link(Link::ProjectPage)
             );
             // The Snip's card is drawn where it moved: its top border is a card's color, not the background's.
             let card =
@@ -1873,46 +1814,6 @@ mod tests {
                     "{mode:?} {dpi}"
                 );
             }
-        }
-    }
-
-    #[test]
-    fn the_link_is_on_the_right_of_the_footer_and_underlined_in_the_link_color() {
-        for mode in [Mode::Dark, Mode::Light] {
-            for dpi in DPIS {
-                let page = drawn(mode, dpi);
-                let link = page.link;
-                let footer = layout::page(&[]).footer;
-                // It ends 16 logical pixels in from the right, inside the footer.
-                let right = whole_px(layout::WIDTH - layout::SIDE, dpi);
-                assert!(
-                    (right - 1..=right).contains(&link.right),
-                    "{mode:?} {dpi}: {link:?}"
-                );
-                assert!(link.left > right / 2, "{mode:?} {dpi}: {link:?}");
-                let (top, bottom) = (whole_px(footer.top, dpi), whole_px(footer.bottom, dpi));
-                assert!(
-                    top < link.top && link.bottom < bottom,
-                    "{mode:?} {dpi}: {link:?}"
-                );
-                // A row below the text is the link's color all along: the underline.
-                let underlined = (link.top..bottom).any(|y| {
-                    (link.left + 1..link.right - 1)
-                        .all(|x| near(page.at(x, y), palette(mode).link, 2))
-                });
-                assert!(underlined, "{mode:?} {dpi}: no underline in {link:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn the_footer_s_texts_on_the_left_are_drawn_in_the_dim_color() {
-        for mode in [Mode::Dark, Mode::Light] {
-            let page = drawn(mode, 144);
-            let link = page.link;
-            let texts = (link.top..link.bottom)
-                .any(|y| (24..420).any(|x| near(page.at(x, y), palette(mode).dim, 24)));
-            assert!(texts, "{mode:?}");
         }
     }
 

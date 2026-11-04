@@ -92,6 +92,14 @@ const BUTTON_GAP: u32 = layout::ROW_GAP;
 /// (`box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 30%, transparent)`).
 const DARK_ACCENT: Color = color(0x28, 0xd6, 0xdf, 1.0);
 const LIGHT_ACCENT: Color = color(0x00, 0x7c, 0xbb, 1.0);
+
+/// `--accent` in `mode`: also the check mark before "Check for updates"' "You're on the latest version." (`footer`).
+pub fn accent(mode: Mode) -> Color {
+    match mode {
+        Mode::Dark => DARK_ACCENT,
+        Mode::Light => LIGHT_ACCENT,
+    }
+}
 const DARK_RING: [Shadow; 1] = [shadow(0, 0, 3, color(0x28, 0xd6, 0xdf, 0.3))];
 const LIGHT_RING: [Shadow; 1] = [shadow(0, 0, 3, color(0x00, 0x7c, 0xbb, 0.3))];
 
