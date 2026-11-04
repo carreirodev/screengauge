@@ -18,6 +18,7 @@ use windows::Win32::UI::Shell::{FOLDERID_LocalAppData, KF_FLAG_DEFAULT, SHGetKno
 
 use crate::log;
 use crate::notification::{self, Notification};
+use crate::package::{self, AppCopy};
 
 thread_local! {
     /// What the settings file holds, and the file to save it to. Set once, as the process starts, on the resident
@@ -70,9 +71,21 @@ const FILE_NAME: &str = "settings.ini";
 /// What a save writes before it replaces the file.
 const TEMPORARY_NAME: &str = "settings.ini.tmp";
 
+/// The folder of `copy`'s settings file, so the two copies never share a file:
+///
+/// - the Store copy's is its package's own, `LocalState`, which Windows deletes with the package. It is asked for by
+///   name: in `%LOCALAPPDATA%\ScreenGauge`, Windows would redirect only a file the package creates, and would let it
+///   open and change in place one the installer copy left there (WPC-289);
+/// - the installer copy's is `%LOCALAPPDATA%\ScreenGauge`.
+pub fn folder(copy: AppCopy) -> windows::core::Result<PathBuf> {
+    match copy {
+        AppCopy::Store => package::local_folder(),
+        AppCopy::Installer => installer_copy_folder(),
+    }
+}
+
 /// `%LOCALAPPDATA%\ScreenGauge`, the installer copy's folder. Local rather than roaming, because what the file
-/// remembers (folders, the toolbar's place) belongs to this computer. The Store copy's folder is its package's own
-/// (WPC-334), so the two copies never share a file.
+/// remembers (folders, the toolbar's place) belongs to this computer.
 pub fn installer_copy_folder() -> windows::core::Result<PathBuf> {
     // SAFETY: a known folder ID, default flags and no token, meaning the signed-in user.
     let path = unsafe { SHGetKnownFolderPath(&FOLDERID_LocalAppData, KF_FLAG_DEFAULT, None) }?;
@@ -89,7 +102,8 @@ pub fn installer_copy_folder() -> windows::core::Result<PathBuf> {
 /// When the file can't be opened, ScreenGauge runs with the defaults and has no file to save to, so it never writes
 /// over a file it couldn't read or move aside.
 pub fn open_at_startup() -> (Option<SettingsFile>, Stored) {
-    let folder = match installer_copy_folder() {
+    // Should Windows not say which copy this is, there is no folder: ScreenGauge runs with the defaults.
+    let folder = match package::this_copy().and_then(folder) {
         Ok(folder) => folder,
         Err(e) => {
             log::failure("settings: finding the user's data folder", &e);
@@ -517,8 +531,16 @@ mod tests {
         let local_app_data =
             std::env::var_os("LOCALAPPDATA").expect("LOCALAPPDATA is set on Windows");
         assert_eq!(
-            installer_copy_folder().expect("the folder is found"),
+            folder(AppCopy::Installer).expect("the folder is found"),
             PathBuf::from(local_app_data).join("ScreenGauge")
         );
+    }
+
+    #[test]
+    fn the_store_copy_never_falls_back_to_the_installer_copy_s_folder() {
+        // The tests run without a package, so the Store copy's folder can't be found: no folder at all, rather than
+        // the installer copy's, which Windows would let the package open and change in place (WPC-289).
+        let found = folder(AppCopy::Store);
+        assert!(found.is_err(), "{found:?}");
     }
 }

@@ -1,6 +1,7 @@
-//! Windows' standard notifications (`Windows.UI.Notifications`) for the installer copy, which has no package: the
-//! AppUserModelID and the activator are registered in HKCU at every start, with no Start menu shortcut (ADR 0003). The
-//! Store copy declares them in its manifest instead (WPC-334).
+//! Windows' standard notifications (`Windows.UI.Notifications`). The installer copy has no package: its AppUserModelID
+//! and activator are registered in HKCU at every start, with no Start menu shortcut (ADR 0003). The Store copy's
+//! package declares them in its manifest (`packaging/msix/AppxManifest.xml`, WPC-334), so it writes nothing in the
+//! registry, and goes by the package's AppUserModelID.
 
 use std::cell::RefCell;
 use std::ffi::{OsStr, OsString};
@@ -22,14 +23,36 @@ use windows::Win32::System::Registry::{
 use windows::core::{Error, GUID, HSTRING, Ref};
 
 use super::{Dismissal, Event, Notification, Toast, What, report};
+use crate::package::{self, AppCopy};
 use crate::{settings_file, tray};
 
-/// The name Windows knows ScreenGauge's notifications by: the header shows the `DisplayName` registered for it.
-pub const AUMID: &str = "WPCSolutions.ScreenGauge";
+/// The name Windows knows the installer copy's notifications by: the header shows the `DisplayName` registered for it.
+const INSTALLER_COPY_AUMID: &str = "WPCSolutions.ScreenGauge";
 
-/// The activator's class, which Windows starts ScreenGauge with when a notification is clicked. Never changed: the
-/// notifications already in the notification center carry it, and their click would go nowhere.
-pub const CLSID: GUID = GUID::from_u128(0x3beb9695_da23_4599_b10c_7cd6cd96e50c);
+/// The installer copy's activator class, which Windows starts ScreenGauge with when a notification is clicked. Never
+/// changed: the notifications already in the notification center carry it, and their click would go nowhere.
+const INSTALLER_COPY_CLSID: GUID = GUID::from_u128(0x3beb9695_da23_4599_b10c_7cd6cd96e50c);
+
+/// The Store copy's activator class, its own so a click never goes to the other copy (WPC-347, for WPC-339). The
+/// package's manifest names it twice, and a test holds the three equal. Never changed, as the installer copy's.
+pub const STORE_COPY_CLSID: GUID = GUID::from_u128(0x96c6321b_c8aa_4f4d_9c67_f1f3da1ae6c7);
+
+/// The name Windows knows `copy`'s notifications by. The Store copy's is the package's app's, which only a process
+/// started from the package can read: anywhere else it is an error, never the installer copy's name.
+pub fn aumid(copy: AppCopy) -> windows::core::Result<String> {
+    match copy {
+        AppCopy::Store => package::application_user_model_id(),
+        AppCopy::Installer => Ok(INSTALLER_COPY_AUMID.to_string()),
+    }
+}
+
+/// The activator class of `copy`.
+pub fn clsid(copy: AppCopy) -> GUID {
+    match copy {
+        AppCopy::Store => STORE_COPY_CLSID,
+        AppCopy::Installer => INSTALLER_COPY_CLSID,
+    }
+}
 
 /// Every notification's group, which taking one out of the notification center names along with its tag.
 const GROUP: &str = "ScreenGauge";
@@ -78,11 +101,16 @@ thread_local! {
     static SHOWN: RefCell<Vec<(Notification, ToastNotification)>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Registers the AppUserModelID, with ScreenGauge's name and the app icon, for the signed-in user. With `activator`,
-/// the click of a notification goes to the activator, which Windows starts the running `.exe` for when ScreenGauge is
-/// closed. Without it, a click in the notification center would only close the notification (WPC-347, scenario s6).
-pub fn register(activator: bool) -> windows::core::Result<()> {
-    let key = format!(r"Software\Classes\AppUserModelId\{AUMID}");
+/// Registers the installer copy's AppUserModelID, with ScreenGauge's name and the app icon, for the signed-in user.
+/// With `activator`, the click of a notification goes to the activator, which Windows starts the running `.exe` for
+/// when ScreenGauge is closed. Without it, a click in the notification center would only close the notification
+/// (WPC-347, scenario s6). The Store copy registers nothing here: its package declares all of it, and the header shows
+/// the package's name and icon.
+pub fn register(copy: AppCopy, activator: bool) -> windows::core::Result<()> {
+    if copy == AppCopy::Store {
+        return Ok(());
+    }
+    let key = format!(r"Software\Classes\AppUserModelId\{INSTALLER_COPY_AUMID}");
     set_value(&key, Some("DisplayName"), OsStr::new("ScreenGauge"))?;
     match write_icon() {
         Ok(icon) => set_value(&key, Some("IconUri"), icon.as_os_str())?,
@@ -94,7 +122,7 @@ pub fn register(activator: bool) -> windows::core::Result<()> {
         return delete_value(&key, "CustomActivator");
     }
     let exe = std::env::current_exe().map_err(|e| Error::new(E_FAIL, e.to_string()))?;
-    let clsid = format!("{{{CLSID:?}}}");
+    let clsid = format!("{{{INSTALLER_COPY_CLSID:?}}}");
     // The path alone: COM adds -Embedding when it starts the program.
     set_value(
         &format!(r"Software\Classes\CLSID\{clsid}\LocalServer32"),
@@ -229,7 +257,8 @@ pub fn show(toast: &Toast) -> windows::core::Result<()> {
         },
     ))?;
 
-    ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?.Show(&shown)?;
+    let aumid = aumid(package::this_copy()?)?;
+    ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(aumid))?.Show(&shown)?;
     SHOWN.with_borrow_mut(|kept| {
         kept.retain(|(kind, _)| *kind != toast.notification);
         kept.push((toast.notification, shown));
@@ -242,7 +271,7 @@ pub fn remove(notification: Notification) -> windows::core::Result<()> {
     ToastNotificationManager::History()?.RemoveGroupedTagWithId(
         &HSTRING::from(notification.key()),
         &HSTRING::from(GROUP),
-        &HSTRING::from(AUMID),
+        &HSTRING::from(aumid(package::this_copy()?)?),
     )
 }
 
@@ -270,4 +299,60 @@ fn escape(text: &str) -> String {
             }
             escaped
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use windows::Win32::System::Registry::{HKEY, KEY_READ, RegCloseKey, RegOpenKeyExW};
+
+    use super::*;
+
+    #[test]
+    fn the_installer_copy_goes_by_its_own_aumid_and_class() {
+        assert_eq!(
+            aumid(AppCopy::Installer).expect("no package needed"),
+            "WPCSolutions.ScreenGauge"
+        );
+        assert_eq!(
+            clsid(AppCopy::Installer),
+            GUID::from_u128(0x3beb9695_da23_4599_b10c_7cd6cd96e50c)
+        );
+    }
+
+    #[test]
+    fn the_store_copy_has_a_class_of_its_own() {
+        // Decided in WPC-347 for WPC-339: a click on one copy's notification never goes to the other copy.
+        assert_eq!(
+            clsid(AppCopy::Store),
+            GUID::from_u128(0x96c6321b_c8aa_4f4d_9c67_f1f3da1ae6c7)
+        );
+        assert_ne!(clsid(AppCopy::Store), clsid(AppCopy::Installer));
+    }
+
+    #[test]
+    fn the_store_copy_never_goes_by_the_installer_copy_s_aumid() {
+        // The tests run without a package, so the Store copy's AUMID, the package's, can't be found.
+        let found = aumid(AppCopy::Store);
+        assert!(found.is_err(), "{found:?}");
+    }
+
+    #[test]
+    fn the_store_copy_writes_nothing_in_the_registry() {
+        register(AppCopy::Store, true).expect("nothing to fail");
+        let class = HSTRING::from(format!(
+            r"Software\Classes\CLSID\{{{:?}}}",
+            clsid(AppCopy::Store)
+        ));
+        let mut key = HKEY::default();
+        // SAFETY: the string outlives the call, which writes `key` only when the key opens.
+        let opened = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, &class, None, KEY_READ, &mut key) };
+        if opened == ERROR_SUCCESS {
+            // SAFETY: the key the call above opened, closed once.
+            assert_eq!(unsafe { RegCloseKey(key) }, ERROR_SUCCESS);
+        }
+        assert_eq!(
+            opened, ERROR_FILE_NOT_FOUND,
+            "the Store copy's class is in HKCU"
+        );
+    }
 }

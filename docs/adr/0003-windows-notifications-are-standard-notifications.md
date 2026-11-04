@@ -8,7 +8,7 @@ The installer copy has no package, so ScreenGauge registers itself at every star
 - `Software\Classes\CLSID\{3BEB9695-DA23-4599-B10C-7CD6CD96E50C}\LocalServer32` = the running `.exe`'s path, quoted. The CLSID is fixed and never changes: the notifications already in the notification center carry it.
 - The class is registered with `CoRegisterClassObject(CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE | REGCLS_AGILE)` as soon as the resident window exists, and revoked at exit. `CustomActivator` and `LocalServer32` are written only when that registration succeeded, and `CustomActivator` is deleted when it failed: with it written and no process answering COM, a click in the notification center only closes the notification (scenario s6). An earlier `LocalServer32` left behind does nothing without `CustomActivator`.
 
-The Store copy declares the activator in its manifest instead (`com:ExeServer` and `desktop:ToastNotificationActivation`, WPC-334); the uninstaller removes the keys and the PNG (WPC-337).
+The Store copy declares the activator in its manifest instead (`com:ExeServer` and `desktop:ToastNotificationActivation` in `packaging/msix/AppxManifest.xml`, WPC-334), with a class of its own, so it writes nothing in the registry and goes by the package's AppUserModelID; it still registers the class with COM at every start. The manifest starts the `.exe` with `-Embedding` first, as COM starts the installer copy's; the uninstaller removes the keys and the PNG (WPC-337).
 
 ## Considered Options
 

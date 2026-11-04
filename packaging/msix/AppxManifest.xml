@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Store copy's MSIX package (WPC-334). make-msix.ps1 packs it with ScreenGauge.exe and the images of
+  assets/package, which go to Assets\. The tests in crates/screengauge/src/package.rs hold it to the code: the version
+  is Cargo's, the activator class is the code's, and every image named here exists. README.md has the sources.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap com desktop rescap">
+
+  <!-- Name and Publisher as Partner Center gives them for the WPC Solutions account (Product identity). The fourth
+       part of the version is always 0: the Store keeps it for itself. -->
+  <Identity
+    Name="WPCSolutions.ScreenGauge"
+    Publisher="CN=A42AF38D-FCA3-4813-A9BB-788209C42998"
+    Version="0.1.0.0"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>ScreenGauge</DisplayName>
+    <PublisherDisplayName>WPC Solutions</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <!-- Windows 11 (build 22000) at least: Windows 10 refuses the package. -->
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+
+  <Applications>
+    <!-- The Start menu entry. ScreenGauge.exe runs as a full-trust desktop app, as the installer copy does. -->
+    <Application Id="ScreenGauge" Executable="ScreenGauge.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="ScreenGauge"
+        Description="ScreenGauge"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\MedTile.png"
+        Square44x44Logo="Assets\AppList.png" />
+      <Extensions>
+        <!-- The notifications' activator: Windows starts ScreenGauge.exe for a click when it is closed. The arguments
+             make -Embedding the first one, the one the installer copy gets too, so the click opens no tools. The class
+             is the Store copy's own, STORE_COPY_CLSID in notification/toast.rs. -->
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:ExeServer Executable="ScreenGauge.exe" Arguments="-Embedding" DisplayName="ScreenGauge notifications">
+              <com:Class Id="96c6321b-c8aa-4f4d-9c67-f1f3da1ae6c7" />
+            </com:ExeServer>
+          </com:ComServer>
+        </com:Extension>
+        <desktop:Extension Category="windows.toastNotificationActivation">
+          <desktop:ToastNotificationActivation ToastActivatorCLSID="96c6321b-c8aa-4f4d-9c67-f1f3da1ae6c7" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>

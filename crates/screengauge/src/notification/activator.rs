@@ -16,7 +16,6 @@ use windows::Win32::UI::Notifications::{
 };
 use windows::core::{BOOL, Error, GUID, IUnknown, Interface, PCWSTR, Ref, implement};
 
-use super::toast::CLSID;
 use super::{Event, What, report};
 
 thread_local! {
@@ -24,15 +23,16 @@ thread_local! {
     static COOKIE: Cell<Option<u32>> = const { Cell::new(None) };
 }
 
-/// Registers the class with COM, so a click comes to this process: every click while it runs, from any copy of the
-/// class's caller (`REGCLS_MULTIPLEUSE`), on a thread of COM's own (`REGCLS_AGILE`, since this thread's apartment is
-/// single-threaded). COM must be started on this thread.
-pub fn register() -> windows::core::Result<()> {
+/// Registers `class`, this copy's activator class, with COM, so a click comes to this process: every click while it
+/// runs, from any copy of the class's caller (`REGCLS_MULTIPLEUSE`), on a thread of COM's own (`REGCLS_AGILE`, since
+/// this thread's apartment is single-threaded). COM must be started on this thread. Both copies register at every
+/// start: for the Store copy, the package only tells Windows which `.exe` serves the class.
+pub fn register(class: GUID) -> windows::core::Result<()> {
     let factory: IClassFactory = Factory.into();
     // SAFETY: a valid class ID and factory; COM keeps its own reference to the factory until the class is revoked.
     let cookie = unsafe {
         CoRegisterClassObject(
-            &CLSID,
+            &class,
             &factory,
             CLSCTX_LOCAL_SERVER,
             REGCLS_MULTIPLEUSE | REGCLS_AGILE,

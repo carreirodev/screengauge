@@ -20,6 +20,7 @@ mod hidden_icons_panel;
 mod keyboard_hook;
 mod log;
 mod notification;
+mod package;
 mod png;
 mod relief;
 mod resident;

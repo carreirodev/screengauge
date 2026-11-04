@@ -6,6 +6,10 @@
 mod activator;
 mod toast;
 
+/// The manifest tests hold the package to it.
+#[cfg(test)]
+pub use toast::STORE_COPY_CLSID;
+
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicPtr, Ordering};
@@ -17,7 +21,7 @@ use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 use windows::core::Error;
 
-use crate::{com, log, settings_file};
+use crate::{com, log, package, settings_file};
 
 /// Posted to the resident window to show the notifications waiting, once the messages posted before it are handled.
 /// WM_APP + 3 is taken by the frozen screen's "another program in front" (WPC-302).
@@ -182,11 +186,20 @@ static EVENTS: Mutex<Vec<Event>> = Mutex::new(Vec::new());
 /// click. Without the activator, notifications still show, and their click in the notification center does nothing.
 pub fn start(window: HWND) {
     RESIDENT.store(window.0, Ordering::Release);
-    let activator = com::ensure_started().and_then(|()| activator::register());
+    let copy = match package::this_copy() {
+        Ok(copy) => copy,
+        // Neither copy's class nor name can be told apart, so nothing is registered: the notifications then fail to
+        // show, as they would without a name, and wait.
+        Err(e) => {
+            log::failure("notification: finding which copy this is", &e);
+            return;
+        }
+    };
+    let activator = com::ensure_started().and_then(|()| activator::register(toast::clsid(copy)));
     if let Err(e) = &activator {
         log::failure("notification: registering the activator", e);
     }
-    if let Err(e) = toast::register(activator.is_ok()) {
+    if let Err(e) = toast::register(copy, activator.is_ok()) {
         log::failure("notification: registering ScreenGauge with Windows", &e);
     }
 }
