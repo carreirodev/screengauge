@@ -41,7 +41,7 @@ notification or personal file, because the repository is public and so is the St
 
 **Setup, the same for every shot:**
 
-1. The AOC 4K monitor at 175%, HDR off, Windows in the light theme, and ScreenGauge's Theme on Automatic. Close every
+1. The AOC 4K monitor at 175%, made the main display in Settings > System > Display, so Chrome opens on it, HDR off, Windows in the light theme, and ScreenGauge's Theme on Automatic. Close every
    other window on that monitor, and turn on Do not disturb, so no notification comes in.
 2. Open the test page in a separate Chrome, full screen, with an empty profile, so none of the owner's tabs,
    extensions or account can show, and no address bar or taskbar does. In PowerShell 7, from the repository's root:
