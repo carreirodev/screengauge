@@ -187,7 +187,7 @@ fn write_icon() -> windows::core::Result<PathBuf> {
         .find(|(drawn, _)| *drawn >= size)
         .map_or(ICONS[ICONS.len() - 1].1, |(_, bytes)| bytes);
     let folder = settings_file::installer_copy_folder()?;
-    let path = folder.join(format!("notification-icon-{:08x}.png", fnv1a(icon)));
+    let path = folder.join(icon_file_name(icon));
     if !path.exists() {
         fs::create_dir_all(&folder)
             .and_then(|()| write_whole(&path, icon))
@@ -196,9 +196,19 @@ fn write_icon() -> windows::core::Result<PathBuf> {
     Ok(path)
 }
 
+/// The name of the file the header icon `icon` is written to.
+pub fn icon_file_name(icon: &[u8]) -> String {
+    format!("notification-icon-{:08x}.png", fnv1a(icon))
+}
+
+/// The name of the file `path` is written to before it takes `path`'s place.
+pub fn temporary_path(path: &Path) -> PathBuf {
+    path.with_extension("png.tmp")
+}
+
 /// Writes `bytes` to `path` through a temporary file, so Windows never reads half an icon.
 fn write_whole(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let temporary = path.with_extension("png.tmp");
+    let temporary = temporary_path(path);
     fs::write(&temporary, bytes)?;
     fs::rename(&temporary, path)
 }

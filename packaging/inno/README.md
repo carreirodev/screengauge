@@ -6,6 +6,8 @@ The installer copy of ScreenGauge is this Inno Setup installer, downloaded from 
 - with a Start menu entry, ScreenGauge, which opens it as a call (WPC-301), and an entry in Settings > Apps > Installed apps, named ScreenGauge, published by WPC Solutions, with the exe's four-part version, as the Store copy's package shows it;
 - on Windows 11 and later only, x64, which Windows 11 on Arm runs through its emulation. There is no portable `.exe`, and v1 is unsigned.
 
+Setup itself is 32-bit and installs in 64-bit mode, with the registry's 64-bit view, where ScreenGauge writes. Its uninstaller is 4.6 MB against the 64-bit one's 7.0 MB: for 0.1.0, the installer is 2,619,943 bytes (limit 5 MB) and the installed folder 5,755,820 bytes (limit 10 MB), measured on 2026-11-04.
+
 Its uninstall entry is `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\{1DF55A92-C67C-41D9-B304-B2442423D407}_is1`, from the script's `AppId`, which never changes: the Store copy looks for it (WPC-339).
 
 Uninstalling deletes what the installer copy wrote, and nothing of the Store copy's:

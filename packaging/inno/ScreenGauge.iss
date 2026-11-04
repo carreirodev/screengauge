@@ -46,8 +46,11 @@ DisableDirPage=yes
 DisableProgramGroupPage=yes
 ; Windows 11 and later (build 22000 is its first), x64, and Windows 11 on Arm through Windows' emulation.
 MinVersion=10.0.22000
-SetupArchitecture=x64
 ArchitecturesAllowed=x64compatible
+; Setup itself stays 32-bit and installs in 64-bit mode: the 64-bit registry view, where ScreenGauge writes, and an
+; uninstaller of 4.6 MB instead of 7.0 MB, so the installed folder keeps room under its 10 MB (measured in WPC-337:
+; 5.76 MB against 8.22 MB, and a 2.6 MB download against 3.4 MB).
+SetupArchitecture=x86
 ArchitecturesInstallIn64BitMode=x64compatible
 ; ScreenGauge is closed by PrepareToInstall below. Restart Manager stays as a fallback, but never starts it again:
 ; started with no arguments, ScreenGauge would open its tools over the installer.
@@ -56,7 +59,6 @@ WizardStyle=modern
 Compression=lzma2/max
 SolidCompression=yes
 OutputBaseFilename=ScreenGauge-{#CargoVersion}-setup
-SetupLogging=yes
 
 [Messages]
 ; What Setup says on Windows 10, whose build is below MinVersion's (measured: this one, not WinVersionTooLowError).
@@ -141,7 +143,8 @@ begin
       Exit;
     end;
     SetLength(Path, Size);
-    if CompareText(Path, Exe) <> 0 then begin
+    { Windows compares paths ignoring case, accented letters included. }
+    if AnsiLowercase(Path) <> AnsiLowercase(Exe) then begin
       Log('ScreenGauge runs from another folder, left running: ' + Path);
       Exit;
     end;

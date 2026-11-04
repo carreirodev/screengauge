@@ -63,6 +63,14 @@ pub fn update(change: impl FnOnce(&mut Stored) -> bool) -> io::Result<bool> {
     })
 }
 
+/// The name of the `number`th damaged file kept aside: `settings.damaged.ini`, then `settings.damaged-2.ini` and on.
+pub fn damaged_name(number: u32) -> String {
+    match number {
+        1 => String::from("settings.damaged.ini"),
+        _ => format!("settings.damaged-{number}.ini"),
+    }
+}
+
 fn not_kept() -> io::Error {
     io::Error::other("the settings file wasn't read at startup")
 }
@@ -251,11 +259,7 @@ impl SettingsFile {
     /// is there, so no copy is ever replaced. A move keeps the bytes as they were and works on a read-only file too.
     fn move_damaged_aside(&self) -> io::Result<PathBuf> {
         for number in 1..=u32::MAX {
-            let name = match number {
-                1 => String::from("settings.damaged.ini"),
-                _ => format!("settings.damaged-{number}.ini"),
-            };
-            let copy = self.folder.join(name);
+            let copy = self.folder.join(damaged_name(number));
             // Only the running copy of ScreenGauge writes in this folder, so nothing takes the name between this check
             // and the move.
             if !copy.try_exists()? {

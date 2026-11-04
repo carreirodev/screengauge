@@ -3,9 +3,9 @@
 //! copy's.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::notification::{INSTALLER_COPY_AUMID, INSTALLER_COPY_CLSID, STORE_COPY_CLSID};
+use crate::notification::{self, INSTALLER_COPY_AUMID, INSTALLER_COPY_CLSID, STORE_COPY_CLSID};
 use crate::{StartedBy, resident, settings_file, start_with_windows, started_by};
 
 const SCRIPT: &str = include_str!("../../../packaging/inno/ScreenGauge.iss");
@@ -97,16 +97,17 @@ fn parameters(line: &str) -> HashMap<String, String> {
     found
 }
 
-/// The flags of an entry, lowercase.
-fn flags(entry: &HashMap<String, String>) -> Vec<String> {
-    entry
-        .get("flags")
-        .map(|flags| flags.split_whitespace().map(str::to_lowercase).collect())
-        .unwrap_or_default()
+/// Whether an entry has `flag` among its flags, which Inno Setup reads ignoring case.
+fn has_flag(entry: &HashMap<String, String>, flag: &str) -> bool {
+    entry.get("flags").is_some_and(|flags| {
+        flags
+            .split_whitespace()
+            .any(|found| found.eq_ignore_ascii_case(flag))
+    })
 }
 
 /// Whether `name` matches `pattern`, whose `*` stands for any run of characters, ignoring case as Windows does.
-fn matches(pattern: &str, name: &str) -> bool {
+fn wildcard_matches(pattern: &str, name: &str) -> bool {
     let (pattern, name) = (pattern.to_lowercase(), name.to_lowercase());
     let mut parts = pattern.split('*');
     let first = parts.next().unwrap_or_default();
@@ -138,13 +139,11 @@ fn deleted_at_uninstall() -> Vec<HashMap<String, String>> {
     entries("Registry")
         .into_iter()
         .filter(|entry| {
-            let flags = flags(entry);
             assert!(
-                flags.contains(&"dontcreatekey".to_string()),
+                has_flag(entry, "dontcreatekey"),
                 "the installer creates {entry:?}"
             );
-            flags.contains(&"uninsdeletekey".to_string())
-                || flags.contains(&"uninsdeletevalue".to_string())
+            has_flag(entry, "uninsdeletekey") || has_flag(entry, "uninsdeletevalue")
         })
         .collect()
 }
@@ -179,6 +178,8 @@ fn only_windows_11_on_x64() {
     assert_eq!(setup("ArchitecturesAllowed"), "x64compatible");
     // The 64-bit view of the registry, where ScreenGauge writes: HKCU\Software\Classes\CLSID has a 32-bit one too.
     assert_eq!(setup("ArchitecturesInstallIn64BitMode"), "x64compatible");
+    // A 32-bit Setup, whose uninstaller keeps the installed folder well under 10 MB (v1 spec WPC-296).
+    assert_eq!(setup("SetupArchitecture"), "x86");
     // What Setup says below MinVersion's build, in English as everything ScreenGauge shows (WPC-293).
     assert!(
         section("Messages")
@@ -230,19 +231,18 @@ fn finish_opens_screengauge_as_the_start_menu_does_unless_the_install_is_silent(
     assert_eq!(run["filename"], r"{app}\ScreenGauge.exe");
     assert_eq!(run["description"], "Launch ScreenGauge");
     assert!(!run.contains_key("parameters"), "{run:?}");
-    let flags = flags(run);
     for flag in ["postinstall", "skipifsilent", "nowait"] {
-        assert!(flags.contains(&flag.to_string()), "{flag} missing: {run:?}");
+        assert!(has_flag(run, flag), "{flag} missing: {run:?}");
     }
     // Checked, as the owner chose (WPC-337).
-    assert!(!flags.contains(&"unchecked".to_string()), "{run:?}");
+    assert!(!has_flag(run, "unchecked"), "{run:?}");
 }
 
 #[test]
 fn uninstalling_deletes_the_notifications_registration_of_the_installer_copy() {
     let deleted: Vec<_> = deleted_at_uninstall()
         .into_iter()
-        .filter(|entry| flags(entry).contains(&"uninsdeletekey".to_string()))
+        .filter(|entry| has_flag(entry, "uninsdeletekey"))
         // "{{" is Inno Setup's escape for a brace, which would begin a constant.
         .map(|entry| (entry["root"].clone(), entry["subkey"].replace("{{", "{")))
         .collect();
@@ -265,7 +265,7 @@ fn uninstalling_deletes_the_notifications_registration_of_the_installer_copy() {
 fn uninstalling_takes_screengauge_off_the_sign_in_list_and_leaves_the_user_s_choice_to_windows() {
     let values: Vec<_> = deleted_at_uninstall()
         .into_iter()
-        .filter(|entry| flags(entry).contains(&"uninsdeletevalue".to_string()))
+        .filter(|entry| has_flag(entry, "uninsdeletevalue"))
         .collect();
     assert_eq!(values.len(), 1, "{values:?}");
     let run = &values[0];
@@ -308,20 +308,23 @@ fn uninstalling_deletes_every_file_screengauge_writes_in_its_folder_and_then_the
         .filter(|entry| entry["type"] == "files")
         .map(|entry| entry["name"].clone())
         .collect();
+    // The header icon of the notifications, named by a hash of its contents, and the file written before it.
+    let icon = notification::icon_file_name(b"any icon");
+    let icon_temporary = notification::temporary_path(Path::new(&icon));
     let written = [
-        settings_file::FILE_NAME,
-        settings_file::TEMPORARY_NAME,
-        // A damaged file kept aside, and the next one.
-        "settings.damaged.ini",
-        "settings.damaged-2.ini",
-        // The header icon of the notifications, named by a hash of its contents, and the file written before it.
-        "notification-icon-4be52f28.png",
-        "notification-icon-4be52f28.png.tmp",
+        settings_file::FILE_NAME.to_string(),
+        settings_file::TEMPORARY_NAME.to_string(),
+        // A damaged file kept aside, and the next ones.
+        settings_file::damaged_name(1),
+        settings_file::damaged_name(2),
+        settings_file::damaged_name(12),
+        icon,
+        icon_temporary.display().to_string(),
     ];
     for name in written {
-        let path = in_settings_folder(name);
+        let path = in_settings_folder(&name);
         assert!(
-            files.iter().any(|pattern| matches(pattern, &path)),
+            files.iter().any(|pattern| wildcard_matches(pattern, &path)),
             "{path} isn't deleted: {files:?}"
         );
     }
@@ -329,7 +332,7 @@ fn uninstalling_deletes_every_file_screengauge_writes_in_its_folder_and_then_the
     for name in ["screengauge-20261104-101500.png", "notes.txt"] {
         let path = in_settings_folder(name);
         assert!(
-            !files.iter().any(|pattern| matches(pattern, &path)),
+            !files.iter().any(|pattern| wildcard_matches(pattern, &path)),
             "{path} would be deleted: {files:?}"
         );
     }
@@ -362,14 +365,20 @@ fn screengauge_running_from_the_installed_folder_is_closed_by_its_window_class()
 
 #[test]
 fn the_pattern_matcher_matches_as_windows_does() {
-    assert!(matches(r"C:\A\settings*.ini", r"c:\a\settings.ini"));
-    assert!(matches(
+    assert!(wildcard_matches(
+        r"C:\A\settings*.ini",
+        r"c:\a\settings.ini"
+    ));
+    assert!(wildcard_matches(
         r"C:\A\settings*.ini",
         r"C:\A\settings.damaged-2.ini"
     ));
-    assert!(!matches(r"C:\A\settings*.ini", r"C:\A\settings.ini.tmp"));
-    assert!(matches(r"C:\A\n-*.png", r"C:\A\n-1.png"));
-    assert!(!matches(r"C:\A\n-*.png", r"C:\A\n-1.png.tmp"));
-    assert!(matches(r"C:\A\x", r"C:\A\x"));
-    assert!(!matches(r"C:\A\x", r"C:\A\xy"));
+    assert!(!wildcard_matches(
+        r"C:\A\settings*.ini",
+        r"C:\A\settings.ini.tmp"
+    ));
+    assert!(wildcard_matches(r"C:\A\n-*.png", r"C:\A\n-1.png"));
+    assert!(!wildcard_matches(r"C:\A\n-*.png", r"C:\A\n-1.png.tmp"));
+    assert!(wildcard_matches(r"C:\A\x", r"C:\A\x"));
+    assert!(!wildcard_matches(r"C:\A\x", r"C:\A\xy"));
 }
