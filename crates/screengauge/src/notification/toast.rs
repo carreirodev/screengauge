@@ -304,7 +304,7 @@ fn escape(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use windows::Win32::System::Registry::{HKEY, KEY_READ, RegCloseKey, RegOpenKeyExW};
+    use windows::Win32::System::Registry::{RRF_RT_REG_SZ, RegGetValueW};
 
     use super::*;
 
@@ -337,23 +337,68 @@ mod tests {
         assert!(found.is_err(), "{found:?}");
     }
 
+    /// HKCU's `key`'s text value `name` (the default value without one); `None` when the key or the value is missing.
+    fn read(key: &str, name: Option<&str>) -> Option<String> {
+        let key = HSTRING::from(key);
+        let name = name.map(HSTRING::from).unwrap_or_default();
+        let mut size = 0;
+        // SAFETY: a size query: the strings outlive the call, which only writes `size`.
+        match unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                &key,
+                &name,
+                RRF_RT_REG_SZ,
+                None,
+                None,
+                Some(&mut size),
+            )
+        } {
+            ERROR_SUCCESS => {}
+            ERROR_FILE_NOT_FOUND => return None,
+            error => panic!("reading {key}: {error:?}"),
+        }
+        let mut data = vec![0u16; size as usize / 2];
+        // SAFETY: `data` holds the `size` bytes the size query asked for, and outlives the call.
+        let read = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                &key,
+                &name,
+                RRF_RT_REG_SZ,
+                None,
+                Some(data.as_mut_ptr().cast()),
+                Some(&mut size),
+            )
+        };
+        assert_eq!(read, ERROR_SUCCESS, "reading {key}");
+        data.truncate((size as usize / 2).saturating_sub(1));
+        Some(String::from_utf16_lossy(&data))
+    }
+
+    /// Every value either copy's registration could write: the installer copy's name and activator, and a key of the
+    /// Store copy's class.
+    fn registrations() -> Vec<Option<String>> {
+        let installer = format!(r"Software\Classes\AppUserModelId\{INSTALLER_COPY_AUMID}");
+        let mut values: Vec<_> = ["DisplayName", "IconUri", "CustomActivator"]
+            .into_iter()
+            .map(|name| read(&installer, Some(name)))
+            .collect();
+        for class in [INSTALLER_COPY_CLSID, STORE_COPY_CLSID] {
+            values.push(read(
+                &format!(r"Software\Classes\CLSID\{{{class:?}}}\LocalServer32"),
+                None,
+            ));
+        }
+        values
+    }
+
     #[test]
     fn the_store_copy_writes_nothing_in_the_registry() {
+        // On the owner's computer the installer copy's values are there, and must stay as they were; on CI they are
+        // missing, and must stay missing.
+        let before = registrations();
         register(AppCopy::Store, true).expect("nothing to fail");
-        let class = HSTRING::from(format!(
-            r"Software\Classes\CLSID\{{{:?}}}",
-            clsid(AppCopy::Store)
-        ));
-        let mut key = HKEY::default();
-        // SAFETY: the string outlives the call, which writes `key` only when the key opens.
-        let opened = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, &class, None, KEY_READ, &mut key) };
-        if opened == ERROR_SUCCESS {
-            // SAFETY: the key the call above opened, closed once.
-            assert_eq!(unsafe { RegCloseKey(key) }, ERROR_SUCCESS);
-        }
-        assert_eq!(
-            opened, ERROR_FILE_NOT_FOUND,
-            "the Store copy's class is in HKCU"
-        );
+        assert_eq!(registrations(), before);
     }
 }
