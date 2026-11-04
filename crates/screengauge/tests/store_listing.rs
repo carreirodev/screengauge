@@ -144,7 +144,11 @@ fn screengauge_is_one_word_with_s_and_g_capitalized() {
     for name in TEXT_FIELDS {
         let text = field(name);
         let lower = text.to_ascii_lowercase();
-        assert!(!lower.contains("pixmeter"), "{name} has the old name");
+        // "No name starts with Pix" (v1 spec, Distribution): pixel is the one word that may.
+        for word in lower.split(|c: char| !c.is_ascii_alphabetic()) {
+            let pixel = matches!(word, "pixel" | "pixels");
+            assert!(!word.starts_with("pix") || pixel, "{name} has \"{word}\"");
+        }
         let mut from = 0;
         while let Some(at) = lower[from..].find("screen").map(|at| from + at) {
             let rest = lower[at + "screen".len()..].trim_start_matches([' ', '-', '_']);
@@ -196,10 +200,12 @@ fn goal_figure(text: &str) -> Option<String> {
             return found;
         }
     }
-    ["cpu", "processor", "ram", "megabyte"]
-        .into_iter()
-        .find(|named| words.iter().any(|word| word.starts_with(named)))
-        .map(String::from)
+    let named = |word: &String| {
+        matches!(word.as_str(), "cpu" | "ram")
+            || word.starts_with("processor")
+            || word.starts_with("megabyte")
+    };
+    words.into_iter().find(named)
 }
 
 #[test]
@@ -219,6 +225,7 @@ fn a_goal_figure_is_caught() {
         "the keys 1 to 4",
         "10 pixels with Shift",
         "Win + Shift + X",
+        "a ramp of grays",
     ] {
         assert_eq!(goal_figure(fine), None, "{fine}");
     }
@@ -246,6 +253,29 @@ fn the_privacy_policy_is_the_one_the_readme_links_to() {
         README_PT_BR.contains(&format!("]({url})")),
         "README.pt-BR.md doesn't link to {url}"
     );
+}
+
+#[test]
+fn the_justification_names_what_the_manifest_declares() {
+    // The certification testers read the justification against the package: what it quotes of the manifest must be
+    // there, so a change to the manifest can't leave the justification stale.
+    const MANIFEST: &str = include_str!("../../../packaging/msix/AppxManifest.xml");
+    let justification = field("Restricted capability: runFullTrust");
+    for declared in [
+        "runFullTrust",
+        "Windows.FullTrustApplication",
+        "com:ExeServer",
+        "desktop:ToastNotificationActivation",
+    ] {
+        assert!(
+            justification.contains(declared),
+            "the justification doesn't name {declared}"
+        );
+        assert!(
+            MANIFEST.contains(declared),
+            "the manifest doesn't declare {declared}"
+        );
+    }
 }
 
 #[test]

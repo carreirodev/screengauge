@@ -65,7 +65,7 @@ notification or personal file, because the repository is public and so is the St
 | 2 | Bounds | A rectangle dragged loosely around `card-on-gradient`, released so it shrinks to the card and stays pinned with its size. |
 | 3 | Inspect, color format HEX and RGB | The cursor on the edge of `shadow-blue`, so the magnified view shows the card, its glow and the white, with the color under the cursor. |
 | 4 | Snip | A rectangle being dragged around the text cases, `text-20` to `text-64`, before release. |
-| 5 | Settings | Settings, opened from the toolbar's gear, moved onto the stage, with the default options. The tools close when Settings opens, so the live test page is behind it. |
+| 5 | Settings | Settings, opened from the toolbar's gear, moved onto the stage, with the default options except Snip's folder: choose a folder whose path has no personal name in it, such as `C:\Snips`, because Settings shows the path and the default one has the Windows user name. The tools close when Settings opens, so the live test page is behind it. |
 
 ## Still to fill at launch
 

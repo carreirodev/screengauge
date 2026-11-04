@@ -26,7 +26,7 @@ Snip captures the content inside a rectangle you drag as a PNG image, to the cli
 
 Every number is in physical pixels, with logical pixels next to it when Windows scales the monitor. A click copies the number or the color, ready to paste into your design tool, your code or a bug report.
 
-Pin measurements on the screen to compare them, move the cursor one pixel at a time with the arrow keys, and set with the mouse wheel how different a color must be to count as an edge. ScreenGauge works on every monitor, each at its own scale.
+Pin measurements on the screen to compare them, move the cursor one pixel at a time with the arrow keys, and set with the mouse wheel how different a color must be to count as an edge. ScreenGauge works with several monitors, each at its own scale: each tool measures the monitor under the cursor.
 
 ScreenGauge waits next to the clock until you need it. Open it with the shortcut, which you can change in Settings, or with a click on its icon. It can start with Windows, and its theme can be light, dark, or follow Windows.
 
@@ -44,7 +44,7 @@ ScreenGauge collects nothing and has no account. The Microsoft Store keeps it up
 - Pin measurements on the screen to compare them
 - Move the cursor one pixel at a time with the arrow keys
 - Set with the mouse wheel how different a color must be to count as an edge
-- Works on every monitor, each at its own scale
+- Works with several monitors, each at its own scale
 - Light and dark themes, or the one Windows uses
 - Free and open source, with no account and no data collected
 
