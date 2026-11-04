@@ -22,7 +22,7 @@ Run the commands below in PowerShell 7, from the repository's root. They need th
 pwsh -File packaging\msix\make-msix.ps1
 ```
 
-This leaves `target\msix\ScreenGauge.msix` unsigned, as Partner Center takes it: Microsoft signs it when it is submitted.
+This leaves `target\msix\ScreenGauge.msix` unsigned, as Partner Center takes it: Microsoft signs it when it is submitted. The Store page's texts, images and the `runFullTrust` justification are in [`packaging/store`](../store/README.md).
 
 ## Install a test build on this computer
 
