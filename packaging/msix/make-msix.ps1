@@ -110,20 +110,23 @@ $config.Save($priConfig)
 Write-Host "== makeappx pack: $msix"
 & $makeappx pack /o /h SHA256 /d $layout /p $msix
 
+if ($CertThumbprint) {
+    Write-Host "== signtool: signing with Cert:\CurrentUser\My\$CertThumbprint"
+    & $signtool sign /fd SHA256 /sha1 $CertThumbprint $msix
+}
+
+# Measured last, so a signed package is measured with its signature.
 $size = (Get-Item -LiteralPath $msix).Length
 if ($size -gt $SizeLimitBytes) {
     throw "$msix is $size bytes, over the $SizeLimitBytes-byte limit."
 }
 Write-Host "   $size bytes, within the $SizeLimitBytes-byte limit"
 
+Write-Host ''
 if ($CertThumbprint) {
-    Write-Host "== signtool: signing with Cert:\CurrentUser\My\$CertThumbprint"
-    & $signtool sign /fd SHA256 /sha1 $CertThumbprint $msix
-    Write-Host ''
     Write-Host "SIGNED with the test certificate: $msix"
 }
 else {
-    Write-Host ''
     Write-Host "UNSIGNED, as Partner Center takes it: $msix"
     Write-Host 'To install it on this computer, sign it with a test certificate: see README.md.'
 }

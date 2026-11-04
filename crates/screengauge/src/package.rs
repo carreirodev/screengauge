@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use windows::Storage::ApplicationData;
 use windows::Win32::Foundation::{
-    APPMODEL_ERROR_NO_PACKAGE, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, WIN32_ERROR,
+    APPMODEL_ERROR_NO_PACKAGE, E_FAIL, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, WIN32_ERROR,
 };
 use windows::Win32::Storage::Packaging::Appx::{
     GetCurrentApplicationUserModelId, GetCurrentPackageFullName,
@@ -65,8 +65,7 @@ fn package_string(
     }
     // `length` counts the terminating null.
     buffer.truncate(usize::try_from(length)?.saturating_sub(1));
-    String::from_utf16(&buffer)
-        .map_err(|e| Error::new(windows::Win32::Foundation::E_FAIL, e.to_string()))
+    String::from_utf16(&buffer).map_err(|e| Error::new(E_FAIL, e.to_string()))
 }
 
 #[cfg(test)]

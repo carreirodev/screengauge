@@ -50,8 +50,9 @@
         Square44x44Logo="Assets\AppList.png" />
       <Extensions>
         <!-- The notifications' activator: Windows starts ScreenGauge.exe for a click when it is closed. The arguments
-             make -Embedding the first one, the one the installer copy gets too, so the click opens no tools. The class
-             is the Store copy's own, STORE_COPY_CLSID in notification/toast.rs. -->
+             make -Embedding the first one, the one the installer copy gets too, so the click opens no tools. COM adds
+             its own after them: the installed package started as "ScreenGauge.exe -Embedding -Embedding" (WPC-334).
+             The class is the Store copy's own, STORE_COPY_CLSID in notification/toast.rs. -->
         <com:Extension Category="windows.comServer">
           <com:ComServer>
             <com:ExeServer Executable="ScreenGauge.exe" Arguments="-Embedding" DisplayName="ScreenGauge notifications">

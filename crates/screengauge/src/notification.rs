@@ -6,7 +6,7 @@
 mod activator;
 mod toast;
 
-/// The manifest tests hold the package to it.
+/// For the tests of the Store copy's manifest (`package.rs`), which must name the same class as the code registers.
 #[cfg(test)]
 pub use toast::STORE_COPY_CLSID;
 

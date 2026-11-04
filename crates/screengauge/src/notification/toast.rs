@@ -178,7 +178,8 @@ fn delete_value(key: &str, name: &str) -> windows::core::Result<()> {
 /// Writes the icon at the size the taskbar draws its icons now into ScreenGauge's folder, where `IconUri` points; a
 /// change of scale while ScreenGauge runs takes effect at its next start. The file name carries the icon's contents,
 /// because Windows keeps what it read from a path: another icon goes to another file (the uninstaller, WPC-337,
-/// removes every `notification-icon-*.png`).
+/// removes every `notification-icon-*.png`). Only the installer copy writes it: the Store copy's header shows the
+/// package's icon, and its folder is another.
 fn write_icon() -> windows::core::Result<PathBuf> {
     let size = tray::icon_size()?;
     let icon = ICONS
