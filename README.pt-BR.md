@@ -23,7 +23,7 @@ O ScreenGauge é uma régua de tela gratuita e de código aberto para o Windows 
 - **Inspect** amplia a área em volta do cursor e mostra a posição dele e a cor exata do pixel embaixo, em HEX, RGB ou nos dois.
 - **Snip** captura como PNG o conteúdo do retângulo que você arrasta, para a área de transferência, para um arquivo ou para os dois.
 
-Todo número sai em pixels físicos, com os pixels lógicos ao lado quando a escala do monitor não é 100%. Um clique copia o número ou a cor.
+Todo número sai em pixels físicos, com os pixels lógicos ao lado quando a escala do monitor não é 100% (dá para desligar isso em Settings). Um clique copia o número ou a cor.
 
 ## Instalação
 
@@ -51,7 +51,8 @@ Esta cópia não se atualiza sozinha: **Check for updates**, no rodapé de Setti
 - **Abra as ferramentas** com Win + Shift + X, com um clique no ícone do ScreenGauge perto do relógio ou pelo ScreenGauge no menu Iniciar. O atalho pode ser trocado em Settings.
 - **Troque de ferramenta** pela barra ou pelas teclas 1 a 4. No Dimensions, H, V e C escolhem horizontal, vertical ou as duas.
 - **Feche as ferramentas** com Esc, com o atalho de novo, com o botão de fechar da barra ou passando para outro programa.
-- **Clique** no Dimensions, ou solte o arraste no Bounds, para fixar a medida na tela e copiar o número; segure Shift para copiar os pixels lógicos. Backspace apaga a última medida fixada. No Inspect, o clique copia a cor.
+- **Clique** no Dimensions, ou solte o arraste no Bounds, para fixar a medida na tela e copiar o número; com Shift, ele copia os pixels lógicos. Backspace ou Delete apaga a última medida fixada.
+- **Clique no Inspect** para copiar a cor. Quando HEX e RGB aparecem juntos, o clique copia o HEX, e Shift + clique copia o RGB.
 - **Segure Alt** durante o arraste no Bounds ou no Snip para usar o retângulo exatamente como foi desenhado.
 - **A roda do mouse** ajusta a tolerância no Dimensions, no Bounds e no Snip (o quanto uma cor precisa diferir para contar como borda) e a ampliação no Inspect.
 - **As setas** movem o cursor 1 pixel por vez, ou 10 com Shift.

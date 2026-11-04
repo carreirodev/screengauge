@@ -23,7 +23,7 @@ ScreenGauge is a free, open-source screen ruler for Windows 11. Press **Win + Sh
 - **Inspect** magnifies the area around the cursor and shows the cursor's position and the exact color of the pixel under it, in HEX, RGB, or both.
 - **Snip** captures the content inside a rectangle you drag as a PNG, to the clipboard, a file, or both.
 
-Every number is in physical pixels, with logical pixels next to it when the monitor's scale isn't 100%. A click copies the number or the color.
+Every number is in physical pixels, with logical pixels next to it when the monitor's scale isn't 100% (Settings can turn that off). A click copies the number or the color.
 
 ## Install
 
@@ -51,7 +51,8 @@ This copy doesn't update itself: **Check for updates**, at the bottom of Setting
 - **Open the tools** with Win + Shift + X, a click on ScreenGauge's icon next to the clock, or ScreenGauge in the Start menu. You can change the shortcut in Settings.
 - **Switch tools** with the toolbar or the keys 1 to 4. In Dimensions, H, V and C pick horizontal, vertical or both.
 - **Close the tools** with Esc, the shortcut again, the toolbar's close button, or by switching to another program.
-- **Click** in Dimensions, or release the drag in Bounds, to pin the measurement on screen and copy its number; hold Shift to copy logical pixels instead. Backspace removes the last pinned measurement. In Inspect, a click copies the color.
+- **Click** in Dimensions, or release the drag in Bounds, to pin the measurement on screen and copy its number; with Shift, it copies logical pixels instead. Backspace or Delete removes the last pinned measurement.
+- **Click in Inspect** to copy the color. When both HEX and RGB are shown, a click copies HEX and Shift + click copies RGB.
 - **Hold Alt** while dragging in Bounds or Snip to use the rectangle exactly as drawn.
 - **The mouse wheel** sets the tolerance in Dimensions, Bounds and Snip (how different a color must be to count as an edge), and the magnification in Inspect.
 - **The arrow keys** move the cursor 1 pixel at a time, or 10 with Shift.
