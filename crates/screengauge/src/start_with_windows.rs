@@ -5,23 +5,31 @@
 //! writes it, so that choice is never overridden. The rule of what the switch shows is the core's
 //! ([`StartWithWindows`]).
 //!
-//! The Store copy starts with its package's startup task instead (WPC-336).
+//! The Store copy starts with its package's startup task instead (WPC-336), which its manifest declares off: turning
+//! the option on enables the task, and Windows keeps the user's choice in the task's own state, which only Windows
+//! turns to "disabled by the user". The Store copy never writes the `Run` value, whose path would hold the package's
+//! version and so break at its first update.
 
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 
 use screengauge_core::settings::{Change, Click, StartWithWindows};
+use windows::ApplicationModel::{StartupTask, StartupTaskState};
 use windows::Win32::Foundation::{E_FAIL, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, WIN32_ERROR};
 use windows::Win32::System::Registry::{
     HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_BINARY, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW,
     RegSetKeyValueW,
 };
-use windows::core::{Error, PCWSTR, w};
+use windows::core::{Error, HSTRING, PCWSTR, w};
 
+use crate::package::{self, AppCopy};
 use crate::{log, settings_file};
 
 /// What the `Run` value adds after the `.exe`'s path, so a start at sign-in is told from the user opening ScreenGauge.
 pub const SIGN_IN: &str = "--sign-in";
+
+/// The Store copy's startup task, as `packaging/msix/AppxManifest.xml` declares it.
+pub const STARTUP_TASK_ID: &str = "ScreenGauge";
 
 /// Where Windows looks: the `Run` key, where the value lists ScreenGauge, and the key that keeps the user's choice for
 /// it, both under the current user, and the value's name in both.
@@ -37,19 +45,36 @@ const WINDOWS: Keys = Keys {
     name: w!("ScreenGauge"),
 };
 
-/// What the switch and the tray menu's check mark show now.
+/// What the switch and the tray menu's check mark show now. Not knowing which copy this is, it is an error: the Store
+/// copy must never read, nor write, the installer copy's `Run` value.
 pub fn state() -> windows::core::Result<StartWithWindows> {
-    state_in(&WINDOWS)
+    match package::this_copy()? {
+        AppCopy::Store => Ok(of_task(startup_task()?.State()?)),
+        AppCopy::Installer => state_in(&WINDOWS),
+    }
 }
 
-/// Lists ScreenGauge to start at sign-in, this `.exe` as it runs now, or takes it off the list. What the user chose in
-/// Windows stays as it is either way.
+/// Has ScreenGauge start at sign-in, or not: the installer copy lists this `.exe` as it runs now, or takes it off the
+/// list, and the Store copy enables or disables its startup task. What the user chose in Windows stays as it is either
+/// way: Windows doesn't enable a task the user disabled.
 pub fn turn(on: bool) -> windows::core::Result<()> {
-    if on {
-        let exe = std::env::current_exe().map_err(|e| Error::new(E_FAIL, e.to_string()))?;
-        list(&WINDOWS, &command_line(exe.as_os_str()))
-    } else {
-        unlist(&WINDOWS)
+    match package::this_copy()? {
+        AppCopy::Store => {
+            let task = startup_task()?;
+            if on {
+                // A packaged desktop app's request shows no dialog; Windows answers with the task's new state, which
+                // `click` reads again.
+                task.RequestEnableAsync()?.join()?;
+                Ok(())
+            } else {
+                task.Disable()
+            }
+        }
+        AppCopy::Installer if on => {
+            let exe = std::env::current_exe().map_err(|e| Error::new(E_FAIL, e.to_string()))?;
+            list(&WINDOWS, &command_line(exe.as_os_str()))
+        }
+        AppCopy::Installer => unlist(&WINDOWS),
     }
 }
 
@@ -86,6 +111,24 @@ pub fn click() -> windows::core::Result<Clicked> {
             Clicked::Turned
         }
     })
+}
+
+/// The Store copy's startup task, asked of Windows each time, so what the user changed in Task Manager since shows.
+fn startup_task() -> windows::core::Result<StartupTask> {
+    StartupTask::GetAsync(&HSTRING::from(STARTUP_TASK_ID))?.join()
+}
+
+/// What the switch shows for the Store copy's task in `state`. A policy that holds it off shows as the user's choice in
+/// Windows, as ScreenGauge can't turn it on either; one that holds it on shows on. A state Windows may add later shows
+/// off, and a click then asks Windows to enable the task, which never overrides the user.
+fn of_task(state: StartupTaskState) -> StartWithWindows {
+    match state {
+        StartupTaskState::Enabled | StartupTaskState::EnabledByPolicy => StartWithWindows::On,
+        StartupTaskState::DisabledByUser | StartupTaskState::DisabledByPolicy => {
+            StartWithWindows::TurnedOffInWindows
+        }
+        _ => StartWithWindows::Off,
+    }
 }
 
 /// The `Run` value's text: the `.exe`'s path in quotes, as it may hold spaces, then [`SIGN_IN`], null-terminated.
@@ -189,10 +232,8 @@ fn failed(error: WIN32_ERROR) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use windows::Win32::System::Registry::{REG_BINARY, RegDeleteTreeW};
-    use windows::core::HSTRING;
-
     use super::*;
+    use windows::Win32::System::Registry::{REG_BINARY, RegDeleteTreeW};
 
     /// Keys of its own per test under `HKCU\Software`, deleted when the test ends: no test ever touches Windows' own
     /// `Run` key, which would start the test's `.exe` at the next sign-in.
@@ -287,6 +328,30 @@ mod tests {
 
     fn line(exe: &str) -> Vec<u16> {
         command_line(OsStr::new(exe))
+    }
+
+    #[test]
+    fn the_store_copy_s_task_shows_on_only_while_windows_has_it_on() {
+        assert_eq!(of_task(StartupTaskState::Disabled), StartWithWindows::Off);
+        assert_eq!(of_task(StartupTaskState::Enabled), StartWithWindows::On);
+        assert_eq!(
+            of_task(StartupTaskState::EnabledByPolicy),
+            StartWithWindows::On
+        );
+    }
+
+    #[test]
+    fn the_store_copy_s_task_turned_off_in_windows_shows_so() {
+        // The user turned it off in Task Manager or in Settings > Apps > Startup.
+        assert_eq!(
+            of_task(StartupTaskState::DisabledByUser),
+            StartWithWindows::TurnedOffInWindows
+        );
+        // An administrator's policy holds it off: ScreenGauge can't turn it on either.
+        assert_eq!(
+            of_task(StartupTaskState::DisabledByPolicy),
+            StartWithWindows::TurnedOffInWindows
+        );
     }
 
     #[test]

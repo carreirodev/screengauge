@@ -10,7 +10,8 @@
   xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap com desktop rescap">
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  IgnorableNamespaces="uap com desktop rescap uap10">
 
   <!-- Name and Publisher as Partner Center gives them for the WPC Solutions account (Product identity). The fourth
        part of the version is always 0: the Store keeps it for itself. -->
@@ -62,6 +63,15 @@
         </com:Extension>
         <desktop:Extension Category="windows.toastNotificationActivation">
           <desktop:ToastNotificationActivation ToastActivatorCLSID="96c6321b-c8aa-4f4d-9c67-f1f3da1ae6c7" />
+        </desktop:Extension>
+        <!-- "Start with Windows" (WPC-336): Windows starts ScreenGauge.exe at sign-in while the task is on. It is off
+             until the user turns it on in ScreenGauge, and Windows lists it in Task Manager and Settings > Apps >
+             Startup, where the user may turn it off. The parameters are the installer copy's Run value's, so it starts
+             hidden; the code also asks Windows whether the task started it, should the parameters not come. The task
+             ID is STARTUP_TASK_ID in start_with_windows.rs. -->
+        <desktop:Extension Category="windows.startupTask" Executable="ScreenGauge.exe"
+          EntryPoint="Windows.FullTrustApplication" uap10:Parameters="--sign-in">
+          <desktop:StartupTask TaskId="ScreenGauge" Enabled="false" DisplayName="ScreenGauge" />
         </desktop:Extension>
       </Extensions>
     </Application>

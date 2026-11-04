@@ -3,15 +3,16 @@
 The Microsoft Store copy of ScreenGauge is this MSIX package (WPC-334). It holds the same `ScreenGauge.exe` as the installer copy, with the same version. Inside a package, ScreenGauge knows it is the Store copy and:
 
 - keeps its settings file in the package's own folder, `%LOCALAPPDATA%\Packages\WPCSolutions.ScreenGauge_8rc0q4yanedb4\LocalState`, which Windows deletes when the package is uninstalled. It never uses the installer copy's `%LOCALAPPDATA%\ScreenGauge`: Windows would let the package open and change a file already there (WPC-289);
-- writes nothing in the registry for its Windows notifications. The manifest declares their activator, with a class of the Store copy's own, and their header shows the package's name and icon.
+- writes nothing in the registry for its Windows notifications. The manifest declares their activator, with a class of the Store copy's own, and their header shows the package's name and icon;
+- starts with Windows from the package's startup task, never from the installer copy's `Run` value (WPC-336). The manifest declares the task off; "Start with Windows" in Settings or the tray menu enables or disables it, and Task Manager and Settings > Apps > Startup list it as ScreenGauge. Windows runs the task only once the package's app has been opened at least once.
 
 | File | What it does |
 | --- | --- |
-| `AppxManifest.xml` | The package: identity from Partner Center, Windows 11 and x64 only, `runFullTrust`, the Start menu entry, the images of `assets/package`, and the notifications' activator |
+| `AppxManifest.xml` | The package: identity from Partner Center, Windows 11 and x64 only, `runFullTrust`, the Start menu entry, the images of `assets/package`, the notifications' activator, and the startup task |
 | `make-msix.ps1` | Builds `ScreenGauge.exe` in release and packs `target\msix\ScreenGauge.msix`; refuses a version other than the app's and a package over 5 MB |
 | `new-test-cert.ps1` | Creates the test certificate that lets the package be installed on this computer |
 
-The tests in `crates/screengauge/src/package.rs` hold the manifest to the code: its version is Cargo's, its activator class is the code's, and every image it names is in `assets/package`.
+The tests in `crates/screengauge/src/package.rs` hold the manifest to the code: its version is Cargo's, its activator class and startup task ID are the code's, the startup task is off and starts ScreenGauge as at sign-in, and every image it names is in `assets/package`.
 
 Run the commands below in PowerShell 7, from the repository's root. They need the Windows SDK (MakeAppx, MakePri, SignTool); the script finds the newest one installed.
 

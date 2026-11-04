@@ -17,4 +17,10 @@ Windows holds what happens at sign-in, so it is what the switch shows; the setti
 - Not listed, ScreenGauge counts as off whatever `StartupApproved` kept: Windows shows that choice only for a listed program. Turning it on lists it; should Windows still have it off, the switch stays off, the amber message shows, and Settings > Apps > Startup now lists ScreenGauge where the user can turn it on.
 - The value holds the path of the `.exe` that wrote it. The installer copy always runs from the same folder, so an update keeps it right; a build run from elsewhere that turns the option on points it at itself.
 - The uninstaller must delete the `Run` value (WPC-337); `StartupApproved` is Windows' and stays.
-- The Store copy starts with its package's startup task instead, with the same rule of respecting Windows (WPC-336).
+- The Store copy starts with its package's startup task instead, with the same rule of respecting Windows (WPC-336); see below.
+
+## The Store copy: the package's startup task
+
+A packaged app's `Run` value would hold the path inside `WindowsApps`, whose folder name carries the package's version, so it would break at the first Store update. The Store copy declares a startup task in its manifest instead (`desktop:StartupTask`, ID `ScreenGauge`, off), and never writes the `Run` value; not knowing which copy it is, ScreenGauge says so and changes nothing. Turning the option on asks Windows to enable the task, turning it off disables it, and the switch shows the task's state, which Windows reads at each call: `Enabled` is on, `Disabled` off, and `DisabledByUser`, the user's choice in Task Manager or Settings > Apps > Startup, is the same "turned off in Windows" as `StartupApproved`'s odd byte, with the same amber message. Windows never enables a task the user disabled, so the rule needs nothing more of ScreenGauge. A group policy's `DisabledByPolicy` shows as turned off in Windows too, and `EnabledByPolicy` as on.
+
+The task starts `ScreenGauge.exe` with the manifest's `uap10:Parameters`, `--sign-in`, as the `Run` value does. Should Windows not pass them, the Store copy also asks Windows how it started (`AppInstance.GetActivatedEventArgs`), and a start by the startup task is a start at sign-in; DebugView shows both answers. Windows runs the task only once the package's app has been opened at least once.

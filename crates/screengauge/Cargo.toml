@@ -21,6 +21,8 @@ windows-core.workspace = true
 [dependencies.windows]
 workspace = true
 features = [
+    "ApplicationModel",
+    "ApplicationModel_Activation",
     "Data_Json",
     "Data_Xml_Dom",
     "Foundation",

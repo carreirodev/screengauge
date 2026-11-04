@@ -4,6 +4,8 @@
 
 use std::path::PathBuf;
 
+use windows::ApplicationModel::Activation::ActivationKind;
+use windows::ApplicationModel::AppInstance;
 use windows::Storage::ApplicationData;
 use windows::Win32::Foundation::{
     APPMODEL_ERROR_NO_PACKAGE, E_FAIL, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, WIN32_ERROR,
@@ -31,6 +33,20 @@ pub fn this_copy() -> windows::core::Result<AppCopy> {
         APPMODEL_ERROR_NO_PACKAGE => Ok(AppCopy::Installer),
         ERROR_INSUFFICIENT_BUFFER => Ok(AppCopy::Store),
         error => Err(Error::from(error.to_hresult())),
+    }
+}
+
+/// How Windows started the Store copy, as from the Start menu (`Launch`) or by its startup task (`StartupTask`); `None`
+/// in the installer copy, or when Windows doesn't say. Windows answers only once per process: it is asked at startup.
+pub fn activation_kind() -> windows::core::Result<Option<ActivationKind>> {
+    if this_copy()? == AppCopy::Installer {
+        return Ok(None);
+    }
+    match AppInstance::GetActivatedEventArgs() {
+        Ok(arguments) => arguments.Kind().map(Some),
+        // A null answer, which the windows crate gives as an error with no failure code.
+        Err(e) if e.code().is_ok() => Ok(None),
+        Err(e) => Err(e),
     }
 }
 
@@ -79,6 +95,11 @@ mod tests {
     }
 
     #[test]
+    fn without_a_package_windows_is_not_asked_how_it_started_screengauge() {
+        assert_eq!(activation_kind().expect("Windows answers"), None);
+    }
+
+    #[test]
     fn without_a_package_there_is_no_package_folder_nor_package_aumid() {
         assert!(local_folder().is_err());
         assert!(application_user_model_id().is_err());
@@ -94,7 +115,7 @@ mod manifest {
     use windows::core::HSTRING;
 
     use crate::notification::STORE_COPY_CLSID;
-    use crate::{StartedBy, started_by};
+    use crate::{StartedBy, start_with_windows, started_by};
 
     const MANIFEST: &str = include_str!("../../../packaging/msix/AppxManifest.xml");
 
@@ -221,6 +242,46 @@ mod manifest {
             .chain(arguments.split_whitespace().map(str::to_string))
             .chain(["-Embedding".to_string()]);
         assert_eq!(started_by(line), StartedBy::Click);
+    }
+
+    /// The `windows.startupTask` extension, the Store copy's "Start with Windows" (WPC-336).
+    const STARTUP_TASK: &str = "//*[local-name()='Extension'][@Category='windows.startupTask']";
+
+    #[test]
+    fn the_startup_task_is_the_code_s_and_off_until_the_user_turns_it_on() {
+        assert_eq!(
+            one(&format!(
+                "{STARTUP_TASK}/*[local-name()='StartupTask']/@TaskId"
+            )),
+            start_with_windows::STARTUP_TASK_ID
+        );
+        assert_eq!(
+            one(&format!(
+                "{STARTUP_TASK}/*[local-name()='StartupTask']/@Enabled"
+            )),
+            "false"
+        );
+        // Task Manager and Settings > Apps > Startup list it by this name.
+        assert_eq!(
+            one(&format!(
+                "{STARTUP_TASK}/*[local-name()='StartupTask']/@DisplayName"
+            )),
+            "ScreenGauge"
+        );
+        assert_eq!(
+            one(&format!("{STARTUP_TASK}/@EntryPoint")),
+            "Windows.FullTrustApplication"
+        );
+    }
+
+    #[test]
+    fn the_startup_task_starts_screengauge_as_at_sign_in() {
+        let executable = one(&format!("{STARTUP_TASK}/@Executable"));
+        assert_eq!(executable, "ScreenGauge.exe");
+        let parameters = one(&format!("{STARTUP_TASK}/@*[local-name()='Parameters']"));
+        let line =
+            std::iter::once(executable).chain(parameters.split_whitespace().map(str::to_string));
+        assert_eq!(started_by(line), StartedBy::SignIn);
     }
 
     #[test]

@@ -44,6 +44,7 @@ mod win32;
 use std::process::ExitCode;
 
 use single_instance::Instance;
+use windows::ApplicationModel::Activation::ActivationKind;
 
 fn main() -> ExitCode {
     match run() {
@@ -57,7 +58,7 @@ fn main() -> ExitCode {
 }
 
 fn run() -> windows::core::Result<()> {
-    let started_by = started_by(std::env::args());
+    let started_by = who_started();
     let _instance = match single_instance::claim(single_instance::NAME)? {
         Instance::First(guard) => guard,
         // Windows started this process, and a copy runs already. For a click on a notification, that copy isn't the
@@ -74,6 +75,37 @@ fn run() -> windows::core::Result<()> {
     resident::run(file, stored, started_by)
 }
 
+/// Who started this process: its first argument says, and in the Store copy, Windows too (`started_in_package`).
+fn who_started() -> StartedBy {
+    let by_arguments = started_by(std::env::args());
+    match package::activation_kind() {
+        Ok(None) => by_arguments,
+        Ok(Some(kind)) => {
+            let started = started_in_package(by_arguments, Some(kind));
+            // In DebugView, the one trace of how a start at sign-in went (WPC-336).
+            log::note(&format!(
+                "started {started:?}: its arguments say {by_arguments:?}, Windows says {kind:?}"
+            ));
+            started
+        }
+        // The arguments still say, as they do for the installer copy.
+        Err(e) => {
+            log::failure("asking Windows how it started the Store copy", &e);
+            by_arguments
+        }
+    }
+}
+
+/// Who started the Store copy, from its arguments (`started_by`) and how Windows says it started the package's app
+/// (`kind`), should it say. The startup task's start is at sign-in, whether or not Windows passed the manifest's
+/// `--sign-in` along with it.
+fn started_in_package(by_arguments: StartedBy, kind: Option<ActivationKind>) -> StartedBy {
+    match (by_arguments, kind) {
+        (StartedBy::User, Some(ActivationKind::StartupTask)) => StartedBy::SignIn,
+        _ => by_arguments,
+    }
+}
+
 /// Who started this process, from its first argument.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartedBy {
@@ -82,7 +114,8 @@ pub enum StartedBy {
     /// COM, to take a notification's click with ScreenGauge closed: COM adds -Embedding to the command line registered
     /// for the activator, which is the `.exe`'s path alone (WPC-347, scenario s7).
     Click,
-    /// Windows, at sign-in, from the `Run` value "Start with Windows" writes (WPC-326): ScreenGauge starts hidden.
+    /// Windows, at sign-in, from the `Run` value "Start with Windows" writes (WPC-326), or the Store copy's startup task
+    /// (WPC-336): ScreenGauge starts hidden.
     SignIn,
 }
 
@@ -125,6 +158,32 @@ mod tests {
             started_by(args(&["ScreenGauge.exe", "--sign-in"])),
             StartedBy::SignIn
         );
+    }
+
+    #[test]
+    fn the_store_copy_started_by_its_startup_task_starts_as_at_sign_in_even_without_the_flag() {
+        let opened = started_by(args(&["ScreenGauge.exe"]));
+        assert_eq!(
+            started_in_package(opened, Some(ActivationKind::StartupTask)),
+            StartedBy::SignIn
+        );
+        let flagged = started_by(args(&["ScreenGauge.exe", "--sign-in"]));
+        assert_eq!(
+            started_in_package(flagged, Some(ActivationKind::StartupTask)),
+            StartedBy::SignIn
+        );
+    }
+
+    #[test]
+    fn the_store_copy_opened_from_the_start_menu_or_for_a_click_starts_as_its_arguments_say() {
+        let opened = started_by(args(&["ScreenGauge.exe"]));
+        assert_eq!(
+            started_in_package(opened, Some(ActivationKind::Launch)),
+            StartedBy::User
+        );
+        assert_eq!(started_in_package(opened, None), StartedBy::User);
+        let clicked = started_by(args(&["ScreenGauge.exe", "-Embedding", "-Embedding"]));
+        assert_eq!(started_in_package(clicked, None), StartedBy::Click);
     }
 
     #[test]
