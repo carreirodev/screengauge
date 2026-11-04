@@ -9,7 +9,7 @@ itself is built by [`packaging/msix`](../msix/README.md).
 | Product name, short description, description, product features | [`listing.md`](listing.md) | Store listings > English > Product name, Supplemental fields > Short description, Description, Product features |
 | Screenshots and their captions | the list below; captions in [`listing.md`](listing.md) | Store listings > English > Screenshots (Desktop) |
 | Store icon | [`assets/store/StoreIcon.png`](../../assets/store/StoreIcon.png), 300 × 300 | Store listings > English > Store logos > 1:1 App tile icon |
-| Store art | `DesignInterface/MS Store images/`, on the owner's computer only; **not ready** (WPC-294) | Store listings > English > 16:9 Super hero art |
+| Store art | `DesignInterface/MS Store images/Store art.png`, on the owner's computer only, 3840 × 2160 | Store listings > English > 16:9 Super hero art |
 | Privacy policy | [`listing.md`](listing.md): https://wpcsolutions.com.br/screengauge/privacy/ | Properties > Privacy policy URL |
 | Website | [`listing.md`](listing.md): the repository, the page Settings' "Project page" opens | Properties > Website |
 | Why the package declares `runFullTrust` | [`listing.md`](listing.md) | Submission options > Restricted capabilities |
@@ -29,9 +29,12 @@ privacy policy and the website fields of their own. Leave "What's new in this ve
 
 - **Store icon:** the set square drawn as orange acrylic, with thickness and reflection (WPC-291), made by
   `screengauge-icons` with the rest of the icon files. If none is uploaded, the Store uses the package's own logo.
-- **Store art:** not ready. The image chosen so far is 1672 × 941, with blue and yellow colors; Microsoft takes only a PNG
-  of 1920 × 1080 or 3840 × 2160, and WPC-294 redraws it in the brand's orange and graphite, with the main subject in
-  the center, nothing important in the bottom third, and no text. The file stays out of git, as `.gitignore` says.
+- **Store art:** `Store art.png`, a PNG of 3840 × 2160, one of the two sizes Microsoft takes (WPC-294). The Store icon's
+  set square, large, near the center and turned 12°, in warm orange light on graphite, measured as the tools measure: a
+  protractor behind it, a dimension line along its left edge, a dot on each corner, and a magnifier showing the pixels
+  of its long edge. It has no text and no numbers, no monitor or other device, and nothing important in the bottom
+  third, where the Store may lay a gradient. The file stays out of git, as `.gitignore` says; the page that draws it
+  and the script that turns it into the PNG sit beside it, in `source/` (`render.ps1 -Variants b`).
 
 ## The screenshots
 
@@ -70,8 +73,8 @@ notification or personal file, because the repository is public and so is the St
 ## Still to fill at launch
 
 These fields aren't page texts, so they stay with the launch (WPC-342) and are only listed here: pricing (free) and
-markets, category, the company's contact details (required for a company account), the age ratings questionnaire, and
-the Store art (WPC-294).
+markets, category, the company's contact details (required for a company account), and the age ratings
+questionnaire.
 
 ## Sources
 
