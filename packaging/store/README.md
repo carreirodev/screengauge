@@ -33,8 +33,9 @@ privacy policy and the website fields of their own. Leave "What's new in this ve
   set square, large, near the center and turned 12°, in warm orange light on graphite, measured as the tools measure: a
   protractor behind it, a dimension line along its left edge, a dot on each corner, and a magnifier showing the pixels
   of its long edge. It has no text and no numbers, no monitor or other device, and nothing important in the bottom
-  third, where the Store may lay a gradient. The file stays out of git, as `.gitignore` says; the page that draws it
-  and the script that turns it into the PNG sit beside it, in `source/` (`render.ps1 -Variants b`).
+  third, where the Store may lay a gradient. The file stays out of git, as `.gitignore` says. The page that draws it
+  and the script that renders it sit beside it, in `source/`: `render.ps1 -Variants b` writes `source/hero-b.png`,
+  which is copied over `Store art.png`.
 
 ## The screenshots
 
