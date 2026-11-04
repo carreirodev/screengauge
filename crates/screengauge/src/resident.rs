@@ -37,7 +37,7 @@ use crate::{
 };
 
 /// The resident window's class, which a copy opened again looks for to call the running copy.
-const CLASS_NAME: PCWSTR = w!("ScreenGauge.Resident");
+pub const CLASS_NAME: PCWSTR = w!("ScreenGauge.Resident");
 
 /// Explorer broadcasts this message when the taskbar is created: at sign-in, and when Explorer restarts
 /// and has dropped every tray icon.

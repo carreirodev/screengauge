@@ -33,13 +33,13 @@ pub const STARTUP_TASK_ID: &str = "ScreenGauge";
 
 /// Where Windows looks: the `Run` key, where the value lists ScreenGauge, and the key that keeps the user's choice for
 /// it, both under the current user, and the value's name in both.
-struct Keys {
-    run: PCWSTR,
-    approved: PCWSTR,
-    name: PCWSTR,
+pub struct Keys {
+    pub run: PCWSTR,
+    pub approved: PCWSTR,
+    pub name: PCWSTR,
 }
 
-const WINDOWS: Keys = Keys {
+pub const WINDOWS: Keys = Keys {
     run: w!(r"Software\Microsoft\Windows\CurrentVersion\Run"),
     approved: w!(r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"),
     name: w!("ScreenGauge"),

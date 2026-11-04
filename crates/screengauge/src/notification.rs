@@ -6,9 +6,10 @@
 mod activator;
 mod toast;
 
-/// For the tests of the Store copy's manifest (`package.rs`), which must name the same class as the code registers.
+/// For the tests of the Store copy's manifest (`package.rs`) and of the installer copy's uninstaller (`installer.rs`),
+/// which must name the same AppUserModelID and classes as the code registers.
 #[cfg(test)]
-pub use toast::STORE_COPY_CLSID;
+pub use toast::{INSTALLER_COPY_AUMID, INSTALLER_COPY_CLSID, STORE_COPY_CLSID};
 
 use std::cell::RefCell;
 use std::ffi::c_void;

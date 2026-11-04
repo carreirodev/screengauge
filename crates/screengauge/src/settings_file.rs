@@ -67,9 +67,9 @@ fn not_kept() -> io::Error {
     io::Error::other("the settings file wasn't read at startup")
 }
 
-const FILE_NAME: &str = "settings.ini";
+pub const FILE_NAME: &str = "settings.ini";
 /// What a save writes before it replaces the file.
-const TEMPORARY_NAME: &str = "settings.ini.tmp";
+pub const TEMPORARY_NAME: &str = "settings.ini.tmp";
 
 /// The folder of `copy`'s settings file, so the two copies never share a file:
 ///

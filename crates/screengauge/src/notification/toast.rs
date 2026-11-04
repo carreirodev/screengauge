@@ -27,11 +27,11 @@ use crate::package::{self, AppCopy};
 use crate::{settings_file, tray};
 
 /// The name Windows knows the installer copy's notifications by: the header shows the `DisplayName` registered for it.
-const INSTALLER_COPY_AUMID: &str = "WPCSolutions.ScreenGauge";
+pub const INSTALLER_COPY_AUMID: &str = "WPCSolutions.ScreenGauge";
 
 /// The installer copy's activator class, which Windows starts ScreenGauge with when a notification is clicked. Never
 /// changed: the notifications already in the notification center carry it, and their click would go nowhere.
-const INSTALLER_COPY_CLSID: GUID = GUID::from_u128(0x3beb9695_da23_4599_b10c_7cd6cd96e50c);
+pub const INSTALLER_COPY_CLSID: GUID = GUID::from_u128(0x3beb9695_da23_4599_b10c_7cd6cd96e50c);
 
 /// The Store copy's activator class, its own so a click never goes to the other copy (WPC-347, for WPC-339). The
 /// package's manifest names it twice, and a test holds the three equal. Never changed, as the installer copy's.

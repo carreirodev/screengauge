@@ -17,6 +17,8 @@ mod frozen_screen;
 mod global_shortcut;
 mod graphics;
 mod hidden_icons_panel;
+#[cfg(test)]
+mod installer;
 mod keyboard_hook;
 mod log;
 mod notification;
