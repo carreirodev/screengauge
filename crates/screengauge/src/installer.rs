@@ -1,11 +1,18 @@
 //! The installer copy's Inno Setup script, `packaging/inno/ScreenGauge.iss` (WPC-337), held to the code and to the v1
 //! spec (WPC-296): what the uninstaller deletes is exactly what the installer copy writes, and nothing of the Store
-//! copy's.
+//! copy's, and the Store copy Setup warns about (WPC-338) is the Store copy's manifest's package.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use windows::Win32::Foundation::ERROR_SUCCESS;
+use windows::Win32::Storage::Packaging::Appx::{
+    PACKAGE_FAMILY_NAME_MAX_LENGTH, PACKAGE_ID, PackageFamilyNameFromId,
+};
+use windows::core::PWSTR;
+
 use crate::notification::{self, INSTALLER_COPY_AUMID, INSTALLER_COPY_CLSID, STORE_COPY_CLSID};
+use crate::package::manifest;
 use crate::{StartedBy, resident, settings_file, start_with_windows, started_by};
 
 const SCRIPT: &str = include_str!("../../../packaging/inno/ScreenGauge.iss");
@@ -282,12 +289,69 @@ fn uninstalling_takes_screengauge_off_the_sign_in_list_and_leaves_the_user_s_cho
     );
 }
 
+/// The package family Windows names after a package's name and publisher, asked of Windows.
+fn package_family_name(name: &str, publisher: &str) -> String {
+    let mut name: Vec<u16> = name.encode_utf16().chain([0]).collect();
+    let mut publisher: Vec<u16> = publisher.encode_utf16().chain([0]).collect();
+    let id = PACKAGE_ID {
+        name: PWSTR(name.as_mut_ptr()),
+        publisher: PWSTR(publisher.as_mut_ptr()),
+        ..Default::default()
+    };
+    let mut buffer = [0u16; PACKAGE_FAMILY_NAME_MAX_LENGTH as usize + 1];
+    let mut length = u32::try_from(buffer.len()).expect("a short buffer");
+    // SAFETY: `id` points at the two null-terminated strings, and `buffer` holds the `length` UTF-16 units it says;
+    // all of them outlive the call.
+    let found =
+        unsafe { PackageFamilyNameFromId(&id, &mut length, Some(PWSTR(buffer.as_mut_ptr()))) };
+    assert_eq!(found, ERROR_SUCCESS);
+    // `length` counts the terminating null.
+    String::from_utf16(&buffer[..length as usize - 1]).expect("UTF-16 text")
+}
+
 #[test]
-fn nothing_of_the_store_copy_s_is_named() {
-    let script = SCRIPT.to_lowercase();
-    assert!(!script.contains(&format!("{STORE_COPY_CLSID:?}").to_lowercase()));
+fn the_store_copy_looked_for_is_the_package_family_of_the_store_copy_s_manifest() {
+    let family = package_family_name(manifest::NAME, manifest::PUBLISHER);
+    // As Windows lists the test package installed from the manifest (Get-AppxPackage), and as Partner Center shows it.
+    assert_eq!(family, "WPCSolutions.ScreenGauge_8rc0q4yanedb4");
+    assert_eq!(define("StorePackageFamily"), family);
+}
+
+#[test]
+fn with_the_store_copy_installed_the_box_recommends_canceling() {
+    let messages: HashMap<_, _> = section("CustomMessages")
+        .into_iter()
+        .filter_map(|line| line.split_once('='))
+        .collect();
+    // The text of the v1 spec (WPC-296), in English as everything ScreenGauge shows (WPC-293).
+    assert_eq!(
+        messages.get("StoreCopyInstalled"),
+        Some(
+            &"ScreenGauge is already installed from the Microsoft Store, which keeps it up to date. Installing it \
+              here too leaves two copies on this PC. We recommend canceling."
+        )
+    );
+    assert_eq!(messages.get("InstallAnyway"), Some(&"Install anyway"));
+}
+
+#[test]
+fn nothing_of_the_store_copy_s_is_installed_nor_uninstalled() {
+    let registry = entries("Registry");
+    let class = format!("{STORE_COPY_CLSID:?}").to_lowercase();
+    assert!(
+        registry
+            .iter()
+            .all(|entry| !entry["subkey"].to_lowercase().contains(&class)),
+        "{registry:?}"
+    );
     // The Store copy's settings are in its package's folder, which Windows deletes with the package.
-    assert!(!script.contains("packages"));
+    let deleted = entries("UninstallDelete");
+    assert!(
+        deleted
+            .iter()
+            .all(|entry| !entry["name"].to_lowercase().contains(r"\packages\")),
+        "{deleted:?}"
+    );
 }
 
 /// A file named by the code, and the folder it is in, as `[UninstallDelete]` writes them.

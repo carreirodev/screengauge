@@ -24,6 +24,10 @@
 ; The resident window's class (crates/screengauge/src/resident.rs), which a running ScreenGauge always has.
 #define ResidentClass "ScreenGauge.Resident"
 
+; The Store copy's package family, which Windows names after the package's name and publisher
+; (packaging/msix/AppxManifest.xml). Setup asks Windows whether the user has it installed (WPC-338).
+#define StorePackageFamily "WPCSolutions.ScreenGauge_8rc0q4yanedb4"
+
 [Setup]
 ; Never changed: it names the uninstall entry, HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\{AppId}_is1,
 ; which the Store copy looks for (WPC-339), and a new one would install a second copy next to this one.
@@ -64,6 +68,11 @@ OutputBaseFilename=ScreenGauge-{#CargoVersion}-setup
 ; What Setup says on Windows 10, whose build is below MinVersion's (measured: this one, not WinVersionTooLowError).
 WindowsVersionNotSupported=ScreenGauge requires Windows 11 or later.
 
+[CustomMessages]
+; The box Setup shows first when the user has the Store copy (WPC-338), with Cancel as its default button.
+StoreCopyInstalled=ScreenGauge is already installed from the Microsoft Store, which keeps it up to date. Installing it here too leaves two copies on this PC. We recommend canceling.
+InstallAnyway=Install anyway
+
 [Files]
 Source: "{#ScreenGaugeExe}"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -101,6 +110,7 @@ const
   WAIT_OBJECT_0 = 0;
   { How long ScreenGauge has to exit once asked. }
   CLOSE_TIMEOUT_MS = 10000;
+  ERROR_INSUFFICIENT_BUFFER = 122;
 
 function GetWindowThreadProcessId(Window: HWND; var ProcessId: DWORD): DWORD;
   external 'GetWindowThreadProcessId@user32.dll stdcall';
@@ -112,6 +122,98 @@ function WaitForSingleObject(Handle: HANDLE; Milliseconds: DWORD): DWORD;
   external 'WaitForSingleObject@kernel32.dll stdcall';
 function CloseHandle(Handle: HANDLE): Integer;
   external 'CloseHandle@kernel32.dll stdcall';
+{ FullNames and Buffer are pointers, passed as 0, which is null: 32 bits wide, as in this 32-bit Setup. }
+function GetPackagesByPackageFamily(FamilyName: String; var Count: Cardinal; FullNames: Cardinal;
+  var BufferLength: Cardinal; Buffer: Cardinal): Longint;
+  external 'GetPackagesByPackageFamily@kernel32.dll stdcall';
+
+{ Whether the user has the Store copy installed, asked of Windows by its package family, which needs no administrator.
+  False when Windows can't say: the box is advice, so Setup goes on as without the Store copy, and logs why. }
+function StoreCopyInstalled: Boolean;
+var
+  Count, BufferLength: Cardinal;
+  Error: Longint;
+begin
+  Result := False;
+  Count := 0;
+  BufferLength := 0;
+  { With no room for the names, Windows only counts them: ERROR_SUCCESS with none, ERROR_INSUFFICIENT_BUFFER with
+    some. }
+  Error := GetPackagesByPackageFamily('{#StorePackageFamily}', Count, 0, BufferLength, 0);
+  if Error = ERROR_INSUFFICIENT_BUFFER then
+    Result := Count > 0
+  else if Error <> 0 then
+    Log(Format('Windows didn''t say whether the Store copy is installed (error %d): not asking.', [Error]));
+  Log(Format('Store copy packages installed for this user: %d.', [Count]));
+end;
+
+{ The box Setup shows when the user has the Store copy: True for Install anyway, False for Cancel, its default button,
+  and for Esc and the close button too. Not MsgBox, whose buttons are Windows' own (Yes and No), nor
+  TaskDialogMsgBox, which shows custom labels as command links, the first one the default. }
+function InstallNextToStoreCopy: Boolean;
+var
+  Form: TSetupForm;
+  Text: TNewStaticText;
+  InstallButton, CancelButton: TNewButton;
+  ButtonWidth: Integer;
+begin
+  { Sizes as Windows' own message boxes, which Setup scales to the screen's. }
+  Form := CreateCustomForm(400, 124, False, False);
+  try
+    Form.Caption := FmtMessage(SetupMessage(msgSetupWindowTitle), ['ScreenGauge']);
+
+    Text := TNewStaticText.Create(Form);
+    Text.Parent := Form;
+    Text.Left := ScaleX(16);
+    Text.Top := ScaleY(16);
+    Text.Width := Form.ClientWidth - ScaleX(2 * 16);
+    Text.AutoSize := False;
+    Text.WordWrap := True;
+    Text.Height := Form.ClientHeight - ScaleY(16 + 16 + 23 + 16);
+    Text.Caption := CustomMessage('StoreCopyInstalled');
+
+    InstallButton := TNewButton.Create(Form);
+    InstallButton.Parent := Form;
+    InstallButton.Caption := CustomMessage('InstallAnyway');
+    InstallButton.ModalResult := mrOk;
+
+    CancelButton := TNewButton.Create(Form);
+    CancelButton.Parent := Form;
+    CancelButton.Caption := SetupMessage(msgButtonCancel);
+    CancelButton.ModalResult := mrCancel;
+    CancelButton.Default := True;
+    CancelButton.Cancel := True;
+
+    { Cancel last, on the right, as in Windows' own message boxes. }
+    ButtonWidth := Form.CalculateButtonWidth([InstallButton.Caption, CancelButton.Caption]);
+    CancelButton.SetBounds(Form.ClientWidth - ScaleX(16) - ButtonWidth, Form.ClientHeight - ScaleY(16 + 23),
+      ButtonWidth, ScaleY(23));
+    InstallButton.SetBounds(CancelButton.Left - ScaleX(8) - ButtonWidth, CancelButton.Top, ButtonWidth, ScaleY(23));
+
+    Form.ActiveControl := CancelButton;
+    Result := Form.ShowModal = mrOk;
+  finally
+    Form.Free;
+  end;
+end;
+
+{ Before the wizard: someone who has the Store copy is told, and Cancel ends Setup with nothing installed. A silent
+  install doesn't ask. }
+function InitializeSetup: Boolean;
+begin
+  Result := True;
+  if not StoreCopyInstalled then
+    Exit;
+  if WizardSilent then begin
+    Log('The Store copy is installed, and the install is silent: not asking.');
+    Exit;
+  end;
+  Result := InstallNextToStoreCopy;
+  if Result then
+    Log('The Store copy is installed: the user chose Install anyway.')
+  else
+    Log('The Store copy is installed: the user canceled.');
+end;
 
 { Asks ScreenGauge to exit when it runs from Exe, as its tray menu's Exit does, and waits for it to end. One copy runs
   at a time, the Store copy included, so there is one resident window at most; when it is the Store copy's, it is left

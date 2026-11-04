@@ -18,14 +18,16 @@ Uninstalling deletes what the installer copy wrote, and nothing of the Store cop
 
 The installer never creates these: ScreenGauge writes them as it runs.
 
+Before anything else, Setup asks Windows whether the user has the Store copy installed, by its package family, `WPCSolutions.ScreenGauge_8rc0q4yanedb4`, with no administrator (WPC-338). If so, it shows a box: "ScreenGauge is already installed from the Microsoft Store, which keeps it up to date. Installing it here too leaves two copies on this PC. We recommend canceling." Its buttons are **Install anyway** and **Cancel**, the default: Enter, Esc and the close button cancel too, and Setup then ends with nothing installed. Inno Setup's own boxes can't show these buttons, so the box is a form of the script's. A silent install doesn't ask, and its log says the Store copy was found. If Windows can't answer, Setup goes on without the box and logs the error.
+
 Installing over a ScreenGauge that runs, or uninstalling it, first asks it to exit, as its tray menu's Exit does, and only when it runs from the installed folder: a Store copy that runs is left running. Setup's `AppMutex` isn't used, because the two copies claim the same single-instance name.
 
 | File | What it does |
 | --- | --- |
-| `ScreenGauge.iss` | The installer: for the user alone, Windows 11 and x64, the Start menu entry, "Launch ScreenGauge" on the last page (checked, skipped in a silent install), and what the uninstaller deletes |
+| `ScreenGauge.iss` | The installer: the box shown when the Store copy is installed, for the user alone, Windows 11 and x64, the Start menu entry, "Launch ScreenGauge" on the last page (checked, skipped in a silent install), and what the uninstaller deletes |
 | `make-installer.ps1` | Builds `ScreenGauge.exe` in release and compiles `target\installer\ScreenGauge-<version>-setup.exe`; refuses an exe whose version isn't the app's and an installer over 5 MB |
 
-The tests in `crates/screengauge/src/installer.rs` hold the script to the code: what the uninstaller deletes is the code's AppUserModelID, class, `Run` value and settings files, the Start menu entry starts ScreenGauge as a call, and the script names nothing of the Store copy's.
+The tests in `crates/screengauge/src/installer.rs` hold the script to the code: what the uninstaller deletes is the code's AppUserModelID, class, `Run` value and settings files, the Start menu entry starts ScreenGauge as a call, the package family Setup looks for is the Store copy manifest's, the box says what the v1 spec says, and nothing of the Store copy's is installed or uninstalled.
 
 ## Install Inno Setup
 
@@ -70,3 +72,9 @@ Inno Setup's documentation, read on 2026-11-04:
 - `[Registry]`, its 64-bit roots and the `dontcreatekey` flag: https://jrsoftware.org/ishelp/topic_registrysection.htm
 - `MinVersion`: https://jrsoftware.org/ishelp/topic_setup_minversion.htm
 - `CloseApplications`: https://jrsoftware.org/ishelp/topic_setup_closeapplications.htm
+- `CreateCustomForm`, the box's form: https://jrsoftware.org/ishelp/topic_isxfunc_createcustomform.htm
+- `TaskDialogMsgBox`, whose custom labels are command links, the first one the default (its source, `Projects/Src/Shared.TaskDialogFunc.pas` in jrsoftware/issrc): https://jrsoftware.org/ishelp/topic_isxfunc_taskdialogmsgbox.htm
+
+Microsoft's documentation, read on 2026-11-04:
+
+- `GetPackagesByPackageFamily`, which lists the current user's packages of a family: https://learn.microsoft.com/en-us/windows/win32/api/appmodel/nf-appmodel-getpackagesbypackagefamily

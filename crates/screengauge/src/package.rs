@@ -108,7 +108,7 @@ mod tests {
 
 /// The Store copy's manifest, `packaging/msix/AppxManifest.xml`, held to the code and to the v1 spec (WPC-296).
 #[cfg(test)]
-mod manifest {
+pub(crate) mod manifest {
     use std::path::Path;
 
     use windows::Data::Xml::Dom::XmlDocument;
@@ -118,6 +118,11 @@ mod manifest {
     use crate::{StartedBy, start_with_windows, started_by};
 
     const MANIFEST: &str = include_str!("../../../packaging/msix/AppxManifest.xml");
+
+    /// The package's name and publisher, as Partner Center gives them for the WPC Solutions account (Product
+    /// identity). Windows names the package family after them, which the installer looks for (WPC-338).
+    pub(crate) const NAME: &str = "WPCSolutions.ScreenGauge";
+    pub(crate) const PUBLISHER: &str = "CN=A42AF38D-FCA3-4813-A9BB-788209C42998";
 
     fn manifest() -> XmlDocument {
         let document = XmlDocument::new().expect("an XML document");
@@ -153,14 +158,8 @@ mod manifest {
 
     #[test]
     fn the_identity_is_the_one_partner_center_gives() {
-        assert_eq!(
-            one("//*[local-name()='Identity']/@Name"),
-            "WPCSolutions.ScreenGauge"
-        );
-        assert_eq!(
-            one("//*[local-name()='Identity']/@Publisher"),
-            "CN=A42AF38D-FCA3-4813-A9BB-788209C42998"
-        );
+        assert_eq!(one("//*[local-name()='Identity']/@Name"), NAME);
+        assert_eq!(one("//*[local-name()='Identity']/@Publisher"), PUBLISHER);
         assert_eq!(
             one("//*[local-name()='PublisherDisplayName']"),
             "WPC Solutions"
