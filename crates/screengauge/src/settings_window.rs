@@ -461,8 +461,7 @@ fn kept_inside(top: i32, height: i32, work: RECT) -> i32 {
 }
 
 /// Sizes the window for the page as it is now, where it is: a message under a row's label, or "Check for updates"'
-/// line, came or went. The top stays
-/// where it is, and the window grows or shrinks at the bottom.
+/// line, came or went. The top stays where it is, and the window grows or shrinks at the bottom.
 fn follow_page(hwnd: HWND) {
     // SAFETY: our own window.
     let dpi = unsafe { GetDpiForWindow(hwnd) };

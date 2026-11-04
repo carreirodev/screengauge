@@ -10,6 +10,8 @@ use windows::Win32::Graphics::Direct2D::{
     ID2D1SolidColorBrush, ID2D1StrokeStyle,
 };
 
+use crate::relief::dot;
+
 /// The units of the signs' view box.
 const UNITS: f32 = 24.0;
 
@@ -51,13 +53,8 @@ pub fn draw(
         stroke,
     } = *pen;
     let unit = side / UNITS;
-    // A point given in the sign's units; the point type comes from a crate windows 0.62 doesn't re-export.
-    let at = |x: f32, y: f32| {
-        let mut point = D2D1_ELLIPSE::default().point;
-        point.X = left + x * unit;
-        point.Y = top + y * unit;
-        point
-    };
+    // A point given in the sign's units.
+    let at = |x: f32, y: f32| dot(left + x * unit, top + y * unit).point;
     // SAFETY: a drawing call on a live render target. Out of BeginDraw and EndDraw, Direct2D only fails the frame at
     // EndDraw.
     unsafe { target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };

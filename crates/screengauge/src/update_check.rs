@@ -171,6 +171,7 @@ impl Drop for Handle {
 /// certificate checks.
 fn fetch() -> windows::core::Result<Reply> {
     let too_large = || Error::new(E_FAIL, "the reply is larger than a release");
+    let past_u32 = || Error::new(E_FAIL, "a size past what WinHTTP counts");
     // SAFETY: static strings that outlive the call. No proxy named: Windows' own setting decides.
     let session = Handle::new(unsafe {
         WinHttpOpen(
@@ -211,7 +212,7 @@ fn fetch() -> windows::core::Result<Reply> {
     // SAFETY: a live request handle, its request sent.
     unsafe { WinHttpReceiveResponse(request.0, std::ptr::null_mut()) }?;
     let mut status = 0u32;
-    let mut size = u32::try_from(size_of::<u32>()).map_err(|_| too_large())?;
+    let mut size = u32::try_from(size_of::<u32>()).map_err(|_| past_u32())?;
     // SAFETY: a live request handle with its response; the status is read as a number into a local of `size` bytes.
     unsafe {
         WinHttpQueryHeaders(
@@ -248,7 +249,7 @@ fn fetch() -> windows::core::Result<Reply> {
                 &mut read,
             )
         }?;
-        body.truncate(start + usize::try_from(read).map_err(|_| too_large())?);
+        body.truncate(start + usize::try_from(read).map_err(|_| past_u32())?);
     }
     let body =
         String::from_utf8(body).map_err(|_| Error::new(E_FAIL, "the reply isn't UTF-8 text"))?;

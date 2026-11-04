@@ -7,7 +7,8 @@
 //! still on its way then reaches nobody.
 
 use std::cell::{Cell, RefCell};
-use std::sync::mpsc::{self, Receiver};
+use std::panic;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
@@ -18,7 +19,7 @@ use crate::update_check::{self, Answer, Click};
 use crate::{log, package};
 
 /// What the check's thread posts to the Settings window once GitHub answered, or didn't: the answer waits in the
-/// channel this module keeps.
+/// channel this module keeps. WM_APP + 1 to + 13 are taken.
 pub const CHECKED: u32 = WM_APP + 14;
 
 thread_local! {
@@ -43,18 +44,37 @@ pub fn click(hwnd: HWND) {
     }
 }
 
-/// Asks GitHub on a thread of its own, and says "Checking…" meanwhile. A click while it asks does nothing more.
+/// Asks GitHub on a thread of its own, and says "Checking…" meanwhile. A click while it asks does nothing more, unless
+/// the answer already came and its message was lost, or the thread ended with none: then the click shows the answer,
+/// or asks again, so "Checking…" never stays for good.
 fn ask(hwnd: HWND) {
     if STATUS.get() == Some(Status::Checking) {
-        return;
+        match received() {
+            Ok(answer) => {
+                show(hwnd, Status::Answered(answer));
+                return;
+            }
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => {
+                log::failure(
+                    "Check for updates",
+                    &"its thread ended without an answer; asking again",
+                );
+            }
+        }
     }
     let (sender, answer) = mpsc::channel();
     let window = hwnd.0.expose_provenance();
     let spawned = thread::Builder::new()
         .name("check for updates".to_owned())
         .spawn(move || {
+            // A panic in the check still answers, so the line doesn't say "Checking…" for good.
+            let answer = panic::catch_unwind(update_check::check).unwrap_or_else(|_| {
+                log::failure("Check for updates", &"the check panicked");
+                Answer::CouldntCheck
+            });
             // Settings closed while GitHub was asked: nobody to tell.
-            if sender.send(update_check::check()).is_err() {
+            if sender.send(answer).is_err() {
                 return;
             }
             let window = HWND(std::ptr::with_exposed_provenance_mut(window));
@@ -75,14 +95,25 @@ fn ask(hwnd: HWND) {
     }
 }
 
-/// [`CHECKED`] came: the line says GitHub's answer.
+/// [`CHECKED`] came: the line says GitHub's answer. A message from a check Settings no longer waits for, closed and
+/// opened again since, finds no answer and changes nothing.
 pub fn on_checked(hwnd: HWND) {
-    let answer =
-        ANSWER.with_borrow(|answer| answer.as_ref().and_then(|answer| answer.try_recv().ok()));
-    if let Some(answer) = answer {
-        ANSWER.set(None);
+    if let Ok(answer) = received() {
         show(hwnd, Status::Answered(answer));
     }
+}
+
+/// The answer of the check Settings waits for, once, should it have come.
+fn received() -> Result<Answer, TryRecvError> {
+    let answer = ANSWER.with_borrow(|answer| {
+        answer
+            .as_ref()
+            .map_or(Err(TryRecvError::Disconnected), Receiver::try_recv)
+    });
+    if answer.is_ok() {
+        ANSWER.set(None);
+    }
+    answer
 }
 
 /// The line says `status`: the window grows to hold it the first time, and is drawn again after.
