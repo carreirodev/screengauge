@@ -28,6 +28,10 @@
 ; (packaging/msix/AppxManifest.xml). Setup asks Windows whether the user has it installed (WPC-338).
 #define StorePackageFamily "WPCSolutions.ScreenGauge_8rc0q4yanedb4"
 
+; The installer copy's uninstall entry, named after AppId below. When it is there, Setup is an update of the installer
+; copy, which leaves one copy of it: no Store copy box then (owner's choice in WPC-338).
+#define InstallerCopyUninstallKey "Software\Microsoft\Windows\CurrentVersion\Uninstall\{1DF55A92-C67C-41D9-B304-B2442423D407}_is1"
+
 [Setup]
 ; Never changed: it names the uninstall entry, HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\{AppId}_is1,
 ; which the Store copy looks for (WPC-339), and a new one would install a second copy next to this one.
@@ -110,7 +114,12 @@ const
   WAIT_OBJECT_0 = 0;
   { How long ScreenGauge has to exit once asked. }
   CLOSE_TIMEOUT_MS = 10000;
+  ERROR_SUCCESS = 0;
   ERROR_INSUFFICIENT_BUFFER = 122;
+  { The box's margin, button height and gap between its buttons, as in Windows' own message boxes. }
+  BOX_MARGIN = 16;
+  BOX_BUTTON_HEIGHT = 23;
+  BOX_BUTTON_GAP = 8;
 
 function GetWindowThreadProcessId(Window: HWND; var ProcessId: DWORD): DWORD;
   external 'GetWindowThreadProcessId@user32.dll stdcall';
@@ -129,22 +138,23 @@ function GetPackagesByPackageFamily(FamilyName: String; var Count: Cardinal; Ful
 
 { Whether the user has the Store copy installed, asked of Windows by its package family, which needs no administrator.
   False when Windows can't say: the box is advice, so Setup goes on as without the Store copy, and logs why. }
-function StoreCopyInstalled: Boolean;
+function UserHasStoreCopy: Boolean;
 var
   Count, BufferLength: Cardinal;
-  Error: Longint;
+  Answer: Longint;
 begin
-  Result := False;
   Count := 0;
   BufferLength := 0;
   { With no room for the names, Windows only counts them: ERROR_SUCCESS with none, ERROR_INSUFFICIENT_BUFFER with
     some. }
-  Error := GetPackagesByPackageFamily('{#StorePackageFamily}', Count, 0, BufferLength, 0);
-  if Error = ERROR_INSUFFICIENT_BUFFER then
-    Result := Count > 0
-  else if Error <> 0 then
-    Log(Format('Windows didn''t say whether the Store copy is installed (error %d): not asking.', [Error]));
-  Log(Format('Store copy packages installed for this user: %d.', [Count]));
+  Answer := GetPackagesByPackageFamily('{#StorePackageFamily}', Count, 0, BufferLength, 0);
+  if (Answer = ERROR_SUCCESS) or (Answer = ERROR_INSUFFICIENT_BUFFER) then begin
+    Log(Format('Store copy packages installed for this user: %d.', [Count]));
+    Result := Count > 0;
+  end else begin
+    Log(Format('Windows didn''t say whether the Store copy is installed (error %d): not asking.', [Answer]));
+    Result := False;
+  end;
 end;
 
 { The box Setup shows when the user has the Store copy: True for Install anyway, False for Cancel, its default button,
@@ -157,19 +167,20 @@ var
   InstallButton, CancelButton: TNewButton;
   ButtonWidth: Integer;
 begin
-  { Sizes as Windows' own message boxes, which Setup scales to the screen's. }
+  { CreateCustomForm scales the form's size to the screen's, and ScaleX and ScaleY the rest. Room for three lines of
+    text: the box's two, and one more where the text wraps differently. }
   Form := CreateCustomForm(400, 124, False, False);
   try
     Form.Caption := FmtMessage(SetupMessage(msgSetupWindowTitle), ['ScreenGauge']);
 
     Text := TNewStaticText.Create(Form);
     Text.Parent := Form;
-    Text.Left := ScaleX(16);
-    Text.Top := ScaleY(16);
-    Text.Width := Form.ClientWidth - ScaleX(2 * 16);
+    Text.Left := ScaleX(BOX_MARGIN);
+    Text.Top := ScaleY(BOX_MARGIN);
+    Text.Width := Form.ClientWidth - ScaleX(2 * BOX_MARGIN);
     Text.AutoSize := False;
     Text.WordWrap := True;
-    Text.Height := Form.ClientHeight - ScaleY(16 + 16 + 23 + 16);
+    Text.Height := Form.ClientHeight - ScaleY(BOX_MARGIN + BOX_MARGIN + BOX_BUTTON_HEIGHT + BOX_MARGIN);
     Text.Caption := CustomMessage('StoreCopyInstalled');
 
     InstallButton := TNewButton.Create(Form);
@@ -186,9 +197,10 @@ begin
 
     { Cancel last, on the right, as in Windows' own message boxes. }
     ButtonWidth := Form.CalculateButtonWidth([InstallButton.Caption, CancelButton.Caption]);
-    CancelButton.SetBounds(Form.ClientWidth - ScaleX(16) - ButtonWidth, Form.ClientHeight - ScaleY(16 + 23),
-      ButtonWidth, ScaleY(23));
-    InstallButton.SetBounds(CancelButton.Left - ScaleX(8) - ButtonWidth, CancelButton.Top, ButtonWidth, ScaleY(23));
+    CancelButton.SetBounds(Form.ClientWidth - ScaleX(BOX_MARGIN) - ButtonWidth,
+      Form.ClientHeight - ScaleY(BOX_MARGIN + BOX_BUTTON_HEIGHT), ButtonWidth, ScaleY(BOX_BUTTON_HEIGHT));
+    InstallButton.SetBounds(CancelButton.Left - ScaleX(BOX_BUTTON_GAP) - ButtonWidth, CancelButton.Top, ButtonWidth,
+      ScaleY(BOX_BUTTON_HEIGHT));
 
     Form.ActiveControl := CancelButton;
     Result := Form.ShowModal = mrOk;
@@ -197,13 +209,17 @@ begin
   end;
 end;
 
-{ Before the wizard: someone who has the Store copy is told, and Cancel ends Setup with nothing installed. A silent
-  install doesn't ask. }
+{ Before the wizard: someone who has the Store copy is told, and Cancel ends Setup with nothing installed. An update of
+  the installer copy and a silent install don't ask. }
 function InitializeSetup: Boolean;
 begin
   Result := True;
-  if not StoreCopyInstalled then
+  if not UserHasStoreCopy then
     Exit;
+  if RegKeyExists(HKCU64, '{#InstallerCopyUninstallKey}') then begin
+    Log('The Store copy is installed, and so is the installer copy, which this updates: not asking.');
+    Exit;
+  end;
   if WizardSilent then begin
     Log('The Store copy is installed, and the install is silent: not asking.');
     Exit;

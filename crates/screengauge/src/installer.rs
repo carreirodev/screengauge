@@ -197,6 +197,16 @@ fn only_windows_11_on_x64() {
 }
 
 #[test]
+fn an_update_of_the_installer_copy_is_told_by_its_uninstall_entry() {
+    // Setup shows no Store copy box when this entry is there: the installer copy is installed, and an update leaves
+    // one copy of it (owner's choice in WPC-338).
+    assert_eq!(
+        define("InstallerCopyUninstallKey"),
+        format!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_ID}_is1")
+    );
+}
+
+#[test]
 fn installed_apps_lists_screengauge_by_wpc_solutions_with_its_icon() {
     assert_eq!(setup("AppName"), "ScreenGauge");
     // Inno Setup's default would add the version to the name.
