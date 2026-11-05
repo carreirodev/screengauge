@@ -56,7 +56,8 @@ pub const CHOSEN: u32 = WM_APP + 13;
 
 /// What the menu posts the resident window when it opens or closes, so the tray icon's tip follows (`is_open`): hidden
 /// while it is open, which it would otherwise cover (WPC-373). Posted rather than done here: the menu opens while
-/// Explorer waits for the icon's message to be answered, and closes on the way to the photo. WM_APP + 14 is taken.
+/// Explorer waits for the icon's message to be answered, and closes on the way to the photo. WM_APP + 1 to + 14 are
+/// taken.
 pub const OPENED_OR_CLOSED: u32 = WM_APP + 15;
 
 /// The message TrackMouseEvent sends when the cursor leaves the window, as in Settings.

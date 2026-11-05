@@ -137,7 +137,8 @@ pub fn add(hwnd: HWND) -> windows::core::Result<()> {
 }
 
 /// Shows or hides Windows' tip. Without the icon, as before the taskbar exists, it only sets how the icon is added.
-/// A failure keeps the tip as it was, so the next change tries again.
+/// A failure keeps the tip as it was, and Windows' own with it: asking for the other state, as when the menu next opens
+/// or closes, tries again.
 pub fn set_tip(hwnd: HWND, tip: Tip) -> windows::core::Result<()> {
     if TIP.get() == tip {
         return Ok(());
