@@ -116,8 +116,9 @@ pub struct Session {
     /// Snip's image on its way to a file, from the release until the file is written or Save As is cancelled. `None`
     /// the rest of the time.
     saving: Option<Saving>,
-    /// The copies asked for that the clipboard hasn't answered yet, oldest first: the Windows layer answers each before
-    /// it carries out the next effect, so this holds one at most, for a moment.
+    /// The copies asked for that the clipboard hasn't answered yet, oldest first. The Windows layer answers each in the
+    /// order asked, before it carries out the next effect, so this holds them only for a moment: one, or a few should
+    /// several clicks come before the Windows layer gets to the first copy.
     copies: VecDeque<WaitingCopy>,
     /// The remembered state as the tools opened, and as they will leave it: the Windows layer keeps it only when the
     /// two differ.
@@ -403,9 +404,10 @@ impl Session {
         }
     }
 
-    /// Copies the color of the pixel at the magnified view's center, the one under the cursor at the click, and shows
-    /// "Copied" once the clipboard took it, or "Couldn't copy." (WPC-352); the tool stays as it was, and nothing is pinned (v1 spec WPC-296, Inspect). It copies the format the
-    /// strip shows first, or with Shift held the other, even when it doesn't show. The second click of the double-click
+    /// Copies the color of the pixel at the magnified view's center, the one under the cursor at the click; the tool stays
+    /// as it was, and nothing is pinned (v1 spec WPC-296, Inspect). Once the clipboard answers, "Copied" or "Couldn't
+    /// copy." shows (WPC-352). It copies the format the strip shows first, or with Shift held the other, even when it
+    /// doesn't show. The second click of the double-click
     /// that called ScreenGauge copies nothing, as it pins nothing in Dimensions (WPC-308).
     fn copy_color(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
         if self.is_second_click(uptime) {
@@ -421,7 +423,7 @@ impl Session {
         };
         let texts = color::texts(pixels::color(photo, at), self.color_format);
         let text = if held.shift { texts.other } else { texts.first };
-        self.copy(Effect::CopyText(text), monitor)
+        self.ask_for_copy(Effect::CopyText(text), monitor)
     }
 
     /// Starts drawing a rectangle from where the session last put the cursor, on the monitor there, as Dimensions' click
@@ -522,7 +524,9 @@ impl Session {
         };
         let mut effects = Vec::new();
         let copy = match self.snip_destination {
-            SnipDestination::Clipboard => return self.copy(Effect::CopyImage(image), area.monitor),
+            SnipDestination::Clipboard => {
+                return self.ask_for_copy(Effect::CopyImage(image), area.monitor);
+            }
             SnipDestination::File => ImageCopy::NotAsked,
             SnipDestination::Both => {
                 effects.push(Effect::CopyImage(image.clone()));
@@ -737,13 +741,13 @@ impl Session {
         let text = units::clipboard_text(&measurement.lengths(), photo.scale, logical);
         let monitor = measurement.monitor;
         self.pinned.push(measurement);
-        self.copy(Effect::CopyText(text), monitor)
+        self.ask_for_copy(Effect::CopyText(text), monitor)
     }
 
-    /// Asks for `copy`, whose notice waits for the clipboard's answer and then shows where the cursor is now, on its
+    /// Asks for `copy`, a [`Effect::CopyText`] or a [`Effect::CopyImage`], whose notice waits for the clipboard's answer and then shows where the cursor is now, on its
     /// monitor, or on `measured_on`, the monitor of what was copied, should it be on none. Nothing says "Copied" before
     /// the copy was made (WPC-352).
-    fn copy(&mut self, copy: Effect, measured_on: usize) -> Vec<Effect> {
+    fn ask_for_copy(&mut self, copy: Effect, measured_on: usize) -> Vec<Effect> {
         self.copies.push_back(WaitingCopy::Notice {
             at: self.cursor,
             monitor: self.notice_monitor(measured_on),

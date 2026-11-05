@@ -154,9 +154,45 @@ fn nothing_says_copied_before_the_clipboard_answers() {
     }
     for tool in [Tool::Bounds, Tool::Snip] {
         let mut session = open(tool);
-        drag(&mut session);
+        let effects = drag(&mut session);
+        assert!(
+            effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::CopyText(_) | Effect::CopyImage(_))),
+            "{tool:?}: {effects:?}"
+        );
         assert_eq!(notice(&session), None, "{tool:?}");
     }
+}
+
+#[test]
+fn two_copies_waiting_at_once_are_each_answered_in_their_order() {
+    // Two clicks before the Windows layer gets to the first copy: the first answer is the first copy's.
+    let mut session = open(Tool::Dimensions);
+    click(&mut session);
+    session.handle(event(at(1300, 300), 1100, Input::Move));
+    session.handle(event(at(1300, 300), 1110, Input::Press));
+    session.handle(event(at(1300, 300), 1120, Input::Release));
+    assert_eq!(session.scene().pinned.len(), 2);
+    session.handle(event(at(1300, 300), 1130, Input::NotCopied));
+    assert_eq!(
+        session.scene().notice.copied(),
+        Some(Notice {
+            message: Message::CouldntCopy,
+            at: at(1050, 620),
+            monitor: 0,
+        })
+    );
+    // The second answer is the second copy's, where its click was, in place of the first notice.
+    session.handle(event(at(1300, 300), 1140, Input::Copied));
+    assert_eq!(
+        session.scene().notice.copied(),
+        Some(Notice {
+            message: Message::Copied,
+            at: at(1300, 300),
+            monitor: 0,
+        })
+    );
 }
 
 #[test]
