@@ -88,6 +88,12 @@ pub enum Input {
     Saved,
     /// It couldn't be written, and no file was left behind.
     NotSaved,
+    /// The copy asked for with [`Effect::CopyText`](super::Effect::CopyText) or
+    /// [`Effect::CopyImage`](super::Effect::CopyImage) is on the clipboard.
+    Copied,
+    /// Windows refused the clipboard for it, even after waiting for another program to let go of it, and the
+    /// clipboard still holds what it held before.
+    NotCopied,
     /// The moment the session asked to be woken at ([`Effect::WakeAt`](super::Effect::WakeAt)) has come. Windows' timers
     /// may run a little early or late, so the session goes by the event's uptime, not by this coming.
     Wake,

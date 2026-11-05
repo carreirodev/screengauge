@@ -117,6 +117,9 @@ fn a_click_copies_the_hex_of_the_exact_pixel_under_the_cursor_and_says_copied() 
     let mut session = open(item(DODGER_BLUE), ColorFormat::Both);
     let effects = click(&mut session, 1000, false);
     assert_eq!(copied(&effects), Some("#1E90FF"));
+    // The notice waits for the clipboard's answer (WPC-352).
+    assert_eq!(session.scene().notice, None);
+    session.handle(event(1100, false, Input::Copied));
     let notice = session.scene().notice.copied().expect("a notice");
     assert_eq!(notice.message, Message::Copied);
     assert_eq!(notice.at, ITEM);
@@ -177,13 +180,11 @@ fn the_second_click_of_the_double_click_that_called_screengauge_copies_no_color(
 fn a_click_pins_nothing_closes_nothing_and_copies_only_the_color_without_the_position() {
     let mut session = open(item(DODGER_BLUE), ColorFormat::Both);
     let effects = click(&mut session, 1000, false);
-    // The copy, then the wake for the notice to go: no Close, nothing else.
+    // The copy alone: no Close, nothing else. The clipboard's answer brings the notice, and the wake for it to go.
+    assert_eq!(effects, [Effect::CopyText("#1E90FF".to_owned())]);
     assert_eq!(
-        effects,
-        [
-            Effect::CopyText("#1E90FF".to_owned()),
-            Effect::WakeAt(Duration::from_millis(1000 + 1300)),
-        ]
+        session.handle(event(1100, false, Input::Copied)),
+        [Effect::WakeAt(Duration::from_millis(1100 + 1300))]
     );
     let scene = session.scene();
     assert!(scene.pinned.is_empty());

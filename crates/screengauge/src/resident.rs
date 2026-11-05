@@ -377,19 +377,15 @@ fn carry_out(resident: HWND, effects: Vec<Effect>) {
                     log::failure("session: moving the cursor", &e);
                 }
             }
-            // The notice "Copied" already shows: should Windows refuse the clipboard after the retries, it is logged.
-            // TODO(WPC-352): tell the user when the copy fails instead of showing "Copied" anyway.
+            // The session hears at once whether Windows took the copy, before the next effect: its notice waits for
+            // that, so "Copied" never shows for a copy Windows refused after the retries (WPC-352).
             Effect::CopyText(text) => {
-                if let Err(e) = clipboard::copy_text(resident, &text) {
-                    log::failure("session: copying text", &e);
-                }
+                let copied = clipboard::copy_text(resident, &text);
+                tell(resident, copy_answer(copied, "session: copying text"));
             }
-            // As with the text: "Copied" already shows.
-            // TODO(WPC-352): tell the user when the copy fails instead of showing "Copied" anyway.
             Effect::CopyImage(image) => {
-                if let Err(e) = clipboard::copy_image(resident, &image) {
-                    log::failure("session: copying an image", &e);
-                }
+                let copied = clipboard::copy_image(resident, &image);
+                tell(resident, copy_answer(copied, "session: copying an image"));
             }
             Effect::WakeAt(uptime) => {
                 FROZEN_SCREEN.with_borrow(|open| {
@@ -528,6 +524,17 @@ fn tell(resident: HWND, input: Input) {
         .with_borrow(|open| open.as_ref().map(|frozen| frozen.handle(event::now(input))));
     if let Some(effects) = told {
         carry_out(resident, effects);
+    }
+}
+
+/// What the session hears of a copy to the clipboard: a refusal is logged under `doing` too.
+fn copy_answer(copied: windows::core::Result<()>, doing: &str) -> Input {
+    match copied {
+        Ok(()) => Input::Copied,
+        Err(e) => {
+            log::failure(doing, &e);
+            Input::NotCopied
+        }
     }
 }
 

@@ -151,6 +151,9 @@ fn letting_go_pins_the_content_and_shows_copied_where_the_cursor_is() {
     let mut session = open(vec![button()], at(900, 500));
     drag(&mut session, at(900, 500), at(1200, 700), 1000);
     assert_eq!(pinned(&session), [the_button()]);
+    // The notice waits for the clipboard's answer (WPC-352).
+    assert_eq!(session.scene().notice, None);
+    session.handle(event(at(1200, 700), 1100, Input::Copied));
     assert_eq!(
         session.scene().notice.copied(),
         Some(Notice {
@@ -370,6 +373,7 @@ fn the_rectangle_stops_at_the_limit_of_the_monitor_the_drag_began_on() {
         Input::Release,
     ));
     assert_eq!(copied(&effects), ["22.9 x 22.9"]);
+    session.handle(event(at(4000, 700), 1110, Input::Copied));
     assert_eq!(
         pinned(&session)[0].label,
         Label {

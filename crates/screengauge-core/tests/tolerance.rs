@@ -223,15 +223,18 @@ fn any_event_after_its_time_takes_the_indicator_away_should_a_wake_be_lost() {
 /// How long the notice "Copied" stays (v1 spec WPC-296, Como as medidas aparecem).
 const NOTICE: u64 = 1300;
 
-/// A click with the cursor on gray 150: it pins what Dimensions measures and shows "Copied".
-fn click(milliseconds: u64) -> Event {
-    event(GRAY_150, milliseconds, Input::Press)
+/// A click with the cursor on gray 150, which pins what Dimensions measures and copies it, and the clipboard taking the
+/// copy in the same millisecond, which shows "Copied": what the press and the answer return, in their order.
+fn click(session: &mut Session, milliseconds: u64) -> Vec<Effect> {
+    let mut effects = session.handle(event(GRAY_150, milliseconds, Input::Press));
+    effects.extend(session.handle(event(GRAY_150, milliseconds, Input::Copied)));
+    effects
 }
 
 #[test]
 fn with_a_notice_up_the_wheel_asks_to_be_woken_when_the_notice_goes_then_for_the_indicator() {
     let mut session = open(options());
-    session.handle(click(1000));
+    click(&mut session, 1000);
     assert_eq!(
         wakes(&session.handle(wheel(NOTCH, 1500))),
         [ms(1000 + NOTICE)]
@@ -249,7 +252,7 @@ fn with_a_notice_up_the_wheel_asks_to_be_woken_when_the_notice_goes_then_for_the
 fn with_the_indicator_up_a_copy_asks_to_be_woken_when_the_indicator_goes_then_for_the_notice() {
     let mut session = open(options());
     session.handle(wheel(NOTCH, 1000));
-    assert_eq!(wakes(&session.handle(click(1100))), [ms(1000 + INDICATOR)]);
+    assert_eq!(wakes(&click(&mut session, 1100)), [ms(1000 + INDICATOR)]);
     let effects = session.handle(event(GRAY_150, 1000 + INDICATOR, Input::Wake));
     assert_eq!(indicator(&session), None);
     assert!(session.scene().notice.is_some());
@@ -359,7 +362,7 @@ fn with_bounds_or_snip_active_the_wheel_changes_the_same_tolerance() {
 #[test]
 fn a_pinned_measurement_keeps_what_it_measured_when_the_wheel_changes_the_tolerance() {
     let mut session = open(options());
-    session.handle(click(1000));
+    click(&mut session, 1000);
     session.handle(wheel(NOTCH, 2000));
     let pinned: Vec<Option<Span>> = session
         .scene()

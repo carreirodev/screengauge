@@ -314,6 +314,7 @@ fn with_alt_held_from_before_the_press_the_drag_measures_exactly_the_drawn_recta
     let effects = session.handle(event_holding(at(1200, 700), ALT, 1030, Input::Release));
     assert_eq!(copied(&effects), ["301 x 201"]);
     assert_eq!(pinned(&session), [the_drawn_rectangle()]);
+    session.handle(event(at(1200, 700), 1040, Input::Copied));
     assert_eq!(
         session.scene().notice.map(|notice| notice.message),
         Some(Message::Copied)
@@ -332,6 +333,7 @@ fn with_alt_an_area_of_nothing_but_the_reference_color_is_measured_like_any_othe
             .collect::<Vec<_>>(),
         [Some(rect(100, 100, 400, 300))]
     );
+    session.handle(event(at(400, 300), 1100, Input::Copied));
     assert_eq!(
         session.scene().notice.map(|notice| notice.message),
         Some(Message::Copied)

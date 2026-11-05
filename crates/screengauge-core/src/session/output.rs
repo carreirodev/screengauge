@@ -242,6 +242,13 @@ pub enum Message {
     CouldntSave,
     /// The same with Destination at Both, where the image went to the clipboard all the same.
     CouldntSaveButCopied,
+    /// Windows refused the clipboard, so the copy wasn't made and the clipboard holds what it held before (WPC-352). A
+    /// measurement stays pinned all the same.
+    CouldntCopy,
+    /// With Destination at Both, the Snip's image was written to a file, but Windows refused the clipboard.
+    CouldntCopyButSaved,
+    /// With Destination at Both, neither the file nor the copy could be made.
+    CouldntSaveOrCopy,
 }
 
 impl Message {
@@ -255,6 +262,9 @@ impl Message {
             Message::CopiedAndSaved => "Copied and saved",
             Message::CouldntSave => "Couldn't save.",
             Message::CouldntSaveButCopied => "Couldn't save. The image was copied.",
+            Message::CouldntCopy => "Couldn't copy.",
+            Message::CouldntCopyButSaved => "Couldn't copy. The image was saved.",
+            Message::CouldntSaveOrCopy => "Couldn't save or copy.",
         }
     }
 
@@ -264,7 +274,10 @@ impl Message {
             Message::NoContentFound
             | Message::NoContentFoundToSnip
             | Message::CouldntSave
-            | Message::CouldntSaveButCopied => Sign::Alert,
+            | Message::CouldntSaveButCopied
+            | Message::CouldntCopy
+            | Message::CouldntCopyButSaved
+            | Message::CouldntSaveOrCopy => Sign::Alert,
         }
     }
 }
@@ -362,9 +375,11 @@ pub enum SaveTo {
 /// Something the Windows layer does for the session, in the order the session returns them.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
-    /// Put this text on the clipboard.
+    /// Put this text on the clipboard, and hand the session [`Input::Copied`](super::Input::Copied), or
+    /// [`Input::NotCopied`](super::Input::NotCopied) when Windows refused the clipboard, before the next effect: the
+    /// notice waits for that answer, so it never says "Copied" for a copy that wasn't made (WPC-352).
     CopyText(String),
-    /// Put this image on the clipboard.
+    /// Put this image on the clipboard, and answer as for [`Effect::CopyText`].
     CopyImage(Image),
     /// Write this image as a PNG file, where `to` says, and hand the session [`Input::Saved`](super::Input::Saved), or
     /// [`Input::NotSaved`](super::Input::NotSaved) when no file could be written, leaving none behind.

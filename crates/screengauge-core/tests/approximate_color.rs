@@ -184,6 +184,9 @@ fn the_click_on_the_approximate_monitor_still_copies_the_color_and_copied_shows_
         effects.contains(&Effect::CopyText("#FFFFFF".to_owned())),
         "{effects:?}"
     );
+    // The notice waits for the clipboard's answer (WPC-352).
+    assert_eq!(session.scene().notice, None);
+    session.handle(event(1060, ON_APPROXIMATE, Input::Copied));
     // Copied is a notice like any other, at the cursor, which goes by itself; the strip keeps the Approximate color one.
     let scene = session.scene();
     let notice = scene.notice.copied().expect("a notice");

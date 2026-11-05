@@ -146,6 +146,9 @@ fn letting_go_shows_copied_where_the_cursor_is_and_pins_nothing() {
             .any(|effect| matches!(effect, Effect::CopyText(_)))
     );
     assert_eq!(session.scene().pinned, []);
+    // The notice waits for the clipboard's answer (WPC-352).
+    assert_eq!(session.scene().notice, None);
+    session.handle(event(at(1200, 700), 1100, Input::Copied));
     assert_eq!(
         session.scene().notice.copied(),
         Some(Notice {
@@ -368,6 +371,7 @@ fn with_alt_an_area_of_nothing_but_background_becomes_an_image() {
     let image = images(&effects)[0];
     assert_eq!((image.width(), image.height()), (301, 201));
     assert_eq!(colors(image), vec![WHITE; 301 * 201]);
+    session.handle(event(at(400, 300), 1040, Input::Copied));
     assert_eq!(notice(&session), Some(Message::Copied));
 }
 
@@ -480,6 +484,7 @@ fn the_area_stops_at_the_limit_of_the_monitor_the_drag_began_on() {
     assert_eq!((image.width(), image.height()), (40, 20));
     assert_eq!(colors(image), vec![BUTTON_BLUE; 40 * 20]);
     // "Copied" shows where the cursor is, on the ARZOPA.
+    session.handle(event(at(4100, 600), 1100, Input::Copied));
     assert_eq!(session.scene().notice.map(|notice| notice.monitor), Some(1));
 }
 

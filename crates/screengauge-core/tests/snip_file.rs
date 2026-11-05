@@ -168,12 +168,20 @@ fn event(cursor: Point, milliseconds: u64, input: Input) -> Event {
     }
 }
 
-/// Drags around the button and lets go at (1200, 700); what the release returns.
+/// Drags around the button and lets go at (1200, 700), and, as the Windows layer does, has the clipboard take any copy
+/// the release asks for (WPC-352): what the release and the answer return, in their order.
 fn snip(session: &mut Session) -> Vec<Effect> {
     session.handle(event(at(900, 500), 1000, Input::Move));
     session.handle(event(at(900, 500), 1010, Input::Press));
     session.handle(event(at(1200, 700), 1020, Input::Move));
-    session.handle(event(at(1200, 700), 1030, Input::Release))
+    let mut effects = session.handle(event(at(1200, 700), 1030, Input::Release));
+    if effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::CopyImage(_)))
+    {
+        effects.extend(session.handle(event(at(1200, 700), 1030, Input::Copied)));
+    }
+    effects
 }
 
 /// What the effects do, in their order, without the images' pixels: a wake only says when.

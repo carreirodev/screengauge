@@ -26,6 +26,7 @@ pub use output::{
 };
 pub use snip_file::{FileNames, png_path};
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -115,6 +116,9 @@ pub struct Session {
     /// Snip's image on its way to a file, from the release until the file is written or Save As is cancelled. `None`
     /// the rest of the time.
     saving: Option<Saving>,
+    /// The copies asked for that the clipboard hasn't answered yet, oldest first: the Windows layer answers each before
+    /// it carries out the next effect, so this holds one at most, for a moment.
+    copies: VecDeque<WaitingCopy>,
     /// The remembered state as the tools opened, and as they will leave it: the Windows layer keeps it only when the
     /// two differ.
     remembered_at_opening: Remembered,
@@ -167,14 +171,38 @@ struct Grab {
 /// Snip's image on its way to a file (v1 spec WPC-296, Snip).
 #[derive(Debug)]
 struct Saving {
-    /// Whether the image went to the clipboard too, with Destination at Both, which the notice then says.
-    copied: bool,
+    /// What became of the image's copy to the clipboard, which the notice then says too.
+    copy: ImageCopy,
     /// The monitor the image was taken on, where the notice goes should the cursor be on none.
     monitor: usize,
     /// Whether the monitors changed meanwhile: the tools then close once the file is written or Save As is cancelled,
     /// never with Save As open over them, and without a notice.
     close_after: bool,
     stage: Stage,
+}
+
+/// What became of the Snip's copy to the clipboard, which the notice about its file tells of too (WPC-352).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImageCopy {
+    /// Destination is File: no copy was asked for.
+    NotAsked,
+    /// Destination is Both, and the clipboard hasn't answered yet. Can't last until the file's notice: the copy is
+    /// asked for first, and answered before the file is written or Save As opens. Should it, the notice says nothing
+    /// of the copy, as with File, rather than something that may be false.
+    Waiting,
+    Made,
+    Refused,
+}
+
+/// A copy the session asked for, until the clipboard answers it (WPC-352).
+#[derive(Debug)]
+enum WaitingCopy {
+    /// A measurement's or a color's, or the Snip's image with Destination at Clipboard: once answered, "Copied" or
+    /// "Couldn't copy." shows at `at`, where the cursor was as the copy was asked for, on `monitor`.
+    Notice { at: Point, monitor: usize },
+    /// The Snip's image with Destination at Both: the answer waits in [`Saving`] for the file's, and one notice says
+    /// both.
+    SnipImage,
 }
 
 #[derive(Debug)]
@@ -231,6 +259,7 @@ impl Session {
             snip_destination: options.snip_destination,
             default_folder: options.default_folder,
             saving: None,
+            copies: VecDeque::new(),
             remembered_at_opening: remembered.clone(),
             remembered,
             live: None,
@@ -286,6 +315,11 @@ impl Session {
         if event.input == Input::Exit {
             self.saving = None;
             return self.close();
+        }
+        // The clipboard's answer counts in every state, Save As's included: with Destination at Both it comes while the
+        // Snip's image is on its way to a file.
+        if let Input::Copied | Input::NotCopied = event.input {
+            return self.copy_answered(event.input == Input::Copied, event.uptime);
         }
         if self.saving.is_some() {
             return self.while_saving(event);
@@ -370,7 +404,7 @@ impl Session {
     }
 
     /// Copies the color of the pixel at the magnified view's center, the one under the cursor at the click, and shows
-    /// "Copied"; the tool stays as it was, and nothing is pinned (v1 spec WPC-296, Inspect). It copies the format the
+    /// "Copied" once the clipboard took it, or "Couldn't copy." (WPC-352); the tool stays as it was, and nothing is pinned (v1 spec WPC-296, Inspect). It copies the format the
     /// strip shows first, or with Shift held the other, even when it doesn't show. The second click of the double-click
     /// that called ScreenGauge copies nothing, as it pins nothing in Dimensions (WPC-308).
     fn copy_color(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
@@ -387,9 +421,7 @@ impl Session {
         };
         let texts = color::texts(pixels::color(photo, at), self.color_format);
         let text = if held.shift { texts.other } else { texts.first };
-        let mut effects = vec![Effect::CopyText(text)];
-        effects.extend(self.show(Message::Copied, self.notice_monitor(monitor), uptime));
-        effects
+        self.copy(Effect::CopyText(text), monitor)
     }
 
     /// Starts drawing a rectangle from where the session last put the cursor, on the monitor there, as Dimensions' click
@@ -463,9 +495,9 @@ impl Session {
             return Vec::new();
         }
         let nothing_found = match (self.remembered.last_tool, measured, snipped) {
-            (Tool::Snip, _, Some(area)) => return self.take_image(&area, time, uptime),
+            (Tool::Snip, _, Some(area)) => return self.take_image(&area, time),
             (Tool::Snip, _, None) => Message::NoContentFoundToSnip,
-            (_, Some(measurement), _) => return self.pin_and_copy(measurement, held.shift, uptime),
+            (_, Some(measurement), _) => return self.pin_and_copy(measurement, held.shift),
             (_, None, _) => Message::NoContentFound,
         };
         let monitor = self.notice_monitor(drag.monitor);
@@ -478,8 +510,8 @@ impl Session {
     /// where Destination says (v1 spec WPC-296, Snip). The clipboard, with Clipboard or Both, gets it at once, each image
     /// in the place of the last. The file, with File or Both, goes to the default folder under the automatic name when
     /// "Save to default folder" is on, with no window, and otherwise wherever Save As, opened in the folder it last saved
-    /// to, says. The notice waits for the file: "Copied" alone shows at once.
-    fn take_image(&mut self, area: &SnipArea, time: LocalTime, uptime: Duration) -> Vec<Effect> {
+    /// to, says. The notice waits for the clipboard's answer, and for the file too when there is one.
+    fn take_image(&mut self, area: &SnipArea, time: LocalTime) -> Vec<Effect> {
         let Some(image) = self
             .frozen_screen
             .get(area.monitor)
@@ -488,23 +520,16 @@ impl Session {
             // Can't happen: the area lies on the monitor the drag began on, one of the frozen screen's.
             return Vec::new();
         };
-        let copied = match self.snip_destination {
-            SnipDestination::Clipboard => {
-                let mut effects = vec![Effect::CopyImage(image)];
-                effects.extend(self.show(
-                    Message::Copied,
-                    self.notice_monitor(area.monitor),
-                    uptime,
-                ));
-                return effects;
-            }
-            SnipDestination::File => false,
-            SnipDestination::Both => true,
-        };
         let mut effects = Vec::new();
-        if copied {
-            effects.push(Effect::CopyImage(image.clone()));
-        }
+        let copy = match self.snip_destination {
+            SnipDestination::Clipboard => return self.copy(Effect::CopyImage(image), area.monitor),
+            SnipDestination::File => ImageCopy::NotAsked,
+            SnipDestination::Both => {
+                effects.push(Effect::CopyImage(image.clone()));
+                self.copies.push_back(WaitingCopy::SnipImage);
+                ImageCopy::Waiting
+            }
+        };
         let names = FileNames::at(time);
         let (stage, effect) = match &self.default_folder {
             DefaultFolder::On(folder) => (
@@ -529,7 +554,7 @@ impl Session {
             ),
         };
         self.saving = Some(Saving {
-            copied,
+            copy,
             monitor: area.monitor,
             close_after: false,
             stage,
@@ -584,7 +609,7 @@ impl Session {
     }
 
     /// Save As closed with the cursor at `cursor`: the image goes to `chosen`, always as a `.png`, or, cancelled, goes
-    /// nowhere, no file is made, and only a copy already made shows "Copied".
+    /// nowhere, no file is made, and only a copy asked for says what became of it: "Copied" or "Couldn't copy.".
     fn save_as_closed(
         &mut self,
         chosen: Option<PathBuf>,
@@ -592,7 +617,7 @@ impl Session {
         uptime: Duration,
     ) -> Vec<Effect> {
         let Some(Saving {
-            copied,
+            copy,
             monitor,
             close_after,
             stage: Stage::SaveAs { image, aside },
@@ -611,7 +636,7 @@ impl Session {
                 let path = png_path(&chosen);
                 let folder = path.parent().and_then(Folder::new);
                 self.saving = Some(Saving {
-                    copied,
+                    copy,
                     monitor,
                     close_after,
                     stage: Stage::Writing { folder },
@@ -622,20 +647,26 @@ impl Session {
                 });
             }
             None if close_after => effects.extend(self.close()),
-            None if copied => {
-                effects.extend(self.show(Message::Copied, self.notice_monitor(monitor), uptime));
+            None => {
+                let message = match copy {
+                    ImageCopy::Made => Some(Message::Copied),
+                    ImageCopy::Refused => Some(Message::CouldntCopy),
+                    ImageCopy::NotAsked | ImageCopy::Waiting => None,
+                };
+                if let Some(message) = message {
+                    effects.extend(self.show(message, self.notice_monitor(monitor), uptime));
+                }
             }
-            None => {}
         }
         effects
     }
 
-    /// The file was written, or, when not `saved`, couldn't be, and none was left: the notice says which, and that the
-    /// image went to the clipboard anyway with Destination at Both. A folder Save As chose is the one it opens in next,
+    /// The file was written, or, when not `saved`, couldn't be, and none was left: the notice says which, and, with
+    /// Destination at Both, whether the image went to the clipboard. A folder Save As chose is the one it opens in next,
     /// once a file was written there. The options stay as they were, and the tools stay open.
     fn written(&mut self, saved: bool, uptime: Duration) -> Vec<Effect> {
         let Some(Saving {
-            copied,
+            copy,
             monitor,
             close_after,
             stage: Stage::Writing { folder },
@@ -650,7 +681,7 @@ impl Session {
             return self.close();
         }
         self.show(
-            file_notice(saved, copied),
+            file_notice(saved, copy),
             self.notice_monitor(monitor),
             uptime,
         )
@@ -661,7 +692,7 @@ impl Session {
     /// Windows couldn't open Save As: no file is written, as when one couldn't be, and the notice says so.
     fn save_as_failed(&mut self, uptime: Duration) -> Vec<Effect> {
         let Some(Saving {
-            copied,
+            copy,
             monitor,
             close_after,
             stage: Stage::SaveAs { .. },
@@ -673,7 +704,7 @@ impl Session {
             return self.close();
         }
         self.show(
-            file_notice(false, copied),
+            file_notice(false, copy),
             self.notice_monitor(monitor),
             uptime,
         )
@@ -691,28 +722,65 @@ impl Session {
         let Some(measurement) = self.live.clone() else {
             return Vec::new();
         };
-        self.pin_and_copy(measurement, held.shift, uptime)
+        self.pin_and_copy(measurement, held.shift)
     }
 
     /// Pins `measurement` and copies its physical pixels, or its logical pixels when `logical`, whether its label shows
     /// them or not, which is what Dimensions' click and Bounds' release both copy (v1 spec WPC-296, Dimensions and
-    /// Bounds). The copy shows "Copied" where the cursor is.
-    fn pin_and_copy(
-        &mut self,
-        measurement: Measurement,
-        logical: bool,
-        uptime: Duration,
-    ) -> Vec<Effect> {
+    /// Bounds). Once the clipboard answers, "Copied" or "Couldn't copy." shows where the cursor is, and the measurement
+    /// stays pinned either way (WPC-352).
+    fn pin_and_copy(&mut self, measurement: Measurement, logical: bool) -> Vec<Effect> {
         let Some(photo) = self.frozen_screen.get(measurement.monitor) else {
             // Can't happen: the tools measure on monitors of the frozen screen.
             return Vec::new();
         };
         let text = units::clipboard_text(&measurement.lengths(), photo.scale, logical);
-        let monitor = self.notice_monitor(measurement.monitor);
+        let monitor = measurement.monitor;
         self.pinned.push(measurement);
-        let mut effects = vec![Effect::CopyText(text)];
-        effects.extend(self.show(Message::Copied, monitor, uptime));
-        effects
+        self.copy(Effect::CopyText(text), monitor)
+    }
+
+    /// Asks for `copy`, whose notice waits for the clipboard's answer and then shows where the cursor is now, on its
+    /// monitor, or on `measured_on`, the monitor of what was copied, should it be on none. Nothing says "Copied" before
+    /// the copy was made (WPC-352).
+    fn copy(&mut self, copy: Effect, measured_on: usize) -> Vec<Effect> {
+        self.copies.push_back(WaitingCopy::Notice {
+            at: self.cursor,
+            monitor: self.notice_monitor(measured_on),
+        });
+        vec![copy]
+    }
+
+    /// The clipboard answered the oldest copy still waiting: Windows took it when `made`, and refused it otherwise. A
+    /// measurement's, a color's or the Snip's image to the clipboard alone shows "Copied" or "Couldn't copy." where
+    /// the copy was asked for; the Snip's image with Destination at Both waits for its file, whose notice says both.
+    fn copy_answered(&mut self, made: bool, uptime: Duration) -> Vec<Effect> {
+        match self.copies.pop_front() {
+            Some(WaitingCopy::Notice { at, monitor }) => {
+                let message = if made {
+                    Message::Copied
+                } else {
+                    Message::CouldntCopy
+                };
+                self.show_at(message, at, monitor, uptime)
+                    .into_iter()
+                    .collect()
+            }
+            Some(WaitingCopy::SnipImage) => {
+                if let Some(saving) = self.saving.as_mut()
+                    && saving.copy == ImageCopy::Waiting
+                {
+                    saving.copy = if made {
+                        ImageCopy::Made
+                    } else {
+                        ImageCopy::Refused
+                    };
+                }
+                Vec::new()
+            }
+            // Can't happen: the Windows layer answers only the copies the session asked for.
+            None => Vec::new(),
+        }
     }
 
     /// Picks the toolbar up by its background at `at`, to drag it (v1 spec WPC-296, Toolbar; WPC-312). The second click of
@@ -798,12 +866,23 @@ impl Session {
     /// Shows `message` where the cursor is, on `monitor`, in place of any notice still on screen, until it is due to go,
     /// and asks for the next wake, which is the tolerance indicator's when that goes first.
     fn show(&mut self, message: Message, monitor: usize, uptime: Duration) -> Option<Effect> {
+        self.show_at(message, self.cursor, monitor, uptime)
+    }
+
+    /// Shows `message` at `at`, on `monitor`, as [`Session::show`] does where the cursor is.
+    fn show_at(
+        &mut self,
+        message: Message,
+        at: Point,
+        monitor: usize,
+        uptime: Duration,
+    ) -> Option<Effect> {
         // Can't happen: Windows' uptime is milliseconds since it started, nowhere near Duration's limit.
         let until = uptime.checked_add(NOTICE_LASTS)?;
         self.notice = Some(TimedNotice {
             notice: Notice {
                 message,
-                at: self.cursor,
+                at,
                 monitor,
             },
             until,
@@ -1123,14 +1202,16 @@ impl Session {
     }
 }
 
-/// What the notice says once the Snip's file was `saved`, or couldn't be, with the image `copied` to the clipboard too
-/// or not (v1 spec WPC-296, Snip).
-fn file_notice(saved: bool, copied: bool) -> Message {
-    match (saved, copied) {
-        (true, false) => Message::Saved,
-        (true, true) => Message::CopiedAndSaved,
-        (false, false) => Message::CouldntSave,
-        (false, true) => Message::CouldntSaveButCopied,
+/// What the notice says once the Snip's file was `saved`, or couldn't be, and of the image's `copy` to the clipboard
+/// with Destination at Both (v1 spec WPC-296, Snip; WPC-352).
+fn file_notice(saved: bool, copy: ImageCopy) -> Message {
+    match (saved, copy) {
+        (true, ImageCopy::NotAsked | ImageCopy::Waiting) => Message::Saved,
+        (true, ImageCopy::Made) => Message::CopiedAndSaved,
+        (true, ImageCopy::Refused) => Message::CouldntCopyButSaved,
+        (false, ImageCopy::NotAsked | ImageCopy::Waiting) => Message::CouldntSave,
+        (false, ImageCopy::Made) => Message::CouldntSaveButCopied,
+        (false, ImageCopy::Refused) => Message::CouldntSaveOrCopy,
     }
 }
 

@@ -99,6 +99,14 @@ fn click(cursor: Point, milliseconds: u64) -> Event {
     event(cursor, milliseconds, Input::Press)
 }
 
+/// A click at `cursor`, `milliseconds` after Windows started, and the clipboard taking its copy in the same
+/// millisecond: what the press and the answer return, in their order.
+fn clicked(session: &mut Session, cursor: Point, milliseconds: u64) -> Vec<Effect> {
+    let mut effects = session.handle(click(cursor, milliseconds));
+    effects.extend(session.handle(event(cursor, milliseconds, Input::Copied)));
+    effects
+}
+
 fn shift_click(cursor: Point, milliseconds: u64) -> Event {
     Event {
         held: Held {
@@ -206,6 +214,9 @@ fn each_copy_shows_copied_where_the_click_was_with_an_ok_sign() {
     let mut session = open(vec![two_cards()], DimensionsMode::Horizontal, at(1010, 600));
     assert_eq!(session.scene().notice, None);
     session.handle(click(at(1010, 600), 1000));
+    // The notice waits for the clipboard's answer (WPC-352).
+    assert_eq!(session.scene().notice, None);
+    session.handle(event(at(1010, 600), 1010, Input::Copied));
     let notice = session.scene().notice.copied().expect("a notice");
     assert_eq!(
         notice,
@@ -222,7 +233,7 @@ fn each_copy_shows_copied_where_the_click_was_with_an_ok_sign() {
 #[test]
 fn the_notice_stays_where_it_appeared_while_the_cursor_moves_on() {
     let mut session = open(vec![two_cards()], DimensionsMode::Horizontal, at(1010, 600));
-    session.handle(click(at(1010, 600), 1000));
+    clicked(&mut session, at(1010, 600), 1000);
     session.handle(event(at(1500, 900), 1100, Input::Move));
     assert_eq!(
         session.scene().notice.map(|notice| notice.at),
@@ -233,7 +244,7 @@ fn the_notice_stays_where_it_appeared_while_the_cursor_moves_on() {
 #[test]
 fn a_copy_asks_to_be_woken_when_its_notice_is_due_to_go() {
     let mut session = open(vec![two_cards()], DimensionsMode::Horizontal, at(1010, 600));
-    let effects = session.handle(click(at(1010, 600), 1000));
+    let effects = clicked(&mut session, at(1010, 600), 1000);
     assert_eq!(
         effects,
         [
@@ -246,7 +257,7 @@ fn a_copy_asks_to_be_woken_when_its_notice_is_due_to_go() {
 #[test]
 fn the_notice_goes_once_its_time_is_up_and_not_a_millisecond_before() {
     let mut session = open(vec![two_cards()], DimensionsMode::Horizontal, at(1010, 600));
-    session.handle(click(at(1010, 600), 1000));
+    clicked(&mut session, at(1010, 600), 1000);
     // A timer may wake the session a little early: the notice stays, and the session asks again for the rest.
     let early = session.handle(event(at(1010, 600), 1000 + NOTICE - 1, Input::Wake));
     assert!(session.scene().notice.is_some());
@@ -260,7 +271,7 @@ fn the_notice_goes_once_its_time_is_up_and_not_a_millisecond_before() {
 fn any_event_after_the_notice_is_due_takes_it_away() {
     // Should Windows never deliver the wake, the next move still takes the notice away.
     let mut session = open(vec![two_cards()], DimensionsMode::Horizontal, at(1010, 600));
-    session.handle(click(at(1010, 600), 1000));
+    clicked(&mut session, at(1010, 600), 1000);
     session.handle(event(at(1011, 600), 1000 + NOTICE + 500, Input::Move));
     assert_eq!(session.scene().notice, None);
 }
@@ -268,9 +279,9 @@ fn any_event_after_the_notice_is_due_takes_it_away() {
 #[test]
 fn an_earlier_notices_time_never_takes_away_a_newer_one() {
     let mut session = open(vec![two_cards()], DimensionsMode::Horizontal, at(1010, 600));
-    session.handle(click(at(1010, 600), 1000));
+    clicked(&mut session, at(1010, 600), 1000);
     session.handle(event(at(900, 600), 1900, Input::Move));
-    let second = session.handle(click(at(900, 600), 2000));
+    let second = clicked(&mut session, at(900, 600), 2000);
     assert_eq!(wakes(&second), [Duration::from_millis(2000 + NOTICE)]);
     // The first notice's wake comes: the second, shown a second later, stays its whole time.
     session.handle(event(at(900, 600), 1000 + NOTICE, Input::Wake));
@@ -307,10 +318,10 @@ fn key(cursor: Point, milliseconds: u64, key: Key) -> Event {
 fn several_clicks_pin_several_measurements_oldest_first() {
     let mut session = open(vec![two_cards()], DimensionsMode::Horizontal, at(1010, 600));
     let gap = session.scene().live.cloned().expect("the gap");
-    session.handle(click(at(1010, 600), 1000));
+    clicked(&mut session, at(1010, 600), 1000);
     session.handle(event(at(900, 600), 1500, Input::Move));
     let card = session.scene().live.cloned().expect("the card");
-    session.handle(click(at(900, 600), 2000));
+    clicked(&mut session, at(900, 600), 2000);
     assert_eq!(pinned(&session), [gap, card]);
 }
 
@@ -318,11 +329,11 @@ fn several_clicks_pin_several_measurements_oldest_first() {
 fn backspace_and_delete_each_take_away_the_newest_pin() {
     let mut session = open(vec![two_cards()], DimensionsMode::Horizontal, at(1010, 600));
     let gap = session.scene().live.cloned().expect("the gap");
-    session.handle(click(at(1010, 600), 1000));
+    clicked(&mut session, at(1010, 600), 1000);
     session.handle(event(at(900, 600), 1500, Input::Move));
-    session.handle(click(at(900, 600), 2000));
+    clicked(&mut session, at(900, 600), 2000);
     session.handle(event(at(1100, 600), 2500, Input::Move));
-    session.handle(click(at(1100, 600), 3000));
+    clicked(&mut session, at(1100, 600), 3000);
     assert_eq!(pinned(&session).len(), 3);
     assert_eq!(session.handle(key(at(1100, 600), 4000, Key::Backspace)), []);
     assert_eq!(pinned(&session).len(), 2);
@@ -345,7 +356,7 @@ fn backspace_with_nothing_pinned_does_nothing() {
 fn a_pin_is_a_record_of_the_click_that_a_later_mode_doesnt_change() {
     let mut session = open(vec![two_cards()], DimensionsMode::Horizontal, at(1010, 600));
     let horizontal = session.scene().live.cloned().expect("the gap");
-    session.handle(click(at(1010, 600), 1000));
+    clicked(&mut session, at(1010, 600), 1000);
     session.handle(key(at(1010, 600), 2000, Key::V));
     assert_ne!(session.scene().live.cloned(), Some(horizontal.clone()));
     assert_eq!(pinned(&session), [horizontal]);
@@ -359,13 +370,13 @@ fn a_pin_stays_on_its_monitor_while_the_cursor_measures_on_another() {
         at(1010, 600),
     );
     let gap = session.scene().live.cloned().expect("the gap");
-    session.handle(click(at(1010, 600), 1000));
+    clicked(&mut session, at(1010, 600), 1000);
     session.handle(event(at(-900, 500), 2000, Input::Move));
     assert_eq!(session.scene().live.map(|live| live.monitor), Some(1));
     assert_eq!(pinned(&session), [gap]);
     assert_eq!(pinned(&session)[0].monitor, 0);
     // Pinned on the other monitor, the copy and its notice are that monitor's.
-    let effects = session.handle(click(at(-900, 500), 3000));
+    let effects = clicked(&mut session, at(-900, 500), 3000);
     assert_eq!(copied(&effects), ["1920"]);
     assert_eq!(session.scene().notice.map(|notice| notice.monitor), Some(1));
     assert_eq!(pinned(&session)[1].monitor, 1);
@@ -381,7 +392,7 @@ fn every_way_of_closing_erases_the_pins_and_the_notice() {
         Input::MonitorsChanged,
     ] {
         let mut session = open(vec![two_cards()], DimensionsMode::Horizontal, at(1010, 600));
-        session.handle(click(at(1010, 600), 1000));
+        clicked(&mut session, at(1010, 600), 1000);
         let effects = session.handle(event(at(1010, 600), 1100, exit.clone()));
         assert_eq!(effects.first(), Some(&Effect::Close), "{exit:?}");
         assert_eq!(pinned(&session), [], "{exit:?}");
@@ -392,7 +403,7 @@ fn every_way_of_closing_erases_the_pins_and_the_notice() {
 #[test]
 fn the_next_call_opens_with_nothing_pinned() {
     let mut session = open(vec![two_cards()], DimensionsMode::Horizontal, at(1010, 600));
-    session.handle(click(at(1010, 600), 1000));
+    clicked(&mut session, at(1010, 600), 1000);
     session.handle(key(at(1010, 600), 1100, Key::Esc));
     let next = open(vec![two_cards()], DimensionsMode::Horizontal, at(1010, 600));
     assert_eq!(pinned(&next), []);
