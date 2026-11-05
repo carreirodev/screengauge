@@ -169,7 +169,7 @@ mod tests {
     use super::*;
 
     /// An image of `width` × `height` whose pixels are each a different color, given as blue, green, red and a fourth
-    /// byte of 0, as a capture may leave it.
+    /// byte of 0, as a photo may leave it.
     fn varied(width: u32, height: u32) -> Image {
         let bgra = (0..width * height)
             .flat_map(|i| {

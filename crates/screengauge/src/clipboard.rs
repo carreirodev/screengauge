@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn the_bitmap_has_a_header_of_40_bytes_for_32_bit_bottom_up_pixels() {
-        // 3 × 2, a fourth byte of 0 in every pixel, as a capture may leave it.
+        // 3 × 2, a fourth byte of 0 in every pixel, as a photo may leave it.
         let image = Image::new(3, 2, vec![0; 24]).expect("the pixels fill the image");
         let bytes = dib(&image).expect("a bitmap");
         assert_eq!(bytes.len(), 40 + 3 * 2 * 4);

@@ -24,7 +24,7 @@ const BUTTON_BLUE: [u8; 3] = [37, 99, 235];
 
 /// A monitor at `rect` and `dpi` (96 is 100%), white, with rectangles of the given colors from (`left`, `top`) to
 /// (`right`, `bottom`), both included, in physical pixels of the virtual screen. Later rectangles cover earlier ones.
-/// The fourth byte of every pixel is 0, as a capture may leave it: it says nothing.
+/// The fourth byte of every pixel is 0, as a photo may leave it: it says nothing.
 fn monitor(rect: Rect, dpi: u32, shapes: &[([u8; 3], [i32; 4])]) -> Photo {
     let width = usize::try_from(rect.width).expect("a small monitor");
     let height = usize::try_from(rect.height).expect("a small monitor");

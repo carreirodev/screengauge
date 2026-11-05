@@ -100,6 +100,10 @@ _Avoid_: history, session state, last session
 The still image of every monitor, taken all at once when ScreenGauge is called, that stays on screen in place of the live screen until the tools close; it is what the tools measure and capture.
 _Avoid_: snapshot, screenshot (the Snip's image is a different thing), still
 
+**Photo**:
+The still image of one monitor, one of those the frozen screen is made of, kept with that monitor's place, its scale and whether its colors are exact or approximate, and erased when the tools close.
+_Avoid_: capture (the taking of the photos, not what they are), image (the Snip's image is a different thing), frame (one drawing on screen, a different thing), snapshot, screenshot
+
 **Notice**:
 A short message ScreenGauge draws on screen itself, next to the cursor or in the magnified view, such as Copied, No content found or Approximate color.
 _Avoid_: toast, popup, alert, notification (a Windows notification is the system's message in the corner of the screen, a different thing)
@@ -195,3 +199,21 @@ _Avoid_: banner, hero image, wide image
 **Wordmark**:
 The name ScreenGauge written as a mark, with "Screen" light and "Gauge" bold, as at the top of the README.
 _Avoid_: logo, logotype
+
+## Inside ScreenGauge
+
+**Resident process**:
+ScreenGauge's single running process, from its start until Exit, which waits hidden, with no taskbar button, for the global shortcut, the tray icon and Windows notifications; opening ScreenGauge again calls it instead of starting another.
+_Avoid_: daemon, background app, service (a Windows service is a different thing), tray app
+
+**Session core**:
+The part of ScreenGauge that decides everything between calling ScreenGauge and closing the tools, from what the user does and without calling Windows itself, by describing the scene and returning effects.
+_Avoid_: engine, session model, controller
+
+**Scene**:
+Everything the tools show at one moment, as the session core describes it for drawing: the photos, the cursor, the measurements, the drawn rectangle, the magnified view, the tolerance indicator, the notice and the toolbar.
+_Avoid_: view model, render state, frame (one drawing of it on screen, a different thing)
+
+**Effect**:
+Something the session core asks the rest of ScreenGauge to do in Windows, in the order it asks, such as copying to the clipboard, writing the Snip's PNG file, opening Save As or Settings, keeping the remembered state or closing the tools.
+_Avoid_: command, side effect, request
