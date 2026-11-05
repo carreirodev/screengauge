@@ -37,6 +37,8 @@ mod start_with_windows;
 mod test_bitmap;
 #[cfg(test)]
 mod test_folder;
+#[cfg(test)]
+mod test_process;
 mod theme;
 mod tray;
 mod tray_menu;

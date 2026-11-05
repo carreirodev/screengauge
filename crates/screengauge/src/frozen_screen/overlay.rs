@@ -748,39 +748,15 @@ mod tests {
         CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICBitmap, IWICImagingFactory,
         WICBitmapCacheOnDemand,
     };
-    use windows::Win32::System::Com::{
-        CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
-        CoUninitialize,
-    };
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 
     use super::geometry::Size;
     use super::*;
+    use crate::com::TestCom;
     use crate::graphics::font_family;
 
     pub(super) const CYAN: [u8; 3] = [0x22, 0xd3, 0xee];
     pub(super) const BACKGROUND: [u8; 3] = [200, 120, 60];
-
-    /// Tests run on worker threads, where COM isn't started, and WIC needs it. Started for the thread by the first
-    /// canvas and ended by the last object dropping, so every COM object is released before COM goes.
-    struct Com;
-
-    impl Com {
-        fn start() -> Com {
-            // SAFETY: starts COM for this thread, undone once by the drop of the Com it returns. A thread that
-            // already started it in the same way gets S_FALSE, which is success.
-            unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
-                .ok()
-                .expect("COM starts on a test thread");
-            Com
-        }
-    }
-
-    impl Drop for Com {
-        fn drop(&mut self) {
-            // SAFETY: pairs the CoInitializeEx in `start`.
-            unsafe { CoUninitialize() };
-        }
-    }
 
     /// A bitmap a render target draws on in software, so no monitor or graphics card is needed.
     pub(super) struct Canvas {
@@ -790,7 +766,7 @@ mod tests {
         pub(super) width: u32,
         pub(super) height: u32,
         /// Last, so it drops last.
-        _com: Com,
+        _com: TestCom,
     }
 
     /// The canvas as rows of [r, g, b] pixels.
@@ -807,7 +783,7 @@ mod tests {
 
     impl Canvas {
         pub(super) fn new(width: u32, height: u32) -> Canvas {
-            let com = Com::start();
+            let com = TestCom::start();
             // SAFETY: COM is started for this thread.
             let wic: IWICImagingFactory =
                 unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER) }

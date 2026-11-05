@@ -730,14 +730,12 @@ mod tests {
         CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICImagingFactory,
         WICBitmapCacheOnDemand,
     };
-    use windows::Win32::System::Com::{
-        CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
-        CoUninitialize,
-    };
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 
     use screengauge_core::settings::{ColorFormat, Theme};
 
     use super::*;
+    use crate::com::TestCom;
     use crate::settings_window::row_message::Text;
     use crate::settings_window::start_with_windows_row;
 
@@ -821,7 +819,7 @@ mod tests {
         let width = scaled(layout::WIDTH, dpi);
         let page = layout::with_status(layout::page(&shown.grown), shown.update.is_some());
         let height = scaled(page.height, dpi);
-        let _com = Com::start();
+        let _com = TestCom::start();
         {
             // SAFETY: COM is started for this thread.
             let wic: IWICImagingFactory =
@@ -889,27 +887,6 @@ mod tests {
                 height,
                 bgra: bytes,
             }
-        }
-    }
-
-    /// COM for the test's thread, which the bitmap needs, ended when this drops, after every object made with it: also
-    /// when a check fails and unwinds.
-    struct Com;
-
-    impl Com {
-        fn start() -> Com {
-            // SAFETY: starts COM for this thread, undone once by the drop of the Com it returns.
-            unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
-                .ok()
-                .expect("COM starts on a test thread");
-            Com
-        }
-    }
-
-    impl Drop for Com {
-        fn drop(&mut self) {
-            // SAFETY: pairs the CoInitializeEx in `start`.
-            unsafe { CoUninitialize() };
         }
     }
 

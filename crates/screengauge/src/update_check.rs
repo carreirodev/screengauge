@@ -15,8 +15,8 @@ use windows::Win32::Networking::WinHttp::{
 };
 use windows::core::{Error, HSTRING, PCWSTR, w};
 
-use crate::log;
 use crate::package::AppCopy;
+use crate::{com, log};
 
 /// A release's version, from its three numbers: what ScreenGauge compares and shows, never the text GitHub sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -265,6 +265,8 @@ fn read(reply: &Reply, running: Version) -> Result<Answer, String> {
         404 => return Ok(Answer::Latest),
         status => return Err(format!("GitHub answered HTTP {status}")),
     }
+    com::keep_multithreaded_apartment()
+        .map_err(|e| format!("COM's multithreaded apartment can't be kept open: {e}"))?;
     let release = JsonObject::Parse(&HSTRING::from(&reply.body))
         .map_err(|e| format!("the reply isn't a JSON object: {e}"))?;
     let tag = release
@@ -281,9 +283,13 @@ fn read(reply: &Reply, running: Version) -> Result<Answer, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+
     use windows::Win32::Foundation::E_FAIL;
+    use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize};
 
     use super::*;
+    use crate::test_process;
 
     fn version(text: &str) -> Version {
         Version::parse(text).expect("a version")
@@ -442,5 +448,37 @@ mod tests {
     #[test]
     fn this_exe_s_own_version_is_a_version() {
         assert!(Version::parse(env!("CARGO_PKG_VERSION")).is_some());
+    }
+
+    #[test]
+    fn a_reply_still_reads_after_another_thread_read_one_and_ended_its_com() {
+        test_process::run_alone(concat!(
+            module_path!(),
+            "::alone_a_reply_still_reads_after_another_thread_read_one_and_ended_its_com"
+        ));
+    }
+
+    /// One thread starts COM's multithreaded apartment by hand, reads a reply in it and ends COM; then a thread with no
+    /// COM reads one. Alone, because another test holding COM open would hide what happens once nothing does.
+    #[test]
+    #[ignore = "the shared run starts it alone, in a process of its own, from the test above"]
+    fn alone_a_reply_still_reads_after_another_thread_read_one_and_ended_its_com() {
+        let first = thread::spawn(|| {
+            // SAFETY: no reserved pointer; undone below, on this thread.
+            unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
+                .ok()
+                .expect("COM starts on the first thread");
+            let answer = read(&release("v1.1.0"), version("1.0.0"));
+            // SAFETY: pairs the CoInitializeEx above; the reply's objects are gone with `read`.
+            unsafe { CoUninitialize() };
+            answer
+        })
+        .join()
+        .expect("the first thread");
+        assert_eq!(first, Ok(Answer::Available(version("1.1.0"))));
+        let second = thread::spawn(|| read(&release("v1.2.0"), version("1.0.0")))
+            .join()
+            .expect("the thread with no COM");
+        assert_eq!(second, Ok(Answer::Available(version("1.2.0"))));
     }
 }

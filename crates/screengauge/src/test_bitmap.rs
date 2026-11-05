@@ -15,9 +15,9 @@ use windows::Win32::Graphics::Imaging::{
     CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICImagingFactory,
     WICBitmapCacheOnDemand,
 };
-use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
-};
+use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+
+use crate::com::TestCom;
 
 /// What was drawn, as rows of [r, g, b] pixels, and as a PNG would hold it: blue, green, red and alpha.
 pub struct Picture {
@@ -63,7 +63,7 @@ pub fn drawn(
     height: u32,
     draw: impl FnOnce(&ID2D1RenderTarget, &ID2D1Factory),
 ) -> Picture {
-    let _com = Com::start();
+    let _com = TestCom::start();
     // SAFETY: COM is started for this thread.
     let wic: IWICImagingFactory =
         unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER) }
@@ -116,26 +116,5 @@ pub fn drawn(
         height,
         pixels,
         bgra,
-    }
-}
-
-/// COM for the test's thread, which the bitmap needs, ended when this drops, after every object made with it: also when
-/// a check fails and unwinds.
-struct Com;
-
-impl Com {
-    fn start() -> Com {
-        // SAFETY: starts COM for this thread, undone once by the drop of the Com it returns.
-        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
-            .ok()
-            .expect("COM starts on a test thread");
-        Com
-    }
-}
-
-impl Drop for Com {
-    fn drop(&mut self) {
-        // SAFETY: pairs the CoInitializeEx in `start`.
-        unsafe { CoUninitialize() };
     }
 }
