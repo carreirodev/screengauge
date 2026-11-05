@@ -29,6 +29,8 @@ mod toolbar_icons;
 mod toolbar_paint;
 #[cfg(test)]
 mod toolbar_tests;
+#[cfg(test)]
+mod typeset_tests;
 
 use std::cell::RefCell;
 
@@ -43,10 +45,10 @@ use windows::Win32::Graphics::Direct2D::{
     ID2D1RoundedRectangleGeometry, ID2D1SolidColorBrush, ID2D1StrokeStyle,
 };
 use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FONT_FEATURE, DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, DWRITE_FONT_WEIGHT,
-    DWRITE_FONT_WEIGHT_MEDIUM, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_LINE_METRICS,
-    DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE, IDWriteTextFormat, IDWriteTextLayout,
-    IDWriteTypography,
+    DWRITE_FONT_FEATURE, DWRITE_FONT_FEATURE_TAG_KERNING, DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES,
+    DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_MEDIUM, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+    DWRITE_LINE_METRICS, DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE, IDWriteTextFormat,
+    IDWriteTextLayout, IDWriteTypography,
 };
 use windows::core::Error;
 
@@ -122,7 +124,8 @@ pub struct Overlay {
     tag_format: IDWriteTextFormat,
     /// The magnified view's Approximate color notice: semibold, at its own size.
     approximate_format: IDWriteTextFormat,
-    /// Asks for tabular figures; applied to each label's text.
+    /// Asks for tabular figures, and for the kerning that asking for any feature would otherwise drop; applied to each
+    /// label's and notice's text.
     figures: IDWriteTypography,
     fonts: Fonts,
     /// The palette the toolbar is drawn in; the pinned labels' and the notice's are in `surfaces`.
@@ -224,13 +227,21 @@ impl Overlay {
         let brush = |r, g, b| solid_brush(target, color(r, g, b, 1.0));
         // SAFETY: no arguments.
         let figures = unsafe { fonts.factory.CreateTypography() }?;
-        // SAFETY: plain values.
-        unsafe {
-            figures.AddFontFeature(DWRITE_FONT_FEATURE {
-                nameTag: DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES,
-                parameter: 1,
-            })
-        }?;
+        // Asking DirectWrite for a feature replaces its default ones, kerning among them, which would leave "Couldn't
+        // save." a pixel wider than Chromium draws it. Kerning is the only default these texts use: with it back, every
+        // label and notice is as wide as with no features asked for, measured at 100 to 175% for WPC-354.
+        for feature in [
+            DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES,
+            DWRITE_FONT_FEATURE_TAG_KERNING,
+        ] {
+            // SAFETY: plain values.
+            unsafe {
+                figures.AddFontFeature(DWRITE_FONT_FEATURE {
+                    nameTag: feature,
+                    parameter: 1,
+                })
+            }?;
+        }
         // SAFETY: no arguments; the factory comes back as an owned interface.
         let factory = unsafe { target.GetFactory() }?;
         let stroke = crate::sign::round_stroke(&factory)?;
@@ -464,7 +475,7 @@ impl Overlay {
         Typeset::of(self.layout(text, format)?)
     }
 
-    /// As `typeset`, without tabular figures: for text with no digits, see `layout_as`.
+    /// As `typeset`, with DirectWrite's default features alone: for text with no digits to align.
     fn typeset_plain(
         &self,
         text: &str,
@@ -638,9 +649,8 @@ impl Overlay {
         self.layout_as(label, format, true)
     }
 
-    /// `label` laid out on one line in `format`, with tabular figures only if `tabular`. Asking DirectWrite for a
-    /// feature replaces its default ones, kerning among them, so text with no digits to align asks for none: the
-    /// "To" of "Tolerance" kerns by a pixel at 11px, as it does in Chromium.
+    /// `label` laid out on one line in `format`, with tabular figures only if `tabular`. Either way it keeps the font's
+    /// kerning (see `figures`): the "To" of "Tolerance" kerns by a pixel at 11px, as it does in Chromium.
     fn layout_as(
         &self,
         label: &str,
