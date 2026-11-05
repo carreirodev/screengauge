@@ -326,14 +326,7 @@ fn duplicate_every_output() -> windows::core::Result<(Vec<Output>, Devices)> {
                     e,
                 );
             }
-            let made = gpu.get_or_insert_with(|| {
-                let made = Gpu::on(&adapter);
-                if let Ok(made) = &made {
-                    devices.0.push(made.clone());
-                }
-                made
-            });
-            let duplication = match made {
+            let duplication = match gpu.get_or_insert_with(|| devices.make_on(&adapter)) {
                 Ok(gpu) if is_upright(description.Rotation) => Duplication::of(gpu, output, path),
                 Ok(_) => Err(Error::new(
                     E_FAIL,
@@ -398,7 +391,7 @@ impl Gpu {
         }
     }
 
-    /// Has Direct3D and the driver free now the memory of everything released on this device. Left to themselves, they
+    /// Makes Direct3D and the driver free at once the memory of everything released on this device. Left to themselves, they
     /// keep it about 5 seconds: on the owner's computer, about 75 MB after each call, the copies of the desktop images
     /// among it, which also made the memory with the tools open climb from one call to the next (WPC-385). The cost
     /// Microsoft warns of, a device slower to draw right after, never reaches a call: each call makes its own devices.
@@ -418,6 +411,15 @@ impl Gpu {
 /// The devices one capture made, one per adapter with a monitor. They free their memory as they drop
 /// ([`Gpu::free_released`]), which comes after every duplication and copy made on them was released.
 struct Devices(Vec<Gpu>);
+
+impl Devices {
+    /// A new device on `adapter`, kept to free its memory when the capture ends.
+    fn make_on(&mut self, adapter: &IDXGIAdapter1) -> windows::core::Result<Gpu> {
+        let gpu = Gpu::on(adapter)?;
+        self.0.push(gpu.clone());
+        Ok(gpu)
+    }
+}
 
 impl Drop for Devices {
     fn drop(&mut self) {
