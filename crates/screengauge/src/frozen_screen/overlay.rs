@@ -228,8 +228,9 @@ impl Overlay {
         // SAFETY: no arguments.
         let figures = unsafe { fonts.factory.CreateTypography() }?;
         // Asking DirectWrite for a feature replaces its default ones, kerning among them, which would leave "Couldn't
-        // save." a pixel wider than Chromium draws it. Kerning is the only default these texts use: with it back, every
-        // label and notice is as wide as with no features asked for, measured at 100 to 175% for WPC-354.
+        // save." a pixel wider than Chromium draws it. Kerning is the only default that changes these texts' width: with
+        // it back, every label and notice is as wide as with no features asked for, measured at 100 to 175% for WPC-354,
+        // ligatures and contextual alternates asked for too or not.
         for feature in [
             DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES,
             DWRITE_FONT_FEATURE_TAG_KERNING,
@@ -650,7 +651,8 @@ impl Overlay {
     }
 
     /// `label` laid out on one line in `format`, with tabular figures only if `tabular`. Either way it keeps the font's
-    /// kerning (see `figures`): the "To" of "Tolerance" kerns by a pixel at 11px, as it does in Chromium.
+    /// kerning, from DirectWrite's default features without them and from `figures` with them: the "To" of
+    /// "Tolerance" kerns by a pixel at 11px, as it does in Chromium.
     fn layout_as(
         &self,
         label: &str,

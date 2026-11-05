@@ -47,6 +47,7 @@ fn text_without_digits_is_as_wide_as_with_the_default_features() {
     }
 }
 
+/// Without tabular figures a 1 is narrower than a 0: at 100%, "1111" is 19.31 pixels wide and "0000" 26.65.
 #[test]
 fn digits_stay_tabular() {
     let canvas = Canvas::new(8, 8);
