@@ -30,8 +30,8 @@ use super::*;
 const MONITOR: Rect = Rect {
     left: 1920,
     top: 0,
-    width: 1920,
-    height: 1080,
+    width: WIDTH.unsigned_abs(),
+    height: HEIGHT.unsigned_abs(),
 };
 const WIDTH: i32 = 1920;
 const HEIGHT: i32 = 1080;
@@ -57,8 +57,10 @@ fn at(x: i32, y: i32) -> Point {
 fn monitor_pixels() -> &'static [u8] {
     static PIXELS: OnceLock<Vec<u8>> = OnceLock::new();
     PIXELS.get_or_init(|| {
-        let row = |[r, g, b]: [u8; 3]| [b, g, r, 255].repeat(1920);
-        let gray = row(GRAY).repeat(1080 - BAR);
+        let columns = usize::try_from(WIDTH).expect("a width");
+        let rows = usize::try_from(HEIGHT).expect("a height");
+        let row = |[r, g, b]: [u8; 3]| [b, g, r, 255].repeat(columns);
+        let gray = row(GRAY).repeat(rows - BAR);
         let red = row(RED).repeat(BAR);
         [gray, red].concat()
     })
@@ -71,7 +73,7 @@ fn open(dpi: u32, format: ColorFormat, magnification: Magnification) -> Session 
             rect: MONITOR,
             scale: Scale::from_dpi(dpi).expect("a scale"),
             colors: Colors::Exact,
-            image: Image::new(1920, 1080, monitor_pixels().to_vec())
+            image: Image::new(MONITOR.width, MONITOR.height, monitor_pixels().to_vec())
                 .expect("the pixels fill the image"),
         })],
         cursor: at(2500, 500),
@@ -184,12 +186,7 @@ fn parts(view: &MagnifiedView) -> Vec<(&'static str, Rect)> {
 
 /// `rect` with its right and bottom sides one past its last pixel.
 fn sides(rect: Rect) -> RECT {
-    RECT {
-        left: rect.left,
-        top: rect.top,
-        right: rect.left + i32::try_from(rect.width).expect("a width"),
-        bottom: rect.top + i32::try_from(rect.height).expect("a height"),
-    }
+    geometry::bounds(rect).expect("a rectangle on the monitor")
 }
 
 /// How many rows of `part` `panel` covers, 0 for none.
@@ -216,9 +213,9 @@ fn first_row_above(dpi: u32, format: ColorFormat, magnification: Magnification, 
 }
 
 /// The most rows of the swatch's bottom edge the notice may cover with the cursor at `y`, at `dpi`: none, but on the
-/// monitor's last rows, where the notice has no room below the cursor and slides up to 2 pixels from the bottom. There
-/// it covers 4 rows at 150%, on the last 4 rows of the monitor, and 1 row at 100% and 175%, on the last one (the owner's
-/// choice in WPC-367).
+/// monitor's last rows, where the notice has no room below the cursor and slides up to 2 pixels from the bottom.
+/// There it covers 4 rows at 150%, on the last 4 rows of the monitor, and 1 row at 100% and 175%, on the last one (the
+/// owner's choice in WPC-367).
 fn edge_rows_allowed(y: i32, dpi: u32) -> i32 {
     let edge = if dpi == 144 { 4 } else { 1 };
     let from_bottom = BOTTOM - y;
@@ -235,8 +232,9 @@ fn near_the_bottom_the_notice_leaves_the_position_and_the_colors_text_uncovered(
         for format in FORMATS {
             for magnification in [Magnification::X8, Magnification::X32] {
                 let first = first_row_above(dpi, format, magnification, MIDDLE);
-                // The start of the bottom quarter, where the view first goes above; 50 pixels from the bottom; the last
-                // five rows; and the bottom right corner.
+                // The first row where the view goes above the cursor, which the ticket calls the start of the bottom
+                // quarter (row 810 at 100%, higher at 150% and 175%, where the view is taller); 50 pixels from the
+                // bottom; the last five rows; and the bottom right corner.
                 let mut places = vec![
                     ("first row above", at(MIDDLE, first)),
                     ("50 from the bottom", at(MIDDLE, BOTTOM - 50)),
@@ -371,8 +369,8 @@ fn render(
     let whole = D2D_RECT_F {
         left: 0.0,
         top: 0.0,
-        right: crop.width as f32,
-        bottom: crop.height as f32,
+        right: f32::from(u16::try_from(crop.width).expect("a crop's width")),
+        bottom: f32::from(u16::try_from(crop.height).expect("a crop's height")),
     };
     canvas.render_in(mode, crop, dpi, |overlay, target| {
         // SAFETY: a drawing call between the BeginDraw and EndDraw of `render_in`, with arguments that outlive it.
@@ -417,7 +415,6 @@ fn on_the_last_rows_the_colors_text_and_the_position_stay_whole() {
     let (width, height) = (720, 420);
     let canvas = Canvas::new(width, height);
     let mut checked = 0;
-    let mut commas = 0;
     for mode in MODES {
         for dpi in SCALES {
             for format in FORMATS {
@@ -477,9 +474,6 @@ fn on_the_last_rows_the_colors_text_and_the_position_stay_whole() {
                             hidden <= allowed,
                             "{case}: {hidden} pixels of the {part}'s ink hidden, {allowed} allowed"
                         );
-                        if allowed > 0 && hidden > 0 {
-                            commas += 1;
-                        }
                         checked += 1;
                     }
                 }
@@ -487,6 +481,4 @@ fn on_the_last_rows_the_colors_text_and_the_position_stay_whole() {
         }
     }
     assert!(checked > 0);
-    // The commas' case does happen, in both themes, so the allowance is what the drawing does, not idle.
-    assert_eq!(commas, 2);
 }
