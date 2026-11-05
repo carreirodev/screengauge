@@ -3,7 +3,8 @@
 //! place, scale and colors the session core receives with each photo. DXGI's image is in 8 bits on a monitor with HDR
 //! off, and in 16 bits converted by the monitor's SDR white level on one with HDR on (Colors and HDR), so the
 //! conversion happens once per call. Everything DXGI, Direct3D and GDI create for it is released before
-//! [`every_monitor`] returns, so the capture exists only during the call.
+//! [`every_monitor`] returns, so the capture exists only during the call, and Direct3D frees its memory then, rather
+//! than about 5 seconds later as it otherwise does (WPC-385).
 
 mod gdi;
 mod sdr_white_level;
@@ -30,8 +31,8 @@ use windows::Win32::Graphics::Dxgi::Common::{
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_NOT_FOUND, DXGI_ERROR_WAIT_TIMEOUT,
-    DXGI_OUTDUPL_FRAME_INFO, IDXGIAdapter, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput, IDXGIOutput5,
-    IDXGIOutput6, IDXGIOutputDuplication,
+    DXGI_OUTDUPL_FRAME_INFO, IDXGIAdapter, IDXGIAdapter1, IDXGIDevice3, IDXGIFactory1, IDXGIOutput,
+    IDXGIOutput5, IDXGIOutput6, IDXGIOutputDuplication,
 };
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
@@ -242,9 +243,10 @@ fn device_name(buffer: &[u16]) -> String {
 }
 
 /// The current image of every output attached to the desktop. Every device and duplication is made first, so the
-/// images come one right after the other.
+/// images come one right after the other, and the devices free their memory once the last image is read.
 fn grab_every_output() -> windows::core::Result<Vec<Grab>> {
-    Ok(duplicate_every_output()?
+    let (outputs, devices) = duplicate_every_output()?;
+    let grabs = outputs
         .into_iter()
         .map(|output| {
             let (image, hdr) = match output.duplication {
@@ -257,7 +259,10 @@ fn grab_every_output() -> windows::core::Result<Vec<Grab>> {
                 image,
             }
         })
-        .collect())
+        .collect();
+    // Every duplication and every copy of a desktop image is released by now.
+    drop(devices);
+    Ok(grabs)
 }
 
 /// An output attached to the desktop, ready to give its image.
@@ -280,10 +285,12 @@ fn white_level(
 }
 
 /// A duplication of every output attached to the desktop, on every adapter (the owner's two monitors are on two
-/// graphics cards), or why it couldn't be made.
-fn duplicate_every_output() -> windows::core::Result<Vec<Output>> {
+/// graphics cards), or why it couldn't be made, with the devices made for them.
+fn duplicate_every_output() -> windows::core::Result<(Vec<Output>, Devices)> {
     // SAFETY: no arguments; the factory is released when it drops.
     let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }?;
+    // Before the duplications, so on an early return they drop first, and the devices free their memory after them.
+    let mut devices = Devices(Vec::new());
     let mut duplications = Vec::new();
     let mut white_levels = None;
     for index in 0.. {
@@ -319,7 +326,14 @@ fn duplicate_every_output() -> windows::core::Result<Vec<Output>> {
                     e,
                 );
             }
-            let duplication = match gpu.get_or_insert_with(|| Gpu::on(&adapter)) {
+            let made = gpu.get_or_insert_with(|| {
+                let made = Gpu::on(&adapter);
+                if let Ok(made) = &made {
+                    devices.0.push(made.clone());
+                }
+                made
+            });
+            let duplication = match made {
                 Ok(gpu) if is_upright(description.Rotation) => Duplication::of(gpu, output, path),
                 Ok(_) => Err(Error::new(
                     E_FAIL,
@@ -334,7 +348,7 @@ fn duplicate_every_output() -> windows::core::Result<Vec<Output>> {
             });
         }
     }
-    Ok(duplications)
+    Ok((duplications, devices))
 }
 
 /// Whether HDR is on for an output in this color space: Microsoft's documented test (research/hdr-screen-colors).
@@ -381,6 +395,34 @@ impl Gpu {
                 E_FAIL,
                 "D3D11CreateDevice returned no device or context",
             )),
+        }
+    }
+
+    /// Has Direct3D and the driver free now the memory of everything released on this device. Left to themselves, they
+    /// keep it about 5 seconds: on the owner's computer, about 75 MB after each call, the copies of the desktop images
+    /// among it, which also made the memory with the tools open climb from one call to the next (WPC-385). The cost
+    /// Microsoft warns of, a device slower to draw right after, never reaches a call: each call makes its own devices.
+    fn free_released(&self) {
+        // Microsoft asks for ClearState before Trim: nothing bound to the pipeline then keeps a released object alive.
+        // SAFETY: a live context, used only on this thread.
+        unsafe { self.context.ClearState() };
+        // IDXGIDevice3 is there on every Windows 11.
+        match self.device.cast::<IDXGIDevice3>() {
+            // SAFETY: a live device, after every object the capture made on it was released.
+            Ok(device) => unsafe { device.Trim() },
+            Err(e) => log::failure("capture: freeing the graphics memory at once", &e),
+        }
+    }
+}
+
+/// The devices one capture made, one per adapter with a monitor. They free their memory as they drop
+/// ([`Gpu::free_released`]), which comes after every duplication and copy made on them was released.
+struct Devices(Vec<Gpu>);
+
+impl Drop for Devices {
+    fn drop(&mut self) {
+        for gpu in &self.0 {
+            gpu.free_released();
         }
     }
 }
@@ -1118,6 +1160,44 @@ mod tests {
             println!("{}: {differing} of {pixels} pixels differ", monitor.device);
             assert!(differing * 100 < pixels, "{}", monitor.device);
         }
+    }
+
+    /// The process's private working set in bytes: its memory, as Task Manager shows it.
+    fn private_working_set() -> usize {
+        use windows::Win32::System::ProcessStatus::{
+            GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX2,
+        };
+        use windows::Win32::System::Threading::GetCurrentProcess;
+        let mut counters = PROCESS_MEMORY_COUNTERS_EX2 {
+            cb: const { struct_size::<PROCESS_MEMORY_COUNTERS_EX2>() },
+            ..Default::default()
+        };
+        // SAFETY: this process's own pseudo handle; PROCESS_MEMORY_COUNTERS_EX2 starts with the fields of
+        // PROCESS_MEMORY_COUNTERS, and `cb` gives the size actually passed.
+        unsafe {
+            GetProcessMemoryInfo(
+                GetCurrentProcess(),
+                (&raw mut counters).cast::<PROCESS_MEMORY_COUNTERS>(),
+                counters.cb,
+            )
+        }
+        .expect("the process's memory");
+        counters.PrivateWorkingSetSize
+    }
+
+    #[test]
+    #[ignore = "photographs the real screen and reads the whole process's memory, so it runs alone (`--exact`) on the owner's computer, never in CI"]
+    fn the_capture_leaves_none_of_the_graphics_drivers_memory_behind() {
+        // The capture gives its photos and keeps nothing else (v1 spec WPC-296). Left to themselves, Direct3D and the
+        // driver free what it released about 5 seconds later: on the owner's computer, about 75 MB stayed after the
+        // call, so it is read right after it (WPC-385). Loading Direct3D and the driver the first time adds a few MB.
+        const MB: usize = 1 << 20;
+        let before = private_working_set();
+        for _ in 0..3 {
+            drop(every_monitor().expect("the photos"));
+        }
+        let left = private_working_set().saturating_sub(before);
+        assert!(left < 25 * MB, "{} MB stayed after the capture", left / MB);
     }
 
     #[test]
