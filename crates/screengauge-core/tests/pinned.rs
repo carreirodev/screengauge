@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use screengauge_core::session::{
     Colors, Effect, Event, Held, Image, Input, Key, LocalTime, Measurement, Message, Notice,
-    Opening, Photo, Point, Rect, Scale, Session, Sign,
+    NoticeSide, Opening, Photo, Point, Rect, Scale, Session, Sign,
 };
 use screengauge_core::settings::{DimensionsMode, Options, Remembered};
 
@@ -224,6 +224,7 @@ fn each_copy_shows_copied_where_the_click_was_with_an_ok_sign() {
             message: Message::Copied,
             at: at(1010, 600),
             monitor: 0,
+            side: NoticeSide::Above,
         }
     );
     assert_eq!(notice.message.text(), "Copied");

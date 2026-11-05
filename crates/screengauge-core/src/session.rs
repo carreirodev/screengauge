@@ -21,8 +21,8 @@ pub use event::{Event, Held, Input, Key, LocalTime, ToolbarButton};
 pub use frozen_screen::{Colors, Image, Photo, Point, Rect, Scale};
 pub use output::{
     ApproximateColor, ColorText, Coordinate, Cursor, DrawnRectangle, Effect, Label, MagnifiedView,
-    Measurement, Message, Notice, NoticeLine, PixelColor, SaveTo, Scene, Sign, SnipArea, Span,
-    ToleranceIndicator, Toolbar,
+    Measurement, Message, Notice, NoticeLine, NoticeSide, PixelColor, SaveTo, Scene, Sign,
+    SnipArea, Span, ToleranceIndicator, Toolbar,
 };
 pub use snip_file::{FileNames, png_path};
 
@@ -199,8 +199,13 @@ enum ImageCopy {
 #[derive(Debug)]
 enum WaitingCopy {
     /// A measurement's or a color's, or the Snip's image with Destination at Clipboard: once answered, "Copied" or
-    /// "Couldn't copy." shows at `at`, where the cursor was as the copy was asked for, on `monitor`.
-    Notice { at: Point, monitor: usize },
+    /// "Couldn't copy." shows at `at`, where the cursor was as the copy was asked for, on `monitor`, on the `side`
+    /// of `at` it had then (WPC-367).
+    Notice {
+        at: Point,
+        monitor: usize,
+        side: NoticeSide,
+    },
     /// The Snip's image with Destination at Both: the answer waits in [`Saving`] for the file's, and one notice says
     /// both.
     SnipImage,
@@ -751,6 +756,7 @@ impl Session {
         self.copies.push_back(WaitingCopy::Notice {
             at: self.cursor,
             monitor: self.notice_monitor(measured_on),
+            side: self.notice_side(),
         });
         vec![copy]
     }
@@ -760,13 +766,13 @@ impl Session {
     /// the copy was asked for; the Snip's image with Destination at Both waits for its file, whose notice says both.
     fn copy_answered(&mut self, made: bool, uptime: Duration) -> Vec<Effect> {
         match self.copies.pop_front() {
-            Some(WaitingCopy::Notice { at, monitor }) => {
+            Some(WaitingCopy::Notice { at, monitor, side }) => {
                 let message = if made {
                     Message::Copied
                 } else {
                     Message::CouldntCopy
                 };
-                self.show_at(message, at, monitor, uptime)
+                self.show_at(message, at, monitor, side, uptime)
                     .into_iter()
                     .collect()
             }
@@ -870,15 +876,26 @@ impl Session {
     /// Shows `message` where the cursor is, on `monitor`, in place of any notice still on screen, until it is due to go,
     /// and asks for the next wake, which is the tolerance indicator's when that goes first.
     fn show(&mut self, message: Message, monitor: usize, uptime: Duration) -> Option<Effect> {
-        self.show_at(message, self.cursor, monitor, uptime)
+        self.show_at(message, self.cursor, monitor, self.notice_side(), uptime)
     }
 
-    /// Shows `message` at `at`, on `monitor`, as [`Session::show`] does where the cursor is.
+    /// Which side of the cursor a notice shown now goes: below it where Inspect's magnified view is above it, near the
+    /// monitor's bottom, so the notice doesn't hide the color just copied, and above it everywhere else (the owner's
+    /// choice in WPC-367).
+    fn notice_side(&self) -> NoticeSide {
+        match self.magnified_view() {
+            Some(view) if view.panel.top < view.center.y => NoticeSide::Below,
+            _ => NoticeSide::Above,
+        }
+    }
+
+    /// Shows `message` at `at`, on `monitor`, on `side` of `at`, as [`Session::show`] does where the cursor is.
     fn show_at(
         &mut self,
         message: Message,
         at: Point,
         monitor: usize,
+        side: NoticeSide,
         uptime: Duration,
     ) -> Option<Effect> {
         // Can't happen: Windows' uptime is milliseconds since it started, nowhere near Duration's limit.
@@ -888,6 +905,7 @@ impl Session {
                 message,
                 at,
                 monitor,
+                side,
             },
             until,
         });

@@ -1,7 +1,7 @@
 //! Render tests of the pinned labels, of measurements drawn over each other, and of the notice, on a WIC bitmap like
 //! the ones in `overlay`'s own tests.
 
-use screengauge_core::session::{Message, Notice, Point, Sign};
+use screengauge_core::session::{Message, Notice, NoticeSide, Point, Sign};
 
 use super::notice;
 use super::tests::{
@@ -560,11 +560,12 @@ fn render_notice(
     let mut found = None;
     let picture = canvas.render_in(mode, MONITOR, dpi, |overlay, target| {
         overlay
-            .show_notice(target, at, text, sign)
+            .show_notice(target, at, NoticeSide::Above, text, sign)
             .expect("the notice");
         let width = text_width(overlay, text, &overlay.format);
         let panel = notice::place(
             at,
+            NoticeSide::Above,
             notice::size(width, dpi),
             geometry::bounds(MONITOR).expect("the monitor"),
             dpi,
@@ -710,6 +711,7 @@ fn the_public_notice_is_the_one_that_says_copied_with_a_check() {
             message: Message::Copied,
             at: point(-300, 400),
             monitor: 0,
+            side: NoticeSide::Above,
         };
         let drawn = canvas.render_in(mode, MONITOR, 120, |overlay, target| {
             overlay.draw_notice(target, &notice).expect("the notice");

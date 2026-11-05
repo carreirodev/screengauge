@@ -13,6 +13,8 @@ mod magnified_view;
 #[cfg(test)]
 mod magnified_view_tests;
 mod notice;
+#[cfg(test)]
+mod notice_side_tests;
 mod palette;
 #[cfg(test)]
 mod panel_tests;
@@ -350,6 +352,7 @@ impl Overlay {
         self.show_notice(
             target,
             notice.at,
+            notice.side,
             notice.message.text(),
             notice.message.sign(),
         )

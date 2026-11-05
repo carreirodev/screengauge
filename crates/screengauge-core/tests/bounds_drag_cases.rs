@@ -8,7 +8,8 @@ use std::time::Duration;
 use screengauge_core::session::toolbar;
 use screengauge_core::session::{
     Colors, Cursor, DrawnRectangle, Effect, Event, Held, Image, Input, Key, Label, LocalTime,
-    Measurement, Message, Notice, Opening, Photo, Point, Rect, Scale, Session, Sign, ToolbarButton,
+    Measurement, Message, Notice, NoticeSide, Opening, Photo, Point, Rect, Scale, Session, Sign,
+    ToolbarButton,
 };
 use screengauge_core::settings::{DimensionsMode, Options, Remembered, Tool, ToolbarPlace};
 
@@ -220,6 +221,7 @@ fn a_drag_over_nothing_but_the_reference_color_shows_no_content_found_and_pins_a
             message: Message::NoContentFound,
             at: at(400, 300),
             monitor: 0,
+            side: NoticeSide::Above,
         })
     );
     // What the user asked for wasn't done, so the notice has the alert sign, not Copied's check mark, and it tells of Alt,

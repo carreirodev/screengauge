@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use screengauge_core::session::{
-    Colors, Effect, Event, Held, Image, Input, LocalTime, Message, Notice, Opening, Photo, Point,
-    Rect, Scale, Session, Sign,
+    Colors, Effect, Event, Held, Image, Input, LocalTime, Message, Notice, NoticeSide, Opening,
+    Photo, Point, Rect, Scale, Session, Sign,
 };
 use screengauge_core::settings::{
     DefaultFolder, Folder, Options, Remembered, SnipDestination, Tool,
@@ -181,6 +181,7 @@ fn two_copies_waiting_at_once_are_each_answered_in_their_order() {
             message: Message::CouldntCopy,
             at: at(1050, 620),
             monitor: 0,
+            side: NoticeSide::Above,
         })
     );
     // The second answer is the second copy's, where its click was, in place of the first notice.
@@ -191,6 +192,7 @@ fn two_copies_waiting_at_once_are_each_answered_in_their_order() {
             message: Message::Copied,
             at: at(1300, 300),
             monitor: 0,
+            side: NoticeSide::Above,
         })
     );
 }
@@ -222,6 +224,7 @@ fn the_notice_shows_where_the_click_was_for_as_long_as_copied_does() {
             message: Message::CouldntCopy,
             at: at(1050, 620),
             monitor: 0,
+            side: NoticeSide::Above,
         })
     );
     // 1.3 s, as "Copied" (v1 spec WPC-296, Como as medidas aparecem).

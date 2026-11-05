@@ -1,8 +1,9 @@
 //! The notice: a short message on a panel with a sign before its text, drawn above and to the right of where the cursor
-//! was when it appeared (the prototype's notice, WPC-279). Where it goes needs no Windows, so [`size`] and [`place`]
-//! are tested without a monitor; the rest draws it onto the overlay's render target.
+//! was when it appeared (the prototype's notice, WPC-279), or below it where the magnified view is above it (WPC-367).
+//! Where it goes needs no Windows, so [`size`] and [`place`] are tested without a monitor; the rest draws it onto the
+//! overlay's render target.
 
-use screengauge_core::session::{Point, Sign};
+use screengauge_core::session::{NoticeSide, Point, Sign};
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Direct2D::{
     D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1RenderTarget,
@@ -48,36 +49,45 @@ pub fn size(text_width: i32, dpi: u32) -> Size {
     }
 }
 
-/// Where the panel goes: its rectangle in the virtual screen, right and bottom one past its last pixel. It sits `REACH`
-/// right of `at` and `REACH` above it. Where it would come within `EDGE` of the monitor's right side it goes to the left
-/// of `at` instead, and where it would come within `EDGE` of the monitor's top it goes `BELOW` below `at`. Where it
-/// would still stick out, it slides inside, `floating::MARGIN` from the sides; should the monitor be smaller than the
-/// panel, it starts that far inside the monitor's left and top sides.
-pub fn place(at: Point, size: Size, monitor: RECT, dpi: u32) -> RECT {
+/// Where the panel goes: its rectangle in the virtual screen, right and bottom one past its last pixel. On `side`
+/// [`NoticeSide::Above`] it sits `REACH` right of `at` and `REACH` above it, and where it would come within `EDGE` of
+/// the monitor's top it goes `BELOW` below `at`; on [`NoticeSide::Below`] it sits `BELOW` below `at` from the start.
+/// Where it would come within `EDGE` of the monitor's right side it goes to the left of `at` instead. Where it would
+/// still stick out, it slides inside, `floating::MARGIN` from the sides; should the monitor be smaller than the panel,
+/// it starts that far inside the monitor's left and top sides.
+pub fn place(at: Point, side: NoticeSide, size: Size, monitor: RECT, dpi: u32) -> RECT {
     let (reach, below, edge) = (scaled(REACH, dpi), scaled(BELOW, dpi), scaled(EDGE, dpi));
     let mut left = at.x + reach;
-    let mut top = at.y - reach - size.height;
     if left + size.width > monitor.right - edge {
         left = at.x - reach - size.width;
     }
-    if top < monitor.top + edge {
-        top = at.y + below;
-    }
+    let above = at.y - reach - size.height;
+    let top = match side {
+        NoticeSide::Above if above >= monitor.top + edge => above,
+        NoticeSide::Above | NoticeSide::Below => at.y + below,
+    };
     floating::inside_monitor(left, top, size, monitor, dpi)
 }
 
 impl Overlay {
-    /// Draws a notice that says `text` after `sign`, for the cursor having been at `at`: the floating panel, the sign
-    /// and the text.
+    /// Draws a notice that says `text` after `sign`, for the cursor having been at `at`, on `side` of it: the
+    /// floating panel, the sign and the text.
     pub(super) fn show_notice(
         &self,
         target: &ID2D1RenderTarget,
         at: Point,
+        side: NoticeSide,
         text: &str,
         sign: Sign,
     ) -> windows::core::Result<()> {
         let typeset = self.typeset(text, &self.format)?;
-        let panel = place(at, size(typeset.width, self.dpi), self.monitor, self.dpi);
+        let panel = place(
+            at,
+            side,
+            size(typeset.width, self.dpi),
+            self.monitor,
+            self.dpi,
+        );
         self.draw_floating_panel(target, &panel, RADIUS, 1.0)?;
 
         let ring_width = scaled(geometry::RING, self.dpi);
@@ -199,13 +209,13 @@ mod tests {
         let at = point(2500, 600);
         // 14 right, and 14 above the bottom side.
         assert_eq!(
-            place(at, PANEL, MONITOR, 96),
+            place(at, NoticeSide::Above, PANEL, MONITOR, 96),
             rect(2514, 600 - 14 - 31, 2514 + 80, 600 - 14)
         );
         // The distances scale: 14 is 18 at 125% and 25 at 175%, and the panel is another size.
         let panel = size(40, 120);
         assert_eq!(
-            place(at, panel, MONITOR, 120),
+            place(at, NoticeSide::Above, panel, MONITOR, 120),
             rect(
                 2500 + 18,
                 600 - 18 - panel.height,
@@ -214,7 +224,7 @@ mod tests {
             )
         );
         let panel = size(40, 168);
-        let placed = place(at, panel, MONITOR, 168);
+        let placed = place(at, NoticeSide::Above, panel, MONITOR, 168);
         assert_eq!(
             (placed.left, placed.bottom),
             (2500 + 25, 600 - 25),
@@ -226,19 +236,22 @@ mod tests {
     fn the_notice_goes_to_the_left_where_there_is_no_room_on_the_right() {
         // The panel would end at the monitor's right side less 4 or further.
         let room = MONITOR.right - 4 - PANEL.width - 14;
-        let fits = place(point(room, 600), PANEL, MONITOR, 96);
+        let fits = place(point(room, 600), NoticeSide::Above, PANEL, MONITOR, 96);
         assert_eq!(fits.left, room + 14);
         assert_eq!(fits.right, MONITOR.right - 4);
         // One pixel more, and it goes to the other side of the cursor, its right side 14 from it.
-        let flips = place(point(room + 1, 600), PANEL, MONITOR, 96);
+        let flips = place(point(room + 1, 600), NoticeSide::Above, PANEL, MONITOR, 96);
         assert_eq!(flips.right, room + 1 - 14);
         assert_eq!(flips.left, room + 1 - 14 - PANEL.width);
         // The scaled limit: 4 is 7 at 175%, and 14 is 25.
         let panel = size(40, 168);
         let room = MONITOR.right - 7 - panel.width - 25;
-        assert_eq!(place(point(room, 600), panel, MONITOR, 168).left, room + 25);
         assert_eq!(
-            place(point(room + 1, 600), panel, MONITOR, 168).right,
+            place(point(room, 600), NoticeSide::Above, panel, MONITOR, 168).left,
+            room + 25
+        );
+        assert_eq!(
+            place(point(room + 1, 600), NoticeSide::Above, panel, MONITOR, 168).right,
             room + 1 - 25
         );
     }
@@ -247,17 +260,17 @@ mod tests {
     fn the_notice_goes_below_where_there_is_no_room_above() {
         // Above, it would start at the monitor's top plus 4 or lower.
         let room = MONITOR.top + 4 + PANEL.height + 14;
-        let fits = place(point(2500, room), PANEL, MONITOR, 96);
+        let fits = place(point(2500, room), NoticeSide::Above, PANEL, MONITOR, 96);
         assert_eq!(fits.top, MONITOR.top + 4);
         // One pixel less, and it goes 18 below the cursor.
-        let below = place(point(2500, room - 1), PANEL, MONITOR, 96);
+        let below = place(point(2500, room - 1), NoticeSide::Above, PANEL, MONITOR, 96);
         assert_eq!(below.top, room - 1 + 18);
         assert_eq!(below.bottom, room - 1 + 18 + PANEL.height);
         // The scaled distance: 18 is 32 at 175%.
         let panel = size(40, 168);
         let at = point(2500, MONITOR.top);
         assert_eq!(
-            place(at, panel, MONITOR, 168).top,
+            place(at, NoticeSide::Above, panel, MONITOR, 168).top,
             MONITOR.top + scaled(18, 168)
         );
     }
@@ -266,14 +279,85 @@ mod tests {
     fn the_corner_flips_both_ways_at_once() {
         // The cursor in the top right corner: left of it and below it.
         let at = point(MONITOR.right - 1, MONITOR.top);
-        let placed = place(at, PANEL, MONITOR, 96);
+        let placed = place(at, NoticeSide::Above, PANEL, MONITOR, 96);
         assert_eq!(placed.right, MONITOR.right - 1 - 14);
         assert_eq!(placed.top, MONITOR.top + 18);
     }
 
     #[test]
+    fn below_the_notice_is_below_and_to_the_right_of_where_the_cursor_was() {
+        let at = point(2500, 600);
+        // 14 right, and 18 below, as it goes where there is no room above.
+        assert_eq!(
+            place(at, NoticeSide::Below, PANEL, MONITOR, 96),
+            rect(2514, 600 + 18, 2514 + 80, 600 + 18 + 31)
+        );
+        // The distances scale: 14 is 25 at 175%, and 18 is 32.
+        let panel = size(40, 168);
+        assert_eq!(
+            place(at, NoticeSide::Below, panel, MONITOR, 168),
+            rect(
+                2500 + 25,
+                600 + 32,
+                2500 + 25 + panel.width,
+                600 + 32 + panel.height
+            )
+        );
+        // Near the top too, where above would have gone below as well.
+        let top = point(2500, MONITOR.top);
+        assert_eq!(
+            place(top, NoticeSide::Below, PANEL, MONITOR, 96),
+            place(top, NoticeSide::Above, PANEL, MONITOR, 96)
+        );
+    }
+
+    #[test]
+    fn below_the_notice_still_goes_left_where_there_is_no_room_on_the_right() {
+        let room = MONITOR.right - 4 - PANEL.width - 14;
+        assert_eq!(
+            place(point(room, 600), NoticeSide::Below, PANEL, MONITOR, 96).left,
+            room + 14
+        );
+        let flips = place(point(room + 1, 600), NoticeSide::Below, PANEL, MONITOR, 96);
+        assert_eq!(flips.right, room + 1 - 14);
+        assert_eq!(flips.top, 600 + 18);
+    }
+
+    #[test]
+    fn below_the_notice_slides_up_inside_the_monitor_near_its_bottom() {
+        // 18 + 31 below the cursor ends 2 from the bottom with the cursor 51 above it, and fits.
+        let fits = place(
+            point(2500, MONITOR.bottom - 51),
+            NoticeSide::Below,
+            PANEL,
+            MONITOR,
+            96,
+        );
+        assert_eq!(fits.top, MONITOR.bottom - 51 + 18);
+        assert_eq!(fits.bottom, MONITOR.bottom - 2);
+        // Lower, it stays 2 from the bottom, nearer the cursor.
+        for from_bottom in [50, 20, 1] {
+            let placed = place(
+                point(2500, MONITOR.bottom - from_bottom),
+                NoticeSide::Below,
+                PANEL,
+                MONITOR,
+                96,
+            );
+            assert_eq!(
+                placed.bottom,
+                MONITOR.bottom - 2,
+                "{from_bottom} from the bottom"
+            );
+        }
+    }
+
+    #[test]
     fn the_notice_stays_2_pixels_inside_the_monitor_at_every_scale() {
-        for dpi in [96, 120, 144, 168] {
+        for (dpi, side) in [96, 120, 144, 168]
+            .into_iter()
+            .flat_map(|dpi| [(dpi, NoticeSide::Above), (dpi, NoticeSide::Below)])
+        {
             let panel = size(40, dpi);
             let margin = scaled(MARGIN, dpi);
             // The four corners and the middle, where the cursor may be, and points past each side, which the clamp is
@@ -289,24 +373,42 @@ mod tests {
                 point(2500, MONITOR.top - 50),
                 point(2500, MONITOR.bottom + 200),
             ] {
-                let placed = place(at, panel, MONITOR, dpi);
+                let placed = place(at, side, panel, MONITOR, dpi);
                 assert!(
                     placed.left >= MONITOR.left + margin
                         && placed.top >= MONITOR.top + margin
                         && placed.right <= MONITOR.right - margin
                         && placed.bottom <= MONITOR.bottom - margin,
-                    "{placed:?} for {at:?} at {dpi} DPI"
+                    "{placed:?} for {at:?} {side:?} at {dpi} DPI"
                 );
                 assert_eq!(placed.right - placed.left, panel.width);
                 assert_eq!(placed.bottom - placed.top, panel.height);
             }
         }
         // Where the clamp moves it, it stops exactly 2 from the side.
-        let past_right = place(point(MONITOR.right + 100, 600), PANEL, MONITOR, 96);
+        let past_right = place(
+            point(MONITOR.right + 100, 600),
+            NoticeSide::Above,
+            PANEL,
+            MONITOR,
+            96,
+        );
         assert_eq!(past_right.right, MONITOR.right - 2);
-        let past_left = place(point(MONITOR.left - 300, 600), PANEL, MONITOR, 96);
+        let past_left = place(
+            point(MONITOR.left - 300, 600),
+            NoticeSide::Above,
+            PANEL,
+            MONITOR,
+            96,
+        );
         assert_eq!(past_left.left, MONITOR.left + 2);
-        let past_bottom = place(point(2500, MONITOR.bottom + 200), PANEL, MONITOR, 96);
+        let past_bottom = place(
+            point(2500, MONITOR.bottom + 200),
+            NoticeSide::Above,
+            PANEL,
+            MONITOR,
+            96,
+        );
         assert_eq!(past_bottom.bottom, MONITOR.bottom - 2);
     }
 
@@ -315,7 +417,7 @@ mod tests {
         // 50 by 20 pixels: no room for a panel of 80 by 31. This must not panic, and the panel starts inside the
         // monitor's corner rather than past it.
         let tiny = rect(100, 100, 150, 120);
-        let placed = place(point(120, 110), PANEL, tiny, 96);
+        let placed = place(point(120, 110), NoticeSide::Above, PANEL, tiny, 96);
         assert_eq!((placed.left, placed.top), (tiny.left + 2, tiny.top + 2));
     }
 }

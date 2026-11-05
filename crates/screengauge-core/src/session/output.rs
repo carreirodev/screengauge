@@ -210,8 +210,8 @@ pub struct Coordinate {
 }
 
 /// A short message ScreenGauge draws on screen itself (v1 spec WPC-296, Como as medidas aparecem): small, with an ok or
-/// an alert sign before its text, above and to the right of where the cursor was when it appeared. It goes by itself a
-/// moment later.
+/// an alert sign before its text, above and to the right of where the cursor was when it appeared, or below it where
+/// the magnified view is above it (WPC-367). It goes by itself a moment later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Notice {
     pub message: Message,
@@ -220,6 +220,19 @@ pub struct Notice {
     pub at: Point,
     /// The monitor it is drawn on, as an index in the frozen screen's order.
     pub monitor: usize,
+    /// Which side of `at` it goes, decided where the cursor was, as `at` is.
+    pub side: NoticeSide,
+}
+
+/// Which side of where the cursor was a notice goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeSide {
+    /// Above, as the spec says (v1 spec WPC-296, Como as medidas aparecem), or below where the monitor's top leaves no
+    /// room above.
+    Above,
+    /// Below: Inspect's magnified view went above the cursor, near the monitor's bottom, and the notice takes the place
+    /// the view would have had, so it doesn't hide the color just copied (the owner's choice in WPC-367).
+    Below,
 }
 
 /// What a notice says.

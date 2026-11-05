@@ -1,7 +1,7 @@
 //! Render tests of the tolerance indicator on a WIC bitmap, like the notice's in `panel_tests`. The sizes here are the
 //! prototype's (WPC-279), in logical pixels, scaled in the tests, and not read back from the code that is being tested.
 
-use screengauge_core::session::{Point, Sign, ToleranceIndicator};
+use screengauge_core::session::{NoticeSide, Point, Sign, ToleranceIndicator};
 use screengauge_core::settings::Tolerance;
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_SIMULATIONS_NONE, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
@@ -566,11 +566,12 @@ fn the_indicators_shadow_is_fainter_than_the_notices_because_its_panel_is_lower(
             let mut notice_panel = None;
             let notice_picture = canvas.render_in(mode, MONITOR, dpi, |overlay, target| {
                 overlay
-                    .show_notice(target, CURSOR, "Copied", Sign::Ok)
+                    .show_notice(target, CURSOR, NoticeSide::Above, "Copied", Sign::Ok)
                     .expect("the notice");
                 let width = text_width(overlay, "Copied", &overlay.format);
                 notice_panel = Some(notice::place(
                     CURSOR,
+                    NoticeSide::Above,
                     notice::size(width, dpi),
                     geometry::bounds(MONITOR).expect("the monitor"),
                     dpi,
@@ -711,7 +712,7 @@ fn the_ink_has_its_full_strength_whatever_opacity_the_brush_was_left_at_and_leav
                     .draw(target, &[&later], None, None)
                     .expect("the label");
                 overlay
-                    .show_notice(target, notice_at, "Copied", Sign::Ok)
+                    .show_notice(target, notice_at, NoticeSide::Above, "Copied", Sign::Ok)
                     .expect("the notice");
                 let word = overlay
                     .typeset_plain("Tolerance", &overlay.word_format)
@@ -724,7 +725,13 @@ fn the_ink_has_its_full_strength_whatever_opacity_the_brush_was_left_at_and_leav
                     tolerance::place(CURSOR, tolerance::size(word, number, dpi), bounds, dpi),
                     word,
                     overlay.label(&later, Look::Pinned).expect("a label"),
-                    notice::place(notice_at, notice::size(copied, dpi), bounds, dpi),
+                    notice::place(
+                        notice_at,
+                        NoticeSide::Above,
+                        notice::size(copied, dpi),
+                        bounds,
+                        dpi,
+                    ),
                 ));
             });
             let (indicator, word, label, notice) = found.expect("drawn");

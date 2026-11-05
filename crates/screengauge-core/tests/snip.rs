@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use screengauge_core::session::{
     Colors, DrawnRectangle, Effect, Event, Held, Image, Input, Key, Label, LocalTime, Message,
-    Notice, Opening, Photo, Point, Rect, Scale, Session, SnipArea, ToolbarButton,
+    Notice, NoticeSide, Opening, Photo, Point, Rect, Scale, Session, SnipArea, ToolbarButton,
 };
 use screengauge_core::settings::{Options, Remembered, Tool};
 
@@ -155,6 +155,7 @@ fn letting_go_shows_copied_where_the_cursor_is_and_pins_nothing() {
             message: Message::Copied,
             at: at(1200, 700),
             monitor: 0,
+            side: NoticeSide::Above,
         })
     );
 }

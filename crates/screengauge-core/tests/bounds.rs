@@ -8,7 +8,8 @@ use std::time::Duration;
 use screengauge_core::session::toolbar;
 use screengauge_core::session::{
     Colors, Cursor, DrawnRectangle, Effect, Event, Held, Image, Input, Key, Label, LocalTime,
-    Measurement, Message, Notice, Opening, Photo, Point, Rect, Scale, Session, ToolbarButton,
+    Measurement, Message, Notice, NoticeSide, Opening, Photo, Point, Rect, Scale, Session,
+    ToolbarButton,
 };
 use screengauge_core::settings::{DimensionsMode, Options, Remembered, Tool, ToolbarPlace};
 
@@ -160,6 +161,7 @@ fn letting_go_pins_the_content_and_shows_copied_where_the_cursor_is() {
             message: Message::Copied,
             at: at(1200, 700),
             monitor: 0,
+            side: NoticeSide::Above,
         })
     );
 }

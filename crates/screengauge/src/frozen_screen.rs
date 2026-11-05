@@ -1168,7 +1168,7 @@ impl Window {
 mod tests {
     use super::*;
 
-    use screengauge_core::session::{Label, Message, ToolbarButton};
+    use screengauge_core::session::{Label, Message, NoticeSide, ToolbarButton};
     use screengauge_core::settings::{DimensionsMode, Tolerance, Tool};
 
     /// A measurement on `monitor` whose label reads `text`, so two of them on one monitor differ.
@@ -1197,6 +1197,7 @@ mod tests {
             message: Message::Copied,
             at: Point { x: 10, y: 10 },
             monitor,
+            side: NoticeSide::Above,
         }
     }
 
