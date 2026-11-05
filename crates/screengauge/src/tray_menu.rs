@@ -54,6 +54,11 @@ const CLASS_NAME: PCWSTR = w!("ScreenGauge.TrayMenu");
 /// + 12 are taken.
 pub const CHOSEN: u32 = WM_APP + 13;
 
+/// What the menu posts the resident window when it opens or closes, so the tray icon's tip follows (`is_open`): hidden
+/// while it is open, which it would otherwise cover (WPC-373). Posted rather than done here: the menu opens while
+/// Explorer waits for the icon's message to be answered, and closes on the way to the photo. WM_APP + 14 is taken.
+pub const OPENED_OR_CLOSED: u32 = WM_APP + 15;
+
 /// The message TrackMouseEvent sends when the cursor leaves the window, as in Settings.
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
@@ -155,6 +160,7 @@ pub fn open(resident: HWND, anchor: POINT, mode: Mode, checked: bool) -> windows
     frame(hwnd, mode);
     // SAFETY: our own window. The result says whether it was visible before.
     let _ = unsafe { ShowWindow(hwnd, SW_SHOW) };
+    tell_resident(resident);
     // The tray icon's click lets ScreenGauge take the front. Without it, a click elsewhere wouldn't close the menu, nor
     // would Esc reach it; it still closes on an item, or on the next right click on the icon.
     // SAFETY: our own window.
@@ -245,6 +251,20 @@ pub fn close_before_photo() {
 /// Whether `hwnd` is the menu.
 pub fn is(hwnd: HWND) -> bool {
     WINDOW.get() == Some(hwnd)
+}
+
+/// Whether the menu is open.
+pub fn is_open() -> bool {
+    WINDOW.get().is_some()
+}
+
+/// Posts `OPENED_OR_CLOSED` to `resident`. A failure leaves the tray icon's tip as it was until the next one.
+fn tell_resident(resident: HWND) {
+    // SAFETY: the resident window, on this thread; the message carries nothing.
+    if let Err(e) = unsafe { PostMessageW(Some(resident), OPENED_OR_CLOSED, WPARAM(0), LPARAM(0)) }
+    {
+        log::failure("tray menu: telling the tray icon it opened or closed", &e);
+    }
 }
 
 /// The item a `CHOSEN` message carries.
@@ -353,6 +373,10 @@ extern "system" fn window_proc(
                 LIT.set(None);
                 PRESSED.set(None);
                 TRACKING_LEAVE.set(false);
+                // Every way the menu closes ends here: Esc, a click elsewhere, an item chosen, a call, an exit.
+                if let Some(resident) = RESIDENT.get() {
+                    tell_resident(resident);
+                }
             }
             LRESULT(0)
         }

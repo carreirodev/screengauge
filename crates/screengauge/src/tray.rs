@@ -6,6 +6,9 @@
 //! Measured on Windows 11 in WPC-304: after a change of scale while ScreenGauge runs, Explorer may go on drawing the
 //! icon it already holds at the old size, enlarged or shrunk, even when given the new size's picture; an icon it adds
 //! afresh once the taskbar has settled is drawn pixel for pixel. So a new size means adding the icon again.
+//!
+//! Windows' tip, "ScreenGauge", shows when the cursor rests on the icon, except while the icon's menu is open (`Tip`):
+//! measured in WPC-373, it comes about 750 ms after the right click that opens the menu, over the menu's first items.
 
 use std::cell::{Cell, RefCell};
 
@@ -13,8 +16,9 @@ use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{GetDpiForSystem, GetDpiForWindow, GetSystemMetricsForDpi};
 use windows::Win32::UI::Shell::{
-    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION, NIN_SELECT,
-    NINF_KEY, NOTIFY_ICON_MESSAGE, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
+    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
+    NIN_SELECT, NINF_KEY, NOTIFY_ICON_DATA_FLAGS, NOTIFY_ICON_MESSAGE, NOTIFYICON_VERSION_4,
+    NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DestroyIcon, FindWindowW, HICON, IMAGE_ICON, KillTimer, LR_DEFAULTCOLOR, LoadImageW,
@@ -55,6 +59,26 @@ thread_local! {
     static ICON: RefCell<Option<AppIcon>> = const { RefCell::new(None) };
     /// While the icon follows the taskbar, where it stands; `None` when the scale timer isn't running.
     static FOLLOWING: Cell<Option<Following>> = const { Cell::new(None) };
+    /// Whether Windows shows its tip now, which an icon added again keeps.
+    static TIP: Cell<Tip> = const { Cell::new(Tip::Shown) };
+}
+
+/// Whether Windows shows the icon's tip when the cursor rests on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tip {
+    Shown,
+    /// While the icon's menu is open, so the tip never covers it.
+    Hidden,
+}
+
+/// What the icon gives Windows. With version 4, Windows draws its tip only with NIF_SHOWTIP; the tip's text goes either
+/// way, for screen readers.
+fn flags(tip: Tip) -> NOTIFY_ICON_DATA_FLAGS {
+    let flags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    match tip {
+        Tip::Shown => flags | NIF_SHOWTIP,
+        Tip::Hidden => flags,
+    }
 }
 
 /// An icon loaded from the exe's resources, destroyed when dropped.
@@ -101,20 +125,43 @@ impl Drop for AppIcon {
 /// Adds the icon, at the size the taskbar draws it at now. Also called again when the taskbar is created (see
 /// `resident`), after Explorer has dropped every icon: the icon it replaces is freed once the new one is in.
 pub fn add(hwnd: HWND) -> windows::core::Result<()> {
-    let mut data = icon_data(hwnd);
-    data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
-    data.uCallbackMessage = CALLBACK_MESSAGE;
-    if !fill(&mut data.szTip, "ScreenGauge") {
-        return Err(Error::new(E_FAIL, "the tooltip is too long"));
-    }
     let icon = AppIcon::load(icon_size()?)?;
-    data.hIcon = icon.handle;
+    // With the tip as it is now: the menu may be open while the taskbar is created again.
+    let mut data = full_data(hwnd, TIP.get(), icon.handle)?;
     // A failure drops the new icon and keeps the old one, whose size then still differs from the taskbar's, so
     // following the scale tries again.
     notify(NIM_ADD, &data, "NIM_ADD")?;
     drop(ICON.replace(Some(icon)));
     data.Anonymous.uVersion = NOTIFYICON_VERSION_4;
     notify(NIM_SETVERSION, &data, "NIM_SETVERSION")
+}
+
+/// Shows or hides Windows' tip. Without the icon, as before the taskbar exists, it only sets how the icon is added.
+/// A failure keeps the tip as it was, so the next change tries again.
+pub fn set_tip(hwnd: HWND, tip: Tip) -> windows::core::Result<()> {
+    if TIP.get() == tip {
+        return Ok(());
+    }
+    let Some(icon) = ICON.with_borrow(|icon| icon.as_ref().map(|icon| icon.handle)) else {
+        TIP.set(tip);
+        return Ok(());
+    };
+    notify(NIM_MODIFY, &full_data(hwnd, tip, icon)?, "NIM_MODIFY")?;
+    TIP.set(tip);
+    Ok(())
+}
+
+/// Everything the icon gives Windows: its clicks' message, `icon`, and the tip's text, which Windows draws or not as
+/// `tip` says.
+fn full_data(hwnd: HWND, tip: Tip, icon: HICON) -> windows::core::Result<NOTIFYICONDATAW> {
+    let mut data = icon_data(hwnd);
+    data.uFlags = flags(tip);
+    data.uCallbackMessage = CALLBACK_MESSAGE;
+    if !fill(&mut data.szTip, "ScreenGauge") {
+        return Err(Error::new(E_FAIL, "the tooltip is too long"));
+    }
+    data.hIcon = icon;
+    Ok(data)
 }
 
 /// Windows announced a change that may give the taskbar another scale. The resident window, which is never shown,
@@ -341,6 +388,7 @@ fn notify(
 
 #[cfg(test)]
 mod tests {
+    use windows::Win32::UI::Shell::{NIN_POPUPCLOSE, NIN_POPUPOPEN};
     use windows::Win32::UI::WindowsAndMessaging::{
         WM_CONTEXTMENU, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
     };
@@ -438,6 +486,24 @@ mod tests {
             let icon = AppIcon::load(size).unwrap_or_else(|e| panic!("loading at {size}: {e}"));
             assert_eq!(icon.size, size);
         }
+    }
+
+    #[test]
+    fn the_icon_shows_windows_tip_unless_hidden() {
+        let shown = flags(Tip::Shown);
+        assert!(shown.contains(NIF_TIP) && shown.contains(NIF_SHOWTIP));
+        // With version 4, Windows draws its tip only when asked to (NIF_SHOWTIP); the text stays, for screen readers.
+        let hidden = flags(Tip::Hidden);
+        assert!(hidden.contains(NIF_TIP) && !hidden.contains(NIF_SHOWTIP));
+        for state in [shown, hidden] {
+            assert!(state.contains(NIF_MESSAGE | NIF_ICON));
+        }
+    }
+
+    #[test]
+    fn the_messages_windows_sends_while_its_tip_is_hidden_dont_call() {
+        assert!(!is_call(event(NIN_POPUPOPEN)));
+        assert!(!is_call(event(NIN_POPUPCLOSE)));
     }
 
     #[test]

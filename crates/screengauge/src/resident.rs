@@ -189,6 +189,18 @@ extern "system" fn window_proc(
             }
             LRESULT(0)
         }
+        // Read when it comes, not when posted: a menu opened again closes the old one first, and both post it.
+        tray_menu::OPENED_OR_CLOSED => {
+            let tip = if tray_menu::is_open() {
+                tray::Tip::Hidden
+            } else {
+                tray::Tip::Shown
+            };
+            if let Err(e) = tray::set_tip(hwnd, tip) {
+                log::failure("tray icon: following its menu with the tip", &e);
+            }
+            LRESULT(0)
+        }
         WM_HOTKEY if global_shortcut::is_global_shortcut(wparam) => {
             // While Settings' field records a new combination, the global shortcut doesn't call ScreenGauge (WPC-323).
             if !settings_window::is_recording() {
