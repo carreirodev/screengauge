@@ -64,6 +64,7 @@ The screen stays frozen while the tools are open. To measure something that chan
 
 - **Protected content.** Video from streaming services, and windows that protect themselves from screen capture, may come out black or be missing from the frozen screen, and so from measurements, colors and Snips.
 - **"Approximate color (HDR on)".** With HDR on, Windows brightens the colors apps draw, and ScreenGauge undoes it, so Inspect shows the color the app drew. When it can't undo it on a monitor, Inspect shows "Approximate color (HDR on)" under the color: the color shown may differ from the one the app drew. In rare cases, ScreenGauge can't tell that HDR is on, and the color may differ without that notice.
+- **Rotated monitor with HDR on.** On a monitor turned to portrait or upside down in Windows' display settings, with HDR on, Inspect always shows "Approximate color (HDR on)": ScreenGauge photographs a rotated monitor another way, which doesn't guarantee the color the app drew.
 - **HDR content.** Video, games and pictures brighter or more saturated than any standard color have no exact standard color. Inspect shows the nearest standard color, and Snip clips their brightest parts to white.
 - **One monitor at a time.** Each tool works on the monitor under the cursor, so a window that sits across two monitors can't be measured or snipped as one.
 

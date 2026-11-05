@@ -343,7 +343,8 @@ fn is_hdr(color_space: DXGI_COLOR_SPACE_TYPE) -> bool {
 }
 
 /// A rotated monitor's desktop image comes in the monitor's native orientation, so that monitor goes to GDI, whose
-/// photo is upright; turning DXGI's image upright is WPC-344.
+/// photo is upright. The owner chose GDI over turning DXGI's image upright (WPC-344), so with HDR on a rotated monitor
+/// has approximate colors.
 fn is_upright(rotation: windows::Win32::Graphics::Dxgi::Common::DXGI_MODE_ROTATION) -> bool {
     rotation == DXGI_MODE_ROTATION_IDENTITY || rotation == DXGI_MODE_ROTATION_UNSPECIFIED
 }
@@ -718,6 +719,22 @@ fn gdi_colors(hdr: bool) -> Colors {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_an_unrotated_monitor_goes_through_dxgi() {
+        use windows::Win32::Graphics::Dxgi::Common::{
+            DXGI_MODE_ROTATION_ROTATE90, DXGI_MODE_ROTATION_ROTATE180, DXGI_MODE_ROTATION_ROTATE270,
+        };
+        assert!(is_upright(DXGI_MODE_ROTATION_IDENTITY));
+        assert!(is_upright(DXGI_MODE_ROTATION_UNSPECIFIED));
+        for rotated in [
+            DXGI_MODE_ROTATION_ROTATE90,
+            DXGI_MODE_ROTATION_ROTATE180,
+            DXGI_MODE_ROTATION_ROTATE270,
+        ] {
+            assert!(!is_upright(rotated), "{rotated:?} went through DXGI");
+        }
+    }
 
     #[test]
     fn rows_lose_their_padding_and_become_opaque() {
