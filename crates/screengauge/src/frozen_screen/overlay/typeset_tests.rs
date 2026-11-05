@@ -2,7 +2,7 @@
 //! is the reference for a text with no digits: laid out with DirectWrite's default features, it matched Chromium in
 //! WPC-309 ("Tolerance" at 11px, 47.54 pixels wide).
 
-use super::tests::{Canvas, MONITOR, SCALES};
+use super::tests::{Canvas, MONITOR, SCALES, horizontal, text_width, with_logical};
 use super::*;
 
 /// How wide `layout` is, in fractions of a pixel: whole pixels could hide a difference.
@@ -86,7 +86,7 @@ fn a_seven_takes_as_much_room_as_any_other_digit() {
                 ("physical", &overlay.format),
                 ("logical", &overlay.logical_format),
             ] {
-                let width = |text| overlay.typeset(text, format).expect("a text").width;
+                let width = |text| text_width(overlay, text, format);
                 for (without, with) in SEVENS {
                     assert_eq!(
                         width(without),
@@ -101,43 +101,51 @@ fn a_seven_takes_as_much_room_as_any_other_digit() {
 
 #[test]
 fn a_text_without_digits_keeps_its_width() {
+    // As wide as laid out with the default features alone, in whole pixels, as before WPC-386.
     let canvas = Canvas::new(8, 8);
     for dpi in SCALES {
         canvas.render(MONITOR, dpi, |overlay, _| {
             for text in ["Copied", "Couldn't save."] {
-                let label = overlay.typeset(text, &overlay.format).expect("a text");
-                let measured = whole_up(exact_width(&label.layout));
-                assert_eq!(label.width, measured, "{text:?} at {dpi} DPI");
+                let plain = overlay
+                    .typeset_plain(text, &overlay.format)
+                    .expect("a plain text")
+                    .width;
+                assert_eq!(
+                    text_width(overlay, text, &overlay.format),
+                    plain,
+                    "{text:?} at {dpi} DPI"
+                );
             }
         });
     }
 }
 
-/// The label for `physical` and `logical`, live or pinned: its pill's size, and where its bar and its logical text start
-/// from the pill's left side.
-fn label_parts(
-    canvas: &Canvas,
-    dpi: u32,
-    look: Look,
-    physical: &str,
-    logical: &str,
-) -> (i32, i32, i32, f32) {
-    let m = tests::with_logical(tests::horizontal(-400, -100, 350, physical), logical);
+/// A label's pill's size, and where its bar and its logical text start from the pill's left side.
+#[derive(Debug, PartialEq)]
+struct LabelParts {
+    width: i32,
+    height: i32,
+    bar: i32,
+    logical_text: f32,
+}
+
+/// The parts of the label for `physical` and `logical`, live or pinned.
+fn label_parts(canvas: &Canvas, dpi: u32, look: Look, physical: &str, logical: &str) -> LabelParts {
+    let m = with_logical(horizontal(-400, -100, 350, physical), logical);
     let mut parts = None;
     canvas.render(MONITOR, dpi, |overlay, _| {
         let label = overlay.label(&m, look).expect("the label").expect("a pill");
         let after = label.logical.expect("a logical part");
         let left = label.pill.left - MONITOR.left;
-        parts = Some((
-            label.pill.right - label.pill.left,
-            label.pill.bottom - label.pill.top,
+        parts = Some(LabelParts {
+            width: label.pill.right - label.pill.left,
+            height: label.pill.bottom - label.pill.top,
             // The bar is in the window's own pixels, on whole pixels.
-            whole(after.bar.left) - left,
-            after.text.left - px(left),
-        ));
+            bar: whole(after.bar.left) - left,
+            logical_text: after.text.left - px(left),
+        });
     });
-    let (width, height, bar, text) = parts.expect("the label was laid out");
-    (width, height, bar, text)
+    parts.expect("the label was laid out")
 }
 
 #[test]
@@ -145,14 +153,11 @@ fn a_seven_leaves_the_label_as_it_was_live_and_pinned() {
     let canvas = Canvas::new(480, 320);
     // Both parts differ only in their 7s: a 7 in the physical part would move the bar and the logical text, and one in
     // the logical part would move the pill's right side.
-    for dpi in [144, 168] {
+    for dpi in SCALES {
         for look in [Look::Live, Look::Pinned] {
             let without = label_parts(&canvas, dpi, look, "240 \u{d7} 180", "140.1 \u{d7} 102.9");
             let with = label_parts(&canvas, dpi, look, "247 \u{d7} 187", "147.1 \u{d7} 107.9");
-            assert_eq!(
-                without, with,
-                "{look:?} at {dpi} DPI: (width, height, bar, logical text)"
-            );
+            assert_eq!(without, with, "{look:?} at {dpi} DPI");
         }
     }
 }
