@@ -343,8 +343,8 @@ fn is_hdr(color_space: DXGI_COLOR_SPACE_TYPE) -> bool {
 }
 
 /// A rotated monitor's desktop image comes in the monitor's native orientation, so that monitor goes to GDI, whose
-/// photo is upright. The owner chose GDI over turning DXGI's image upright (WPC-344), so with HDR on a rotated monitor
-/// has approximate colors.
+/// photo is already upright, so DXGI's image is never turned (WPC-344). The price: with HDR on, a rotated monitor's
+/// colors are approximate ([`gdi_colors`]).
 fn is_upright(rotation: windows::Win32::Graphics::Dxgi::Common::DXGI_MODE_ROTATION) -> bool {
     rotation == DXGI_MODE_ROTATION_IDENTITY || rotation == DXGI_MODE_ROTATION_UNSPECIFIED
 }

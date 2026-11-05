@@ -64,7 +64,7 @@ A tela fica congelada enquanto as ferramentas estão abertas. Para medir algo qu
 
 - **Conteúdo protegido.** Vídeo de serviços de streaming e janelas que se protegem contra captura de tela podem sair pretos ou sumir da tela congelada e, com isso, das medidas, das cores e dos Snips.
 - **"Approximate color (HDR on)".** Com o HDR ligado, o Windows clareia as cores que os apps pintam, e o ScreenGauge desfaz esse clareamento, para o Inspect mostrar a cor que o app pintou. Quando não consegue desfazer num monitor, o Inspect mostra "Approximate color (HDR on)" embaixo da cor: a cor mostrada pode diferir da que o app pintou. Em casos raros, o ScreenGauge não consegue saber que o HDR está ligado, e a cor pode sair diferente sem esse aviso.
-- **Monitor girado com o HDR ligado.** Num monitor girado para retrato ou de cabeça para baixo nas configurações de tela do Windows, com o HDR ligado, o Inspect sempre mostra "Approximate color (HDR on)": o ScreenGauge fotografa um monitor girado de outro jeito, que não garante a cor que o app pintou.
+- **Monitor girado com o HDR ligado.** Num monitor girado para retrato ou de cabeça para baixo nas configurações de tela do Windows, com o HDR ligado, o Inspect mostra "Approximate color (HDR on)": o ScreenGauge fotografa um monitor girado por um método que não garante a cor que o app pintou.
 - **Conteúdo HDR.** Vídeos, jogos e imagens mais claros ou mais saturados que qualquer cor padrão não têm uma cor padrão exata. O Inspect mostra a cor padrão mais próxima, e o Snip corta as partes mais claras para branco.
 - **Um monitor de cada vez.** Cada ferramenta trabalha no monitor que está sob o cursor, então uma janela que fica metade em cada monitor não pode ser medida nem capturada inteira.
 
