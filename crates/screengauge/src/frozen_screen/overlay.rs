@@ -178,7 +178,7 @@ struct PlacedLogical {
 /// A text laid out, with what the label needs to place it.
 struct Typeset {
     layout: IDWriteTextLayout,
-    /// The text's width, in whole pixels.
+    /// The text's width, in whole pixels: the room the box around it counts for it (see `Overlay::typeset`).
     width: i32,
     /// The distance from the layout's top to its baseline.
     baseline: f32,
@@ -472,8 +472,25 @@ impl Overlay {
     }
 
     /// `text` laid out in `format` with tabular figures, and how wide it is and how far down its baseline is.
+    ///
+    /// Each 7 counts as wide as a 0. The labels' Segoe UI semibold draws its tabular 7 a third of a pixel narrower than
+    /// its other digits (Chromium does the same), and rounded up to whole pixels that third could take a pixel off the
+    /// box around the number as a 7 came in, the jump tabular figures are there to stop (WPC-386). The 7 is still drawn
+    /// as the font draws it, from the real text's layout; only the room counted for it changes, so the text sits at the
+    /// left of a room at most two thirds of a pixel wider than it. The other digits are left as they are: the tolerance
+    /// indicator's Black face has no tabular figures, its 1 is narrower and its 4 wider than its 0 by design (see
+    /// `tolerance::NUMBER_WEIGHT`), and its 7 is already a 0's width.
     fn typeset(&self, text: &str, format: &IDWriteTextFormat) -> windows::core::Result<Typeset> {
-        Typeset::of(self.layout(text, format)?)
+        let typeset = Typeset::of(self.layout(text, format)?)?;
+        if !text.contains('7') {
+            return Ok(typeset);
+        }
+        let room = Typeset::of(self.layout(&text.replace('7', "0"), format)?)?;
+        Ok(Typeset {
+            // Never narrower than the text itself, so the box never cuts into it.
+            width: typeset.width.max(room.width),
+            ..typeset
+        })
     }
 
     /// As `typeset`, with DirectWrite's default features alone: for text with no digits to align.
@@ -1298,38 +1315,29 @@ mod tests {
 
     #[test]
     fn the_labels_digits_are_as_wide_as_each_other() {
-        // Without tabular figures Segoe UI's 1 is 4.8 pixels wide at this size and its 0 is 6.7, so the pill would
-        // jump as the number changed. With them the widths agree to a fraction of a pixel (the font's 7 is 0.2
-        // narrower), in the physical text's format and in the logical text's.
+        // Without tabular figures Segoe UI's 1 is 4.8 pixels wide at 100% and its 0 is 6.7, so the pill would jump as
+        // the number changed. With them every digit but the 7 is as wide as the 0, and the 7 takes the 0's room
+        // (WPC-386), so the label counts the same whole pixels for any digits, in the physical text's format and in the
+        // logical text's. Four of each, as one digit alone rounds up to the same pixel however narrow its 7 is.
         let canvas = Canvas::new(8, 8);
-        let overlay = Overlay::new(
-            &canvas.target,
-            &canvas.fonts,
-            MONITOR,
-            Scale::from_dpi(96).expect("a scale"),
-            Mode::Dark,
-        )
-        .expect("the overlay");
-        for (part, format) in [
-            ("physical", &overlay.format),
-            ("logical", &overlay.logical_format),
-        ] {
-            let widths: Vec<f32> = "0123456789"
-                .chars()
-                .map(|digit| {
-                    let layout = overlay
-                        .layout(&digit.to_string(), format)
-                        .expect("a layout");
-                    let mut metrics = DWRITE_TEXT_METRICS::default();
-                    // SAFETY: fills a local.
-                    unsafe { layout.GetMetrics(&mut metrics) }.expect("metrics");
-                    metrics.width
-                })
-                .collect();
-            let widest = widths.iter().copied().fold(f32::MIN, f32::max);
-            let narrowest = widths.iter().copied().fold(f32::MAX, f32::min);
-            assert!(widest - narrowest < 0.3, "{part}: {widths:?}");
-            assert!(narrowest > 6.0, "{part}: {widths:?}");
+        for dpi in SCALES {
+            canvas.render(MONITOR, dpi, |overlay, _| {
+                for (part, format) in [
+                    ("physical", &overlay.format),
+                    ("logical", &overlay.logical_format),
+                ] {
+                    let width = |text: &str| text_width(overlay, text, format);
+                    let zeros = width("0000");
+                    for digit in '1'..='9' {
+                        let digits = digit.to_string().repeat(4);
+                        assert_eq!(
+                            width(&digits),
+                            zeros,
+                            "{digits} in the {part} format at {dpi} DPI"
+                        );
+                    }
+                }
+            });
         }
     }
 
@@ -1435,11 +1443,7 @@ mod tests {
 
     /// The width of `text` laid out in `format`, in whole pixels, as the label counts it.
     pub(super) fn text_width(overlay: &Overlay, text: &str, format: &IDWriteTextFormat) -> i32 {
-        let layout = overlay.layout(text, format).expect("a layout");
-        let mut metrics = DWRITE_TEXT_METRICS::default();
-        // SAFETY: fills a local.
-        unsafe { layout.GetMetrics(&mut metrics) }.expect("metrics");
-        whole_up(metrics.width)
+        overlay.typeset(text, format).expect("a text").width
     }
 
     /// One label drawn alone, with what the tests know about it from outside the drawing code: the widths of its two

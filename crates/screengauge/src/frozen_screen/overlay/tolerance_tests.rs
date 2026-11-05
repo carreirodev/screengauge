@@ -280,6 +280,34 @@ fn an_indicator_is_drawn_where_the_rule_puts_it() {
 }
 
 #[test]
+fn a_seven_leaves_the_panel_as_wide_as_it_was() {
+    // The number's Segoe UI Black has its 7 as wide as its 0 already, unlike the labels' semibold (WPC-386), so this
+    // held before the labels' 7 took a 0's room, and the rule that gives it that room leaves this face's 7 as it is.
+    // Its 1 stays narrower than its 0: the panel follows the number's other digits, as the prototype's does.
+    let canvas = Canvas::new(480, 320);
+    let ring = tokens(Mode::Dark).ring_over_panel();
+    for dpi in SCALES {
+        let (ten, seventeen) = (
+            render_indicator(&canvas, Mode::Dark, dpi, CURSOR, 10),
+            render_indicator(&canvas, Mode::Dark, dpi, CURSOR, 17),
+        );
+        assert_eq!(ten.panel, seventeen.panel, "at {dpi} DPI");
+        // Drawn there too: the ring is on the panel's left side, and not one pixel outside it.
+        let middle = (ten.panel.top + ten.panel.bottom) / 2;
+        for d in [&ten, &seventeen] {
+            assert!(
+                near(at(&d.picture, d.panel.left, middle), ring, 2),
+                "at {dpi} DPI"
+            );
+            assert!(
+                !near(at(&d.picture, d.panel.left - 1, middle), ring, 6),
+                "at {dpi} DPI"
+            );
+        }
+    }
+}
+
+#[test]
 fn the_bar_is_ten_segments_of_4_by_10_with_2_between_them_in_the_middle_of_the_line() {
     let canvas = Canvas::new(480, 320);
     for mode in MODES {
