@@ -80,6 +80,9 @@ const EX_STYLE: WINDOW_EX_STYLE = WINDOW_EX_STYLE(0);
 /// What a failure while drawing Settings is logged under.
 const DRAWING: &str = "Settings: drawing it";
 
+/// What a failure to ask for Settings' next paint is logged under.
+const REDRAWING: &str = "Settings: drawing it again";
+
 /// What "Project page" opens in the browser: the repository the workspace's manifest names.
 const PROJECT_PAGE: &str = env!("CARGO_PKG_REPOSITORY");
 
@@ -439,13 +442,7 @@ fn follow_page(hwnd: HWND) {
 /// Drops the render target, made for the old size, and asks for a paint.
 fn redraw(hwnd: HWND) {
     drop(TARGET.take());
-    // SAFETY: our own window.
-    if !unsafe { InvalidateRect(Some(hwnd), None, false) }.as_bool() {
-        log::failure(
-            "Settings: drawing it again",
-            &"InvalidateRect returned FALSE",
-        );
-    }
+    drawn_window::repaint(hwnd, REDRAWING);
 }
 
 extern "system" fn window_proc(
@@ -804,13 +801,7 @@ fn invalidate_field(hwnd: HWND) {
 
 /// Asks for a paint with the render target kept, as after a click or a move that changes what the page shows.
 fn invalidate(hwnd: HWND) {
-    // SAFETY: our own window.
-    if !unsafe { InvalidateRect(Some(hwnd), None, false) }.as_bool() {
-        log::failure(
-            "Settings: drawing it again",
-            &"InvalidateRect returned FALSE",
-        );
-    }
+    drawn_window::repaint(hwnd, REDRAWING);
 }
 
 /// Opens `address`, `what` for the log, in the program Windows has for it: a web page in the browser the user chose,

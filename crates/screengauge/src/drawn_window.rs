@@ -53,6 +53,15 @@ pub fn paint(hwnd: HWND, what: &str, draw: impl FnOnce() -> windows::core::Resul
     let _ = unsafe { EndPaint(hwnd, &paint) };
 }
 
+/// Asks Windows for a paint of `hwnd`, as after a change to what it shows. A refusal is logged under `what`: the window
+/// then shows what it showed until its next paint.
+pub fn repaint(hwnd: HWND, what: &str) {
+    // SAFETY: the caller's own window.
+    if !unsafe { InvalidateRect(Some(hwnd), None, false) }.as_bool() {
+        log::failure(what, &"InvalidateRect returned FALSE");
+    }
+}
+
 /// Draws one frame of `hwnd` with `draw` on the target `kept` holds, or on one `make` makes when it holds none, and
 /// keeps the target for the next frame. When the graphics device was lost, as after a driver update, the target is
 /// dropped and the window asked for another paint, which makes it again: then there is no frame, and `None` comes back.

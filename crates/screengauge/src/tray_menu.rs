@@ -22,7 +22,6 @@ use windows::Win32::Graphics::Dwm::{
     DWM_WINDOW_CORNER_PREFERENCE, DWMWA_BORDER_COLOR, DWMWA_TRANSITIONS_FORCEDISABLED,
     DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmFlush, DwmSetWindowAttribute,
 };
-use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -369,13 +368,7 @@ fn item_at(hwnd: HWND, lparam: LPARAM) -> Option<Item> {
 /// Tints `item`, and draws the menu again when that changed.
 fn light(hwnd: HWND, item: Option<Item>) {
     if LIT.replace(item) != item {
-        // SAFETY: our own window.
-        if !unsafe { InvalidateRect(Some(hwnd), None, false) }.as_bool() {
-            log::failure(
-                "tray menu: drawing it again",
-                &"InvalidateRect returned FALSE",
-            );
-        }
+        drawn_window::repaint(hwnd, "tray menu: drawing it again");
     }
 }
 
