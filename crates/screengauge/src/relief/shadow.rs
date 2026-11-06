@@ -8,7 +8,8 @@
 //! applied by distance from the shape's outline, so a corner comes out a little too dark and the end of a long box a
 //! little too light, against what a true blur gives. Each layer's outline is on whole pixels, so its edge is crisp and
 //! the fall-off steps down in bands, `Layers::step` pixels wide, rather than smoothly: with the bands a twentieth of the
-//! blur wide, each step is a few levels of an 8-bit channel.
+//! blur wide, each step is a few levels of an 8-bit channel. The frozen screen's labels and panels have wider bands
+//! (`COARSE`), as their layers are few enough not to round away.
 
 use std::f64::consts::SQRT_2;
 
@@ -85,6 +86,24 @@ fn coverage(profile: Profile, sigma: f64, distance: f64) -> f64 {
 ///
 /// With no blur there is one layer, at the strength, on the outline itself.
 pub fn layers(sigma: f64, strength: f32, profile: Profile) -> Layers {
+    layers_in_bands(sigma, strength, profile, FINE)
+}
+
+/// About twenty bands to each standard deviation of the blur, `layers`'s: the steps between them are small. The
+/// toolbar's and Settings' shadows, drawn once onto a bitmap of their own, have them.
+pub const FINE: f64 = 20.0;
+
+/// Four bands to each standard deviation of the blur: the frozen screen's labels and panels, drawn each frame straight
+/// onto the screen's photo (WPC-393). Each layer is fainter the finer the bands, and every layer a channel of 8 bits
+/// takes in rounds by up to half a level, so the many faint layers of fine bands add up to a shadow darker than the
+/// blur: measured against CSS's true blur of the notice, the tolerance indicator and the magnified view, in both
+/// palettes at 100%, 150% and 175%, fine bands were 0.035 of opacity off it, root mean square, and these 0.021, the
+/// nearest of the widths tried (from 2.5 to 20 to a deviation). The notice's shadow had been fitted with bands 4 pixels
+/// wide, at a deviation of 14, before it came here.
+pub const COARSE: f64 = 4.0;
+
+/// As `layers`, with `bands` bands to each standard deviation of the blur, never one finer than a pixel.
+pub fn layers_in_bands(sigma: f64, strength: f32, profile: Profile, bands: f64) -> Layers {
     if sigma < 1e-3 {
         return Layers {
             layers: vec![Layer {
@@ -94,8 +113,7 @@ pub fn layers(sigma: f64, strength: f32, profile: Profile) -> Layers {
             step: 1,
         };
     }
-    // About twenty bands for each standard deviation keeps the steps between them small; never finer than a pixel.
-    let step = ceil_to_pixels((sigma / 20.0).max(1.0));
+    let step = ceil_to_pixels((sigma / bands).max(1.0));
     let outer = ceil_to_pixels(3.0 * sigma);
     // Inside the outline the fall-off is the same up to three deviations in. A narrow box has no room for that: it
     // keeps a core of its own, a pixel from the middle, so no layer collapses to nothing.
@@ -202,6 +220,30 @@ mod tests {
                     (stacked(&layers, middle) - wanted).abs() < 2.0 / 255.0,
                     "sigma {sigma}: {} at {middle}, wanted {wanted}",
                     stacked(&layers, middle)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn coarse_bands_are_a_quarter_of_a_deviation_and_still_add_up_to_the_blur() {
+        // The panels' shadow at 100% (a deviation of 14) and at 175% (24.5), and the label's at 175% (6.1).
+        for sigma in [14.0, 24.5, 6.1] {
+            let coarse = layers_in_bands(sigma, 0.75, Profile::Edge, COARSE);
+            let fine = layers(sigma, 0.75, Profile::Edge);
+            assert_eq!(coarse.step, ceil_to_pixels((sigma / 4.0).max(1.0)));
+            // Fewer layers, each stronger, so fewer of them round away in an 8-bit channel.
+            assert!(coarse.layers.len() < fine.layers.len(), "sigma {sigma}");
+            for pair in coarse.layers.windows(2) {
+                if pair[1].grow - pair[0].grow != coarse.step {
+                    continue;
+                }
+                let middle = f64::from(pair[0].grow) + f64::from(coarse.step) / 2.0;
+                let wanted = 0.75 * coverage(Profile::Edge, sigma, middle);
+                assert!(
+                    (stacked(&coarse, middle) - wanted).abs() < 2.0 / 255.0,
+                    "sigma {sigma}: {} at {middle}, wanted {wanted}",
+                    stacked(&coarse, middle)
                 );
             }
         }

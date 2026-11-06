@@ -37,32 +37,6 @@ use crate::typeset::{PlacedText, Typeset};
 const PANEL_RADIUS: u32 = 14;
 const ENLARGEMENT_RADIUS: u32 = 9;
 
-/// How much of the notice's shadow this panel casts. The notice's layers are fitted to a shadow box 15px tall (the
-/// notice's 31px less the spread of 8 on each side). This panel is up to 190 by 303 logical pixels (an enlargement of
-/// 176 or less, a readout of 113 at most, the position and the color on two lines each and the Approximate color
-/// notice's two under them), so its box is up to 174 by 287: as good as an edge, as far as a blur of sigma 14 (dark) or
-/// 13 (light) can tell. A box that tall casts a shadow stronger than the layers give at full strength, so they are made
-/// stronger, as the tolerance indicator's, a lower panel than the notice, makes them fainter (see `SHADOW_STRENGTH` in
-/// `tolerance`).
-///
-/// Fitted by least squares, the layers laid over each other as Direct2D lays them, against CSS's true blur of the box
-/// (`0 10px 28px -8px` at .75 in the dark palette, `0 10px 26px -8px` at .45 in the light one, sigma half the blur),
-/// read outward from the panel at 1 pixel steps: 0 to 30 pixels beyond its sides and its top, and 0 to 40 below it. The
-/// answer is the same for every panel from 174 by 199 to 214 by 255, which are all much taller than the blur, and so
-/// for the taller ones the color's row makes (WPC-316): a taller box is only more of an edge. Dark and light want:
-///
-/// - down the middle, below the panel, which is how the tolerance indicator's 0.68 was found (the same reading gives its
-///   0.67 and 0.70): 1.32 and 1.25;
-/// - along the middle of a side: 1.17 and 1.04;
-/// - above the panel: 1.03 and 0.80.
-///
-/// 1.25 is the one number for both palettes that is nearest to all three. The opacity it leaves is within 0.020 (dark)
-/// and 0.014 (light) of CSS's, root mean square, below the panel, 0.012 and 0.012 on the sides, and 0.007 and 0.007 above
-/// it. It cannot be closer, because the layers are the notice's: they fall off the way a box 15px tall's shadow does, a
-/// little slower than an edge's, so no single number fits the panel's whole shadow. Right under the panel it is up to
-/// 0.06 of opacity lighter than CSS's (0.36 against 0.41 in the dark palette), and a test keeps it within 0.07.
-pub(super) const SHADOW_STRENGTH: f32 = 1.25;
-
 /// How much of the grid's black shows over the pixels (CSS `rgba(0,0,0,.2)`).
 const GRID_OPACITY: f32 = 0.2;
 
@@ -260,12 +234,7 @@ impl Overlay {
             .geometry_of(&self.shaped(&places.enlargement, radius, 0, 0))?
             .cast()?;
 
-        self.draw_floating_panel(
-            target,
-            &geometry::bounds(view.panel)?,
-            PANEL_RADIUS,
-            SHADOW_STRENGTH,
-        )?;
+        self.draw_floating_panel(target, &geometry::bounds(view.panel)?, PANEL_RADIUS)?;
 
         let enlargement = self.in_window(&places.enlargement);
         // `D2D1_LAYER_PARAMETERS::default()` is all zeros: no content, no opacity and a transform that squashes the mask

@@ -61,14 +61,6 @@ const UNLIT_OPACITY: f32 = 0.22;
 /// How far the panel sits from the cursor: to its left and above it, with nothing that moves it to the other side.
 const REACH: u32 = 14;
 
-/// How much of the notice's shadow this panel casts. The shadow's layers are fitted to a shadow box 15px tall (the
-/// notice's 31px less the spread of 8 on each side); this panel is 25px tall, so its box is 9px, and a lower box blurs
-/// to a fainter shadow. Fitted to CSS's true blur of that box (a gaussian of sigma 14 in the dark palette and 13 in the
-/// light one, down the panel's middle), the layers want 0.67 and 0.69 of their strength, which brings the shadow's
-/// error from about 0.03 (dark) and 0.02 (light) of opacity at full strength to under 0.01. Unfitted, the shadow would
-/// be a third too dark.
-const SHADOW_STRENGTH: f32 = 0.68;
-
 /// The width of the bar: its segments and the gaps between them, each scaled on its own, so the bar is as wide as the
 /// segments drawn. Scaling the sum in one go would give a different number at some scales (73 against 77 at 125%).
 fn bar_width(dpi: u32) -> i32 {
@@ -191,7 +183,7 @@ impl Overlay {
             self.monitor,
             self.dpi(),
         );
-        self.draw_floating_panel(target, &panel, RADIUS, SHADOW_STRENGTH)?;
+        self.draw_floating_panel(target, &panel, RADIUS)?;
 
         let ring = scaled(geometry::RING, self.dpi());
         let window = self.in_window(&panel);

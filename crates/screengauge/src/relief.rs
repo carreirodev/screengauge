@@ -10,19 +10,22 @@ pub mod palette;
 pub mod shadow;
 
 use screengauge_core::session::{Point, toolbar};
+use std::mem::ManuallyDrop;
 use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D_SIZE_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_GRADIENT_STOP,
     D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_COMBINE_MODE_EXCLUDE, D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, D2D1_ELLIPSE,
-    D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
-    D2D1_ROUNDED_RECT, ID2D1BitmapRenderTarget, ID2D1Brush, ID2D1Factory, ID2D1RenderTarget,
-    ID2D1RoundedRectangleGeometry, ID2D1SolidColorBrush, ID2D1StrokeStyle,
+    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_COMBINE_MODE_EXCLUDE,
+    D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP,
+    D2D1_GAMMA_2_2, D2D1_LAYER_OPTIONS_NONE, D2D1_LAYER_PARAMETERS,
+    D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_ROUNDED_RECT, ID2D1BitmapRenderTarget, ID2D1Brush,
+    ID2D1Factory, ID2D1Geometry, ID2D1Layer, ID2D1RenderTarget, ID2D1RoundedRectangleGeometry,
+    ID2D1SolidColorBrush, ID2D1StrokeStyle,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
-use windows::core::Error;
+use windows::core::{Error, Interface};
 
 use crate::graphics::{Color, color, d2d_color, solid_brush};
 use palette::{Shadow, Stop, Surface};
@@ -212,15 +215,21 @@ pub struct OuterShadow {
 impl OuterShadow {
     /// `None` when the spread leaves nothing of the box.
     pub fn of(shadow: &Shadow, rect: &RECT, dpi: u32) -> Option<OuterShadow> {
+        OuterShadow::in_bands(shadow, rect, dpi, shadow::FINE)
+    }
+
+    /// As `of`, with `bands` bands to each standard deviation of the blur (`shadow::layers_in_bands`).
+    pub fn in_bands(shadow: &Shadow, rect: &RECT, dpi: u32, bands: f64) -> Option<OuterShadow> {
         let spread = signed(shadow.spread, dpi);
         let short = (rect.right - rect.left).min(rect.bottom - rect.top) + 2 * spread;
         if short <= 0 {
             return None;
         }
-        let layers = shadow::layers(
+        let layers = shadow::layers_in_bands(
             sigma(shadow.blur, dpi),
             shadow.color.alpha,
             Profile::Strip(f64::from(short)),
+            bands,
         );
         Some(OuterShadow {
             spread,
@@ -391,6 +400,68 @@ impl<'a> Canvas<'a> {
         Ok(())
     }
 
+    /// The outer shadow `shadow` of the box `rect`, with corners of `radius` physical pixels, for a box painted straight
+    /// over an opaque surface, as the frozen screen's labels and panels are: its layers, in `shadow::COARSE` bands, are
+    /// painted on a transparent layer of their own, which is then laid over what the target holds, so faint layers don't
+    /// round away (see the module's notes). `see_through` cuts the shadow out under the box, once, as the layer is laid.
+    pub fn shadow_over(
+        &self,
+        shadow: &Shadow,
+        rect: &RECT,
+        radius: i32,
+        see_through: bool,
+    ) -> windows::core::Result<()> {
+        let Some(outer) = OuterShadow::in_bands(shadow, rect, self.dpi, shadow::COARSE) else {
+            return Ok(());
+        };
+        // Everything the layers cover, and a pixel more for their antialiased corners.
+        let grown = outer.spread + outer.layers.reach() + 1;
+        let reach = self.shape(rect, 0, grown, outer.drop).rect;
+        let mask: Option<ID2D1Geometry> = if see_through {
+            let hole = geometry_of(self.factory, &self.shape(rect, radius, 0, 0))?;
+            // SAFETY: the rectangle outlives the call, which keeps nothing of it.
+            let all = unsafe { self.factory.CreateRectangleGeometry(&reach) }?;
+            // SAFETY: no arguments.
+            let cut = unsafe { self.factory.CreatePathGeometry() }?;
+            // SAFETY: no arguments.
+            let sink = unsafe { cut.Open() }?;
+            // SAFETY: the geometries and the sink outlive the call, which keeps nothing of them. No transform: both are
+            // already in the target's pixels.
+            unsafe {
+                all.CombineWithGeometry(&hole, D2D1_COMBINE_MODE_EXCLUDE, None, FLATTENING, &sink)
+            }?;
+            // SAFETY: closes the sink opened above, once.
+            unsafe { sink.Close() }?;
+            Some(cut.cast()?)
+        } else {
+            None
+        };
+        // `D2D1_LAYER_PARAMETERS::default()` is all zeros: no content, no opacity and a transform that squashes the mask
+        // to a point, so everything the layer is meant to carry is set.
+        let mut parameters = D2D1_LAYER_PARAMETERS {
+            contentBounds: reach,
+            geometricMask: ManuallyDrop::new(mask),
+            maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            opacity: 1.0,
+            layerOptions: D2D1_LAYER_OPTIONS_NONE,
+            ..D2D1_LAYER_PARAMETERS::default()
+        };
+        // The mask is in the target's pixels already, so the transform leaves it where it is. The matrix is the windows
+        // crate's own type from windows-numerics, which ScreenGauge doesn't name; the default's entries are all zero.
+        parameters.maskTransform.M11 = 1.0;
+        parameters.maskTransform.M22 = 1.0;
+        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
+        // Direct2D only fails the frame at EndDraw. The layer is managed by Direct2D (Windows 8 and later, and
+        // ScreenGauge is Windows 11 only), and it is popped below whatever painting the layers returned.
+        unsafe { self.target.PushLayer(&parameters, None::<&ID2D1Layer>) };
+        let painted = self.outer_layers(&outer, shadow.color.rgb, rect, radius, None);
+        // SAFETY: pops the layer pushed above, once.
+        unsafe { self.target.PopLayer() };
+        // The layer kept its own reference to the mask until the pop; this one is released here, once.
+        drop(ManuallyDrop::into_inner(parameters.geometricMask));
+        painted
+    }
+
     /// An outer shadow of the box `rect`: the box moved down by the shadow's drop and grown by its spread, blurred.
     /// `hole`, when there is one, is cut out of every layer.
     fn outer_shadow(
@@ -400,9 +471,21 @@ impl<'a> Canvas<'a> {
         radius: i32,
         hole: Option<&ID2D1RoundedRectangleGeometry>,
     ) -> windows::core::Result<()> {
-        let Some(outer) = OuterShadow::of(shadow, rect, self.dpi) else {
-            return Ok(());
-        };
+        match OuterShadow::of(shadow, rect, self.dpi) {
+            Some(outer) => self.outer_layers(&outer, shadow.color.rgb, rect, radius, hole),
+            None => Ok(()),
+        }
+    }
+
+    /// The layers of `outer`, a shadow in `rgb` of the box `rect`, filled on the target, with `hole` cut out of each.
+    fn outer_layers(
+        &self,
+        outer: &OuterShadow,
+        rgb: [u8; 3],
+        rect: &RECT,
+        radius: i32,
+        hole: Option<&ID2D1RoundedRectangleGeometry>,
+    ) -> windows::core::Result<()> {
         let (spread, drop) = (outer.spread, outer.drop);
         for layer in &outer.layers.layers {
             let grow = spread + layer.grow;
@@ -410,7 +493,7 @@ impl<'a> Canvas<'a> {
             if grow <= -drop.abs() {
                 continue;
             }
-            self.set(shadow.color.rgb, layer.opacity);
+            self.set(rgb, layer.opacity);
             let layer = self.shape(rect, radius, grow, drop);
             match hole {
                 Some(hole) => fill_except(self.factory, self.target, &layer, hole, &self.brush)?,

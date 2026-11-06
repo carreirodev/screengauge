@@ -93,9 +93,16 @@ fn the_shadow_is_subtle_and_stays_near_the_pill() {
     let below = at(centre, pill.bottom + 1);
     assert!(below[0] < BACKGROUND[0], "{below:?}");
     assert!(below[0] > 150, "{below:?}");
-    // Eight pixels beyond the pill's bottom side, 2 for the drop and 6 for the blur, nothing is left.
-    assert_eq!(at(centre, pill.bottom + 9), BACKGROUND);
-    assert_eq!(at(pill.left - 7, (pill.top + pill.bottom) / 2), BACKGROUND);
+    // Three deviations of the blur (CSS 7px, a deviation of 3.5) and a pixel for the antialiased corners beyond the
+    // pill, and 2 further below for the drop, nothing is left: the blur's own reach, since WPC-393 put the pill's shadow
+    // on `relief`'s blur. It reaches a few pixels further than the 5 fixed layers did (8 below and 6 beside), which the
+    // owner approved on 2026-11-06 (WPC-393).
+    let reach = 11 + 1;
+    assert_eq!(at(centre, pill.bottom + 2 + reach), BACKGROUND);
+    assert_eq!(
+        at(pill.left - reach, (pill.top + pill.bottom) / 2),
+        BACKGROUND
+    );
 }
 
 #[test]

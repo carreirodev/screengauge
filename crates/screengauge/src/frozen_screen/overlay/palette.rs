@@ -5,10 +5,8 @@
 use windows::Win32::Graphics::Direct2D::{ID2D1RenderTarget, ID2D1SolidColorBrush};
 
 use crate::graphics::{Color, color, solid_brush};
+use crate::relief::palette::{Shadow, shadow};
 use crate::theme::Mode;
-
-/// How many rounded rectangles the notice's shadow is made of.
-pub const SHADOW_LAYERS: usize = 10;
 
 /// One mode's colors.
 struct Palette {
@@ -28,18 +26,10 @@ struct Palette {
     highlight: Color,
     /// `--blank`: what the magnified view shows where its enlargement reaches past the monitor.
     blank: Color,
-    /// The notice's shadow, which the opacities below are laid over.
-    shadow: Color,
-    /// The opacity of each layer of the notice's shadow, from the innermost to the outermost.
-    shadow_opacities: [f32; SHADOW_LAYERS],
+    /// The floating panels' shadow (the outer part of `--panel-shadow`), which `relief` blurs as it blurs the toolbar's.
+    shadow: Shadow,
 }
 
-// The notice's shadow is CSS `0 10px 28px -8px` in the dark palette: a gaussian blur with a sigma of 14px (CSS's blur of
-// 28px) of a box 15px tall (the notice's 31px less the spread of 8 on each side), at an opacity of .75. The light one's
-// is `0 10px 26px -8px` at .45; it is drawn with the same layers, as its 2px less of blur moves where it fades by about a
-// pixel. Its layers are rounded rectangles 4px bigger each than the one before, and each one's opacity is what makes
-// the layers laid over each other add up to the gaussian's strength in the middle of its 4px band, reading it from the
-// outermost layer in; the last band beyond them is clear.
 const DARK: Palette = Palette {
     panel: color(26, 27, 31, 0.94),
     ink: color(0xe9, 0xeb, 0xef, 1.0),
@@ -51,10 +41,8 @@ const DARK: Palette = Palette {
     warn: color(0xf3, 0xb9, 0x4c, 1.0),
     highlight: color(255, 255, 255, 0.08),
     blank: color(0x2a, 0x2c, 0x31, 1.0),
-    shadow: color(0, 0, 0, 1.0),
-    shadow_opacities: [
-        0.064, 0.060, 0.059, 0.051, 0.040, 0.028, 0.018, 0.011, 0.006, 0.006,
-    ],
+    // CSS `0 10px 28px -8px rgba(0,0,0,.75)`.
+    shadow: shadow(10, 28, -8, color(0, 0, 0, 0.75)),
 };
 
 const LIGHT: Palette = Palette {
@@ -68,10 +56,8 @@ const LIGHT: Palette = Palette {
     warn: color(0xb8, 0x60, 0x00, 1.0),
     highlight: color(255, 255, 255, 1.0),
     blank: color(0xd9, 0xd6, 0xd0, 1.0),
-    shadow: color(70, 60, 45, 1.0),
-    shadow_opacities: [
-        0.034, 0.033, 0.033, 0.029, 0.023, 0.017, 0.011, 0.007, 0.004, 0.003,
-    ],
+    // CSS `0 10px 26px -8px rgba(70,60,45,.45)`.
+    shadow: shadow(10, 26, -8, color(70, 60, 45, 0.45)),
 };
 
 /// The brushes of one mode's palette, made for one render target. A render target that is lost takes its brushes with
@@ -87,9 +73,7 @@ pub struct Surfaces {
     pub warn: ID2D1SolidColorBrush,
     pub highlight: ID2D1SolidColorBrush,
     pub blank: ID2D1SolidColorBrush,
-    /// Each layer of the notice's shadow sets its opacity first.
-    pub shadow: ID2D1SolidColorBrush,
-    pub shadow_opacities: [f32; SHADOW_LAYERS],
+    pub shadow: Shadow,
 }
 
 impl Surfaces {
@@ -108,8 +92,7 @@ impl Surfaces {
             warn: brush(palette.warn)?,
             highlight: brush(palette.highlight)?,
             blank: brush(palette.blank)?,
-            shadow: brush(palette.shadow)?,
-            shadow_opacities: palette.shadow_opacities,
+            shadow: palette.shadow,
         })
     }
 }

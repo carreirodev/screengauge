@@ -21,9 +21,8 @@ const CROSS_OFFSET: u32 = 12;
 pub const TEXT: u32 = 12;
 pub const PAD_X: u32 = 8;
 const PAD_Y: u32 = 5;
-/// The pill's corner radius, and how far its shadow falls.
+/// The pill's corner radius.
 pub const RADIUS: u32 = 7;
-pub const SHADOW_DROP: u32 = 2;
 /// Between the physical and the logical part of a label: a gap, a bar, and a gap again. The bar is this wide and tall,
 /// and its bottom side hangs this far below the text's baseline (CSS `vertical-align: -1px` on an empty box).
 const BAR_GAP: u32 = 7;

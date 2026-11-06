@@ -14,7 +14,6 @@ use windows::Win32::Graphics::Direct2D::Common::{
 use windows::Win32::Graphics::Direct2D::{D2D1_BITMAP_PROPERTIES, ID2D1Bitmap};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 
-use super::magnified_view::SHADOW_STRENGTH;
 use super::panel_tests::{MODES, inside, over, rect, tokens};
 use super::tests::{BACKGROUND, Canvas, Picture, near};
 use super::*;
@@ -1004,7 +1003,7 @@ fn nothing_is_drawn_outside_the_panel_but_its_shadow() {
                 let full = render(&canvas, &photo, mode, dpi, &view);
                 let alone = canvas.render_in(mode, SCREEN, dpi, |overlay, target| {
                     overlay
-                        .draw_floating_panel(target, &panel, 14, SHADOW_STRENGTH)
+                        .draw_floating_panel(target, &panel, 14)
                         .expect("the panel");
                 });
                 let context = format!("{mode:?} at {dpi} DPI, {}x", fixture.factor());
@@ -1049,7 +1048,7 @@ fn the_panel_has_its_border_and_a_shadow_that_falls_below_it_and_reaches_no_furt
                 at(&picture, across, panel.top)
             );
             // The shadow falls below the panel, darker than it falls above it, and nothing is drawn beyond its reach: the
-            // blur's 28 less the spread of 8 around the panel, 10 further down, and a pixel or two for the last band.
+            // blur's reach around the panel, 10 further down.
             let below = at(&picture, across, panel.bottom + scaled(4, dpi));
             let above = at(&picture, across, panel.top - scaled(4, dpi));
             assert!(
@@ -1060,7 +1059,10 @@ fn the_panel_has_its_border_and_a_shadow_that_falls_below_it_and_reaches_no_furt
                 below[0] < BACKGROUND[0],
                 "{below:?} is not darkened, {context}"
             );
-            let reach = scaled(28, dpi) + 2;
+            // Three deviations of the dark palette's blur (CSS 28px, a deviation of 14), less the spread of 8, and a pixel for
+            // the antialiased corners: the blur's own reach, since WPC-393 put the panels' shadow on `relief`'s blur. It reaches a
+            // few pixels further than the fixed layers did, which the owner approved on 2026-11-06 (WPC-393).
+            let reach = (84 * dpi).div_ceil(192).cast_signed() - scaled(8, dpi) + 1;
             let drop = scaled(10, dpi);
             let reached = rect(
                 panel.left - reach,
@@ -1082,11 +1084,12 @@ fn the_panel_has_its_border_and_a_shadow_that_falls_below_it_and_reaches_no_furt
 }
 
 #[test]
-fn the_shadow_is_within_7_hundredths_of_opacity_of_the_prototypes_below_and_beside_the_panel() {
+fn the_shadow_is_within_4_hundredths_of_opacity_of_the_prototypes_below_and_beside_the_panel() {
     // CSS `0 10px 28px -8px` at .75 in the dark palette and `0 10px 26px -8px` at .45 in the light one: a gaussian blur
     // of sigma half the blur radius, of the panel's box shrunk by 8 on every side and moved 10 down. The panel is much
     // taller than the blur, so down its middle the box is an edge: below the panel the edge is 2 further down than the
-    // panel's bottom, and beside it 8 further in.
+    // panel's bottom, and beside it 8 further in. The notice's layers made stronger, before WPC-393, were up to 0.06 lighter
+    // right under the panel; `relief`'s blur of the panel's own box is within 0.04 of it.
     let canvas = Canvas::new(640, 640);
     let photo = photo(&canvas);
     for (mode, alpha, sigma, shadow) in [
@@ -1112,13 +1115,13 @@ fn the_shadow_is_within_7_hundredths_of_opacity_of_the_prototypes_below_and_besi
             let wanted = css(f64::from(d) + 0.5 - 2.0);
             let found = drawn(across, panel.bottom + d);
             assert!(
-                (found - wanted).abs() < 0.07,
+                (found - wanted).abs() < 0.04,
                 "{d} below the panel the shadow is {found}, CSS's is {wanted}, {mode:?}"
             );
             let wanted = css(f64::from(d) + 0.5 + 8.0);
             let found = drawn(panel.left - 1 - d, middle);
             assert!(
-                (found - wanted).abs() < 0.07,
+                (found - wanted).abs() < 0.04,
                 "{d} beside the panel the shadow is {found}, CSS's is {wanted}, {mode:?}"
             );
         }

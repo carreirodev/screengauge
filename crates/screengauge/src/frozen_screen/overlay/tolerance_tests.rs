@@ -524,9 +524,12 @@ fn an_indicators_shadow_falls_below_it_and_nothing_is_drawn_beyond_it() {
             let below = at(&d.picture, across, d.panel.bottom + scaled(4, dpi));
             assert!(below[0] < BACKGROUND[0], "{below:?} is darkened, {context}");
             assert!(below[0] > 120, "{below:?} is only a shadow, {context}");
-            // The shadow's reach: 36 less its spread of 8 beyond the panel on the sides and above it, and 10 further
-            // below, and a pixel or two for the blur's last band. Beyond it the photo is as it was, to the last pixel.
-            let reach = scaled(28, dpi) + 2;
+            // The shadow's reach beyond the panel on the sides and above it, and 10 further below. Beyond it the photo is as
+            // it was, to the last pixel.
+            // Three deviations of the dark palette's blur (CSS 28px, a deviation of 14), less the spread of 8, and a pixel for
+            // the antialiased corners: the blur's own reach, since WPC-393 put the panels' shadow on `relief`'s blur. It reaches a
+            // few pixels further than the fixed layers did, which the owner approved on 2026-11-06 (WPC-393).
+            let reach = (84 * dpi).div_ceil(192).cast_signed() - scaled(8, dpi) + 1;
             let drop = scaled(10, dpi);
             let reached = rect(
                 d.panel.left - reach,
@@ -558,8 +561,8 @@ fn an_indicators_shadow_falls_below_it_and_nothing_is_drawn_beyond_it() {
 
 #[test]
 fn the_indicators_shadow_is_fainter_than_the_notices_because_its_panel_is_lower() {
-    // The same panel color and the same layers: only the strength of the shadow differs, and a panel 25 tall casts less
-    // than one 31 tall. Measured below the panel, where the shadow is darkest.
+    // The same panel color and the same CSS shadow: a panel 25 tall casts less than one 31 tall, as the blur of a lower
+    // box is fainter. Measured below the panel, where the shadow is darkest.
     let canvas = Canvas::new(480, 320);
     for mode in MODES {
         for dpi in [96, 168] {

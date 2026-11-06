@@ -65,6 +65,7 @@ use windows::core::Error;
 
 use crate::graphics::{Color, Fonts, color, solid_brush};
 use crate::log;
+use crate::relief::palette::{Shadow, shadow};
 use crate::relief::{self, dot, in_surface, px, ring, rounded_at};
 use crate::theme::Mode;
 use crate::typeset::{PlacedText, Typeset};
@@ -100,16 +101,16 @@ const LOGICAL_OPACITY: f32 = 0.62;
 /// on screen in WPC-307.
 const LOGICAL_WEIGHT: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT_MEDIUM;
 
-/// The pill's shadow, approximating CSS `0 2px 7px rgba(0,0,0,.35)`: black rounded rectangles that grow by this many
-/// logical pixels and show this much, laid over each other, so the shadow fades outward from the pill.
-const SHADOW: [(u32, f32); 5] = [(0, 0.05), (1, 0.04), (2, 0.04), (4, 0.03), (6, 0.02)];
+/// The pill's shadow, CSS `0 2px 7px rgba(0,0,0,.35)` in both palettes, which `relief` blurs as it blurs the toolbar's
+/// (WPC-393).
+const SHADOW: Shadow = shadow(2, 7, 0, color(0, 0, 0, 0.35));
 
 /// What draws the measurements and the notice on one monitor's window: brushes and a text format made for its render
 /// target and its scale. A render target that is lost takes its brushes with it, so this is made again with everything
 /// else.
 pub struct Overlay {
     cyan: ID2D1SolidColorBrush,
-    /// Black. Each fill sets its opacity first: the outline's, the drawn rectangle's, then each layer of the shadow's.
+    /// Black. Each fill sets its opacity first: the outline's, then the drawn rectangle's.
     shade: ID2D1SolidColorBrush,
     /// The drawn rectangle's dashes.
     white: ID2D1SolidColorBrush,
@@ -481,28 +482,12 @@ impl Overlay {
         target: &ID2D1RenderTarget,
         label: &PlacedLabel,
     ) -> windows::core::Result<()> {
-        let drop = scaled(geometry::SHADOW_DROP, self.dpi());
-        let pill = &label.pill;
         // SAFETY: a drawing call on a live render target. Out of BeginDraw and EndDraw, Direct2D only fails the frame
         // at EndDraw. The shapes are on whole pixels, so their straight sides are crisp; the corners are antialiased.
         unsafe { target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };
-        let cut_out = match label.look {
-            Look::Live => None,
-            Look::Pinned => Some(self.geometry_of(&self.rounded(pill, 0, 0))?),
-        };
-        for (grow, opacity) in SHADOW {
-            // SAFETY: as above.
-            unsafe { self.shade.SetOpacity(opacity) };
-            let shape = self.rounded(pill, scaled(grow, self.dpi()), drop);
-            match &cut_out {
-                None => {
-                    // SAFETY: as above.
-                    unsafe { target.FillRoundedRectangle(&shape, &self.shade) };
-                }
-                Some(hole) => self.fill_except(target, &shape, hole, &self.shade)?,
-            }
-        }
-        Ok(())
+        let radius = scaled(geometry::RADIUS, self.dpi());
+        self.canvas(target)?
+            .shadow_over(&SHADOW, &label.pill, radius, label.look == Look::Pinned)
     }
 
     /// The pill and the text on it: the physical part in full ink, then, when the label has one, the bar and the
@@ -695,6 +680,14 @@ impl Overlay {
     fn shaped(&self, rect: &RECT, radius: i32, grow: i32, down: i32) -> D2D1_ROUNDED_RECT {
         // None of these shapes is shrunk past half its height, so none needs the toolbar's clamp.
         rounded_at(self.window_origin(), rect, radius, grow, down, false)
+    }
+
+    /// What paints `relief`'s raised surfaces and shadows on `target`, in the window's pixels at its scale.
+    fn canvas<'a>(
+        &'a self,
+        target: &'a ID2D1RenderTarget,
+    ) -> windows::core::Result<relief::Canvas<'a>> {
+        relief::Canvas::new(target, &self.factory, self.dpi(), self.window_origin())
     }
 }
 

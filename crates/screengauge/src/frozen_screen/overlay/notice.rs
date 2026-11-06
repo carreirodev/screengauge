@@ -88,7 +88,7 @@ impl Overlay {
             self.monitor,
             self.dpi(),
         );
-        self.draw_floating_panel(target, &panel, RADIUS, 1.0)?;
+        self.draw_floating_panel(target, &panel, RADIUS)?;
 
         let ring_width = scaled(geometry::RING, self.dpi());
         let window = self.in_window(&panel);
