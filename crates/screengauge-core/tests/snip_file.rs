@@ -615,6 +615,31 @@ fn monitors_changing_with_save_as_open_then_cancelled_close_the_tools() {
 }
 
 #[test]
+fn monitors_changing_with_save_as_aside_then_cancelled_bring_the_frozen_screen_back_before_closing()
+{
+    let mut session = open(SnipDestination::Both, DefaultFolder::Off(None));
+    snip(&mut session);
+    session.handle(event(at(960, 540), 3000, Input::OtherProgramInFront));
+    session.handle(event(at(960, 540), 3010, Input::MonitorsChanged));
+    assert_eq!(
+        did(save_as_closed(&mut session, None)),
+        [Did::ComeBack, Did::Close]
+    );
+}
+
+#[test]
+fn monitors_changing_with_save_as_that_couldnt_open_close_the_tools_without_a_notice() {
+    let mut session = open(SnipDestination::Both, DefaultFolder::Off(None));
+    snip(&mut session);
+    session.handle(event(at(960, 540), 3000, Input::MonitorsChanged));
+    assert_eq!(
+        did(session.handle(event(at(960, 540), 3010, Input::SaveAsFailed))),
+        [Did::Close]
+    );
+    assert_eq!(notice(&session), None);
+}
+
+#[test]
 fn exiting_with_save_as_aside_closes_the_tools_and_keeps_the_folder_this_call_wrote_to() {
     let mut session = open(SnipDestination::File, DefaultFolder::Off(None));
     snip(&mut session);

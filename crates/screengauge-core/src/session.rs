@@ -172,6 +172,14 @@ struct Grab {
 /// Snip's image on its way to a file (v1 spec WPC-296, Snip).
 #[derive(Debug)]
 struct Saving {
+    stage: Stage,
+    ending: Ending,
+}
+
+/// What the end of the Snip's file path goes by, whichever step ends it: Save As cancelled or failing to open, or the
+/// file written or not.
+#[derive(Debug, Clone, Copy)]
+struct Ending {
     /// What became of the image's copy to the clipboard, which the notice then says too.
     copy: ImageCopy,
     /// The monitor the image was taken on, where the notice goes should the cursor be on none.
@@ -179,7 +187,6 @@ struct Saving {
     /// Whether the monitors changed meanwhile: the tools then close once the file is written or Save As is cancelled,
     /// never with Save As open over them, and without a notice.
     close_after: bool,
-    stage: Stage,
 }
 
 /// What became of the Snip's copy to the clipboard, which the notice about its file tells of too (WPC-352).
@@ -191,8 +198,43 @@ enum ImageCopy {
     /// asked for first, and answered before the file is written or Save As opens. Should it, the notice says nothing
     /// of the copy, as with File, rather than something that may be false.
     Waiting,
+    Answered(CopyAnswer),
+}
+
+impl ImageCopy {
+    /// The clipboard's answer, once it came.
+    fn answer(self) -> Option<CopyAnswer> {
+        match self {
+            ImageCopy::Answered(answer) => Some(answer),
+            ImageCopy::NotAsked | ImageCopy::Waiting => None,
+        }
+    }
+}
+
+/// How the clipboard answered a copy: [`Input::Copied`] or [`Input::NotCopied`] (WPC-352).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CopyAnswer {
     Made,
+    /// Windows refused the clipboard, which holds what it held before.
     Refused,
+}
+
+impl CopyAnswer {
+    /// What the notice of a copy alone says: "Copied" or "Couldn't copy.".
+    fn message(self) -> Message {
+        match self {
+            CopyAnswer::Made => Message::Copied,
+            CopyAnswer::Refused => Message::CouldntCopy,
+        }
+    }
+}
+
+/// How the Windows layer answered the Snip's file: [`Input::Saved`] or [`Input::NotSaved`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileAnswer {
+    Saved,
+    /// No file could be written, and none was left behind.
+    NotSaved,
 }
 
 /// A copy the session asked for, until the clipboard answers it (WPC-352).
@@ -327,8 +369,10 @@ impl Session {
         }
         // The clipboard's answer counts in every state, Save As's included: with Destination at Both it comes while the
         // Snip's image is on its way to a file.
-        if let Input::Copied | Input::NotCopied = event.input {
-            return self.copy_answered(event.input == Input::Copied, event.uptime);
+        match event.input {
+            Input::Copied => return self.copy_answered(CopyAnswer::Made, event.uptime),
+            Input::NotCopied => return self.copy_answered(CopyAnswer::Refused, event.uptime),
+            _ => {}
         }
         if self.saving.is_some() {
             return self.while_saving(event);
@@ -567,10 +611,12 @@ impl Session {
             ),
         };
         self.saving = Some(Saving {
-            copy,
-            monitor: area.monitor,
-            close_after: false,
             stage,
+            ending: Ending {
+                copy,
+                monitor: area.monitor,
+                close_after: false,
+            },
         });
         effects.push(effect);
         effects
@@ -585,13 +631,13 @@ impl Session {
         match event.input {
             Input::SaveAsClosed(chosen) => self.save_as_closed(chosen, event.cursor, event.uptime),
             Input::SaveAsFailed => self.save_as_failed(event.uptime),
-            Input::Saved => self.written(true, event.uptime),
-            Input::NotSaved => self.written(false, event.uptime),
+            Input::Saved => self.written(FileAnswer::Saved, event.uptime),
+            Input::NotSaved => self.written(FileAnswer::NotSaved, event.uptime),
             Input::OtherProgramInFront => self.step_aside(true),
             Input::BackInFront | Input::GlobalShortcut | Input::Called => self.step_aside(false),
             Input::MonitorsChanged => {
                 if let Some(saving) = self.saving.as_mut() {
-                    saving.close_after = true;
+                    saving.ending.close_after = true;
                 }
                 Vec::new()
             }
@@ -630,10 +676,8 @@ impl Session {
         uptime: Duration,
     ) -> Vec<Effect> {
         let Some(Saving {
-            copy,
-            monitor,
-            close_after,
             stage: Stage::SaveAs { image, aside },
+            ending,
         }) = self.saving.take()
         else {
             return Vec::new();
@@ -649,80 +693,72 @@ impl Session {
                 let path = png_path(&chosen);
                 let folder = path.parent().and_then(Folder::new);
                 self.saving = Some(Saving {
-                    copy,
-                    monitor,
-                    close_after,
                     stage: Stage::Writing { folder },
+                    ending,
                 });
                 effects.push(Effect::WritePng {
                     to: SaveTo::Chosen(path),
                     image,
                 });
             }
-            None if close_after => effects.extend(self.close()),
-            None => {
-                let message = match copy {
-                    ImageCopy::Made => Some(Message::Copied),
-                    ImageCopy::Refused => Some(Message::CouldntCopy),
-                    ImageCopy::NotAsked | ImageCopy::Waiting => None,
-                };
-                if let Some(message) = message {
-                    effects.extend(self.show(message, self.notice_monitor(monitor), uptime));
-                }
-            }
+            None => effects.extend(self.end_saving(ending, None, uptime)),
         }
         effects
     }
 
-    /// The file was written, or, when not `saved`, couldn't be, and none was left: the notice says which, and, with
-    /// Destination at Both, whether the image went to the clipboard. A folder Save As chose is the one it opens in next,
-    /// once a file was written there. The options stay as they were, and the tools stay open.
-    fn written(&mut self, saved: bool, uptime: Duration) -> Vec<Effect> {
+    /// The file was written, or couldn't be, and none was left, as `file` says. A folder Save As chose is the one it
+    /// opens in next, once a file was written there, even as the tools close.
+    fn written(&mut self, file: FileAnswer, uptime: Duration) -> Vec<Effect> {
         let Some(Saving {
-            copy,
-            monitor,
-            close_after,
             stage: Stage::Writing { folder },
+            ending,
         }) = self.saving.take()
         else {
             return Vec::new();
         };
-        if saved && let Some(folder) = folder {
+        if file == FileAnswer::Saved
+            && let Some(folder) = folder
+        {
             self.remembered.last_save_as_folder = Some(folder);
         }
-        if close_after {
-            return self.close();
-        }
-        self.show(
-            file_notice(saved, copy),
-            self.notice_monitor(monitor),
-            uptime,
-        )
-        .into_iter()
-        .collect()
+        self.end_saving(ending, Some(file), uptime)
     }
 
-    /// Windows couldn't open Save As: no file is written, as when one couldn't be, and the notice says so.
+    /// Windows couldn't open Save As: no file is written, as when one couldn't be.
     fn save_as_failed(&mut self, uptime: Duration) -> Vec<Effect> {
         let Some(Saving {
-            copy,
-            monitor,
-            close_after,
             stage: Stage::SaveAs { .. },
+            ending,
         }) = self.saving.take()
         else {
             return Vec::new();
         };
-        if close_after {
+        self.end_saving(ending, Some(FileAnswer::NotSaved), uptime)
+    }
+
+    /// Ends the Snip's file path, whichever step ends it: `file` says whether the file was written, and is `None` when
+    /// Save As was cancelled. With the monitors changed meanwhile, the tools close without a notice. Otherwise they stay
+    /// open, the options as they were, and the notice says what became of the file and, with Destination at Both, of
+    /// the image's copy to the clipboard; after a cancel, only a copy asked for says what became of it, "Copied" or
+    /// "Couldn't copy.", and nothing shows with File.
+    fn end_saving(
+        &mut self,
+        ending: Ending,
+        file: Option<FileAnswer>,
+        uptime: Duration,
+    ) -> Vec<Effect> {
+        if ending.close_after {
             return self.close();
         }
-        self.show(
-            file_notice(false, copy),
-            self.notice_monitor(monitor),
-            uptime,
-        )
-        .into_iter()
-        .collect()
+        let message = match file {
+            Some(file) => Some(file_notice(file, ending.copy)),
+            None => ending.copy.answer().map(CopyAnswer::message),
+        };
+        let Some(message) = message else {
+            return Vec::new();
+        };
+        let monitor = self.notice_monitor(ending.monitor);
+        self.show(message, monitor, uptime).into_iter().collect()
     }
 
     /// Pins what Dimensions measures, as the user sees it at the click, and copies it, its logical pixels with Shift
@@ -765,30 +801,20 @@ impl Session {
         vec![copy]
     }
 
-    /// The clipboard answered the oldest copy still waiting: Windows took it when `made`, and refused it otherwise. A
-    /// measurement's, a color's or the Snip's image to the clipboard alone shows "Copied" or "Couldn't copy." where
-    /// the copy was asked for; the Snip's image with Destination at Both waits for its file, whose notice says both.
-    fn copy_answered(&mut self, made: bool, uptime: Duration) -> Vec<Effect> {
+    /// The clipboard answered the oldest copy still waiting, as `answer` says. A measurement's, a color's or the Snip's
+    /// image to the clipboard alone shows "Copied" or "Couldn't copy." where the copy was asked for; the Snip's image
+    /// with Destination at Both waits for its file, whose notice says both.
+    fn copy_answered(&mut self, answer: CopyAnswer, uptime: Duration) -> Vec<Effect> {
         match self.copies.pop_front() {
-            Some(WaitingCopy::Notice { at, monitor, side }) => {
-                let message = if made {
-                    Message::Copied
-                } else {
-                    Message::CouldntCopy
-                };
-                self.show_at(message, at, monitor, side, uptime)
-                    .into_iter()
-                    .collect()
-            }
+            Some(WaitingCopy::Notice { at, monitor, side }) => self
+                .show_at(answer.message(), at, monitor, side, uptime)
+                .into_iter()
+                .collect(),
             Some(WaitingCopy::SnipImage) => {
                 if let Some(saving) = self.saving.as_mut()
-                    && saving.copy == ImageCopy::Waiting
+                    && saving.ending.copy == ImageCopy::Waiting
                 {
-                    saving.copy = if made {
-                        ImageCopy::Made
-                    } else {
-                        ImageCopy::Refused
-                    };
+                    saving.ending.copy = ImageCopy::Answered(answer);
                 }
                 Vec::new()
             }
@@ -1232,16 +1258,16 @@ impl Session {
     }
 }
 
-/// What the notice says once the Snip's file was `saved`, or couldn't be, and of the image's `copy` to the clipboard
+/// What the notice says once the Snip's `file` was written, or couldn't be, and of the image's `copy` to the clipboard
 /// with Destination at Both (v1 spec WPC-296, Snip; WPC-352).
-fn file_notice(saved: bool, copy: ImageCopy) -> Message {
-    match (saved, copy) {
-        (true, ImageCopy::NotAsked | ImageCopy::Waiting) => Message::Saved,
-        (true, ImageCopy::Made) => Message::CopiedAndSaved,
-        (true, ImageCopy::Refused) => Message::CouldntCopyButSaved,
-        (false, ImageCopy::NotAsked | ImageCopy::Waiting) => Message::CouldntSave,
-        (false, ImageCopy::Made) => Message::CouldntSaveButCopied,
-        (false, ImageCopy::Refused) => Message::CouldntSaveOrCopy,
+fn file_notice(file: FileAnswer, copy: ImageCopy) -> Message {
+    match (file, copy.answer()) {
+        (FileAnswer::Saved, None) => Message::Saved,
+        (FileAnswer::Saved, Some(CopyAnswer::Made)) => Message::CopiedAndSaved,
+        (FileAnswer::Saved, Some(CopyAnswer::Refused)) => Message::CouldntCopyButSaved,
+        (FileAnswer::NotSaved, None) => Message::CouldntSave,
+        (FileAnswer::NotSaved, Some(CopyAnswer::Made)) => Message::CouldntSaveButCopied,
+        (FileAnswer::NotSaved, Some(CopyAnswer::Refused)) => Message::CouldntSaveOrCopy,
     }
 }
 
