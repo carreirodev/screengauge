@@ -417,16 +417,8 @@ fn write_the_snip_card_for_a_look() {
         for mode in [Mode::Dark, Mode::Light] {
             for dpi in [96, 144] {
                 let page = drawn_with(mode, dpi, &options, Pointer::default());
-                let width = u32::try_from(page.width).expect("small");
-                let image = screengauge_core::session::Image::new(width, page.height, page.bgra)
-                    .expect("the bitmap's size");
-                // On a thread of its own, which the encoder starts COM on in its own way.
-                let png = std::thread::spawn(move || crate::png::encode(&image))
-                    .join()
-                    .expect("the encoder's thread")
-                    .expect("the page as a PNG");
-                std::fs::write(folder_path.join(format!("{name}-{mode:?}-{dpi}.png")), png)
-                    .expect("the PNG");
+                page.image
+                    .write_png(&folder_path.join(format!("{name}-{mode:?}-{dpi}.png")));
             }
         }
     }

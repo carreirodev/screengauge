@@ -22,9 +22,6 @@ use screengauge_core::settings::Folder;
 use windows::Win32::Foundation::{
     COLORREF, ERROR_CANCELLED, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
 };
-use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
-};
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemFree};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Ole::IOleWindow;
@@ -44,7 +41,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{Error, HRESULT, HSTRING, Interface, PCWSTR, w};
 
 use crate::win32::struct_size;
-use crate::{com, log, tray};
+use crate::{com, log, monitor, tray};
 
 const HOST_CLASS: PCWSTR = w!("ScreenGauge.SaveAs");
 
@@ -280,23 +277,17 @@ fn monitor_at(cursor: Point) -> RECT {
         x: cursor.x,
         y: cursor.y,
     };
-    // SAFETY: no pointers; the nearest monitor is always one.
-    let monitor = unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST) };
-    let mut info = MONITORINFO {
-        cbSize: const { struct_size::<MONITORINFO>() },
-        ..Default::default()
-    };
-    // SAFETY: fills a local whose size is set.
-    if unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
-        info.rcMonitor
-    } else {
-        log::failure("Save As: finding the monitor", &Error::from_thread());
-        // Save As then opens around the cursor.
-        RECT {
-            left: cursor.x,
-            top: cursor.y,
-            right: cursor.x + 1,
-            bottom: cursor.y + 1,
+    match monitor::at(point) {
+        Ok(monitor) => monitor.area,
+        Err(e) => {
+            log::failure("Save As: finding the monitor", &e);
+            // Save As then opens around the cursor.
+            RECT {
+                left: cursor.x,
+                top: cursor.y,
+                right: cursor.x + 1,
+                bottom: cursor.y + 1,
+            }
         }
     }
 }

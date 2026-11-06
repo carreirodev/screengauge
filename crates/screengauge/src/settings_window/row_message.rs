@@ -26,20 +26,10 @@ use windows::core::Error;
 
 use super::layout::{self, Grown, Row, Span};
 use super::paint::to_i32;
-use crate::graphics::{Color, Fonts, color, solid_brush};
+use crate::graphics::{Color, Fonts, solid_brush};
+use crate::look;
 use crate::relief::{self, px};
 use crate::theme::Mode;
-
-/// `--warn` in the dark and the light palette: oklch(0.82 0.14 80) and oklch(0.58 0.15 60).
-pub const DARK_WARN: Color = color(0xf3, 0xb9, 0x4c, 1.0);
-pub const LIGHT_WARN: Color = color(0xb8, 0x60, 0x00, 1.0);
-
-pub fn warn(mode: Mode) -> Color {
-    match mode {
-        Mode::Dark => DARK_WARN,
-        Mode::Light => LIGHT_WARN,
-    }
-}
 
 /// How much of `--warn` the band is (`color-mix(in oklch, var(--warn) 14%, transparent)`), and its bar's width on the
 /// row's left (`box-shadow: inset 3px 0 0 var(--warn)`).
@@ -167,11 +157,11 @@ impl Message {
         scale: f32,
     ) -> windows::core::Result<()> {
         let laid = self.layout(fonts, scale)?;
-        let ink = solid_brush(target, warn(mode))?;
+        let ink = solid_brush(target, look::palette(mode).warn)?;
         // The first line's baseline on a whole pixel, as the labels' are, so the letters stay crisp.
         let top = top + GAP * scale;
         let top = (top + laid.baseline).round() - laid.baseline;
-        super::paint::write(target, &laid.layout, left, top, &ink);
+        look::write(target, &laid.layout, left, top, &ink);
         Ok(())
     }
 }
@@ -215,7 +205,7 @@ pub fn band(
         right: width - inner_left,
         bottom: to_i32(scaled(span.bottom, dpi))?,
     };
-    let warn = warn(mode);
+    let warn = look::palette(mode).warn;
     let tint = solid_brush(
         target,
         Color {

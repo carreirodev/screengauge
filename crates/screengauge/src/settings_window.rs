@@ -31,22 +31,15 @@ use std::cell::{Cell, RefCell};
 use screengauge_core::session::toolbar::scaled;
 use screengauge_core::settings::{Folder, Options};
 use windows::Win32::Foundation::{
-    D2DERR_RECREATE_TARGET, E_FAIL, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
+    E_FAIL, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
 };
 use windows::Win32::Graphics::Direct2D::Common::D2D_SIZE_U;
-use windows::Win32::Graphics::Direct2D::ID2D1HwndRenderTarget;
+use windows::Win32::Graphics::Direct2D::{ID2D1HwndRenderTarget, ID2D1StrokeStyle};
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
-use windows::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO,
-    MonitorFromPoint, MonitorFromWindow, PAINTSTRUCT, ScreenToClient,
-};
+use windows::Win32::Graphics::Gdi::{InvalidateRect, ScreenToClient};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::HiDpi::{
-    AdjustWindowRectExForDpi, GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI,
-};
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
-};
+use windows::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForWindow};
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GW_ENABLEDPOPUP, GW_OWNER, GetClientRect,
@@ -61,22 +54,17 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, Error, HSTRING, PCWSTR, w};
 
+use crate::drawn_window::{self, WM_MOUSELEAVE};
 use crate::theme::Mode;
 use crate::win32::{contains, low_word, signed_words, struct_size};
 use crate::{
-    app_message, com, event, folder_picker, graphics, keyboard_hook, log, resident, settings_file,
-    tray, update_check,
+    app_message, com, event, folder_picker, graphics, keyboard_hook, log, monitor, resident,
+    settings_file, sign, tray, update_check,
 };
-pub use controls::dpi_scale;
 use controls::{Control, Pointer};
 use footer::Link;
-pub use paint::{background, palette, write};
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.Settings");
-
-/// The message TrackMouseEvent sends when the cursor leaves the window. The windows crate has it only among the common
-/// controls' features, which ScreenGauge doesn't otherwise need.
-const WM_MOUSELEAVE: u32 = 0x02A3;
 
 /// The title Windows shows in the title bar, on the taskbar and in Alt+Tab.
 const TITLE: PCWSTR = w!("ScreenGauge Settings");
@@ -99,6 +87,8 @@ thread_local! {
     static MODE: Cell<Mode> = const { Cell::new(Mode::Light) };
     /// Made at the first paint, and again after the scale changed or the graphics device was lost.
     static TARGET: RefCell<Option<ID2D1HwndRenderTarget>> = const { RefCell::new(None) };
+    /// The round stroke the footer's signs are drawn with, made at the first paint and kept while the window is open.
+    static STROKE: RefCell<Option<ID2D1StrokeStyle>> = const { RefCell::new(None) };
     /// Where the last paint put what a click acts on, in the window's client pixels.
     static DRAWN: RefCell<Option<paint::Drawn>> = const { RefCell::new(None) };
     /// What the left button went down on and still holds: it acts only when the button comes up on it too.
@@ -168,7 +158,12 @@ pub fn open(mode: Mode) -> windows::core::Result<()> {
 
 /// Makes Settings' window, in `mode`'s palette, and shows it in front.
 fn create(mode: Mode) -> windows::core::Result<()> {
-    let (work, dpi) = monitor_at(event::cursor_now()?)?;
+    let cursor = event::cursor_now()?;
+    let monitor = monitor::at(POINT {
+        x: cursor.x,
+        y: cursor.y,
+    })?;
+    let (work, dpi) = (monitor.work, monitor.dpi()?);
     recorder::opening();
     start_with_windows_row::opening();
     let size = window_size(dpi)?;
@@ -329,28 +324,6 @@ fn to_front(hwnd: HWND) {
     }
 }
 
-/// The work area of the monitor at `cursor`, or the nearest one, without the taskbar, and that monitor's DPI.
-fn monitor_at(cursor: screengauge_core::session::Point) -> windows::core::Result<(RECT, u32)> {
-    let point = POINT {
-        x: cursor.x,
-        y: cursor.y,
-    };
-    // SAFETY: no pointers; the nearest monitor is always one.
-    let monitor = unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST) };
-    let mut info = MONITORINFO {
-        cbSize: const { struct_size::<MONITORINFO>() },
-        ..Default::default()
-    };
-    // SAFETY: fills a local whose size is set.
-    if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
-        return Err(Error::new(E_FAIL, "GetMonitorInfoW found no monitor"));
-    }
-    let (mut dpi, mut unused) = (0, 0);
-    // SAFETY: fills two locals.
-    unsafe { GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut unused) }?;
-    Ok((info.rcWork, dpi))
-}
-
 /// The window's whole size at `dpi`, title bar and frame included, for the page's 560 logical pixels wide and its height
 /// inside, taller while a message shows under a row's label, and while "Check for updates" says something.
 fn window_size(dpi: u32) -> windows::core::Result<SIZE> {
@@ -437,17 +410,7 @@ fn fit(hwnd: HWND, dpi: u32) -> windows::core::Result<()> {
 
 /// The work area of the monitor `hwnd` is on, or the nearest one.
 fn work_area_of(hwnd: HWND) -> windows::core::Result<RECT> {
-    // SAFETY: our own window; the nearest monitor is always one.
-    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
-    let mut info = MONITORINFO {
-        cbSize: const { struct_size::<MONITORINFO>() },
-        ..Default::default()
-    };
-    // SAFETY: fills a local whose size is set.
-    if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
-        return Err(Error::new(E_FAIL, "GetMonitorInfoW found no monitor"));
-    }
-    Ok(info.rcWork)
+    Ok(monitor::of_window(hwnd)?.work)
 }
 
 /// Where the top of a window `height` tall goes, from `top`: where it is, unless its bottom would pass the bottom of
@@ -531,7 +494,7 @@ extern "system" fn window_proc(
         // Direct2D paints every pixel; erasing first would only flash.
         WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => {
-            paint(hwnd);
+            drawn_window::paint(hwnd, "Settings: drawing it", || draw(hwnd));
             LRESULT(0)
         }
         WM_SETCURSOR
@@ -550,7 +513,11 @@ extern "system" fn window_proc(
             LRESULT(1)
         }
         WM_MOUSEMOVE => {
-            track_leave(hwnd);
+            drawn_window::follow_leave(
+                hwnd,
+                &TRACKING_LEAVE,
+                "Settings: following the cursor out of the window",
+            );
             point_at(hwnd, control_at(Some(client_point(lparam))));
             LRESULT(0)
         }
@@ -653,6 +620,7 @@ extern "system" fn window_proc(
             updates::close();
             WINDOW.set(None);
             drop(TARGET.take());
+            drop(STROKE.take());
             DRAWN.set(None);
             PRESSED.set(None);
             OVER.set(None);
@@ -723,25 +691,6 @@ fn control_at(point: Option<POINT>) -> Option<Control> {
 fn point_at(hwnd: HWND, over: Option<Control>) {
     if OVER.replace(over) != over {
         invalidate(hwnd);
-    }
-}
-
-/// Asks Windows for WM_MOUSELEAVE when the cursor leaves the window, once each time it comes in.
-fn track_leave(hwnd: HWND) {
-    if TRACKING_LEAVE.get() {
-        return;
-    }
-    let mut track = TRACKMOUSEEVENT {
-        cbSize: const { struct_size::<TRACKMOUSEEVENT>() },
-        dwFlags: TME_LEAVE,
-        hwndTrack: hwnd,
-        dwHoverTime: 0,
-    };
-    // SAFETY: our own window; the struct is fully set and outlives the call.
-    match unsafe { TrackMouseEvent(&mut track) } {
-        Ok(()) => TRACKING_LEAVE.set(true),
-        // The sign may stay bright after the cursor leaves; the next move over the window asks again.
-        Err(e) => log::failure("Settings: following the cursor out of the window", &e),
     }
 }
 
@@ -890,17 +839,6 @@ fn open_address(hwnd: HWND, address: &str, what: &str) {
     }
 }
 
-fn paint(hwnd: HWND) {
-    let mut paint = PAINTSTRUCT::default();
-    // SAFETY: WM_PAINT on our own window, ended below. Direct2D draws without the device context it returns.
-    unsafe { BeginPaint(hwnd, &mut paint) };
-    if let Err(e) = draw(hwnd) {
-        log::failure("Settings: drawing it", &e);
-    }
-    // SAFETY: ends the BeginPaint above. EndPaint always returns TRUE.
-    let _ = unsafe { EndPaint(hwnd, &paint) };
-}
-
 /// Draws the page at the window's scale, onto a render target of the client area's size.
 fn draw(hwnd: HWND) -> windows::core::Result<()> {
     let mut client = RECT::default();
@@ -914,14 +852,14 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
     if size.width == 0 || size.height == 0 {
         return Ok(());
     }
-    let target = match TARGET.take() {
-        Some(target) => target,
-        None => graphics::window_target(hwnd, size)?,
-    };
     // SAFETY: our own window.
     let dpi = unsafe { GetDpiForWindow(hwnd) };
     let fonts = graphics::fonts()?;
     let factory = graphics::factory()?;
+    let stroke = STROKE.with_borrow_mut(|kept| match kept {
+        Some(stroke) => Ok(stroke.clone()),
+        None => sign::round_stroke(&factory).map(|stroke| kept.insert(stroke).clone()),
+    })?;
     let options = settings_file::current()?.options;
     let shown = paint::Shown {
         recorder: recorder::view(options.global_shortcut),
@@ -937,34 +875,27 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
             Some(Hit::Link(_)) | None => None,
         },
     };
-    let surface = paint::Surface {
-        target: &target,
-        factory: &factory,
-        fonts: &fonts,
-        mode: MODE.get(),
-        dpi,
-        width: size.width,
-    };
-    // SAFETY: drawing calls on a live render target, between BeginDraw and EndDraw.
-    unsafe { target.BeginDraw() };
-    let drawn = paint::draw(&surface, &options, pointer, &shown);
-    // SAFETY: ends the BeginDraw above.
-    match unsafe { target.EndDraw(None, None) } {
-        Ok(()) => TARGET.set(Some(target)),
-        // The graphics device was lost, as after a driver update: the next paint makes the target again.
-        Err(e) if e.code() == D2DERR_RECREATE_TARGET => {
-            redraw(hwnd);
-            return Ok(());
-        }
-        Err(e) => {
-            // The frame failed as a whole; what failed inside it, if anything, is logged so it isn't lost.
-            if let Err(inside) = drawn {
-                log::failure("Settings: drawing it", &inside);
-            }
-            return Err(e);
-        }
+    let drawn = drawn_window::frame(
+        hwnd,
+        &TARGET,
+        || graphics::window_target(hwnd, size),
+        "Settings: drawing it",
+        |target| {
+            let surface = paint::Surface {
+                target,
+                factory: &factory,
+                fonts: &fonts,
+                stroke: &stroke,
+                mode: MODE.get(),
+                dpi,
+                width: size.width,
+            };
+            paint::draw(&surface, &options, pointer, &shown)
+        },
+    )?;
+    if let Some(drawn) = drawn {
+        DRAWN.set(Some(drawn));
     }
-    DRAWN.set(Some(drawn?));
     Ok(())
 }
 

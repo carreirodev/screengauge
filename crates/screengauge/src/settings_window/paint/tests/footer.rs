@@ -174,8 +174,8 @@ fn the_latest_version_has_the_accent_s_check_mark_and_couldn_t_check_the_warning
     for mode in [Mode::Dark, Mode::Light] {
         for dpi in DPIS {
             let rows = line_rows(dpi);
-            let accent = recorder_field::accent(mode);
-            let warn = row_message::warn(mode);
+            let accent = palette(mode).accent;
+            let warn = palette(mode).warn;
             for (status, with_accent, with_warn) in [
                 (Status::Checking, false, false),
                 (Status::Answered(Answer::Latest), true, false),
@@ -268,16 +268,8 @@ fn write_the_lines_for_a_look() {
             .zip(statuses())
         {
             let page = showing(mode, 144, status);
-            let width = u32::try_from(page.width).expect("small");
-            let image = screengauge_core::session::Image::new(width, page.height, page.bgra)
-                .expect("the bitmap's size");
-            // On a thread of its own, which the encoder starts COM on in its own way.
-            let png = std::thread::spawn(move || crate::png::encode(&image))
-                .join()
-                .expect("the encoder's thread")
-                .expect("the page as a PNG");
-            std::fs::write(folder.join(format!("{mode:?}-144-update-{name}.png")), png)
-                .expect("the PNG");
+            page.image
+                .write_png(&folder.join(format!("{mode:?}-144-update-{name}.png")));
         }
     }
 }

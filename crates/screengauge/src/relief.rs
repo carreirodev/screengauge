@@ -21,8 +21,8 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP,
     D2D1_GAMMA_2_2, D2D1_LAYER_OPTIONS_NONE, D2D1_LAYER_PARAMETERS,
     D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_ROUNDED_RECT, ID2D1BitmapRenderTarget, ID2D1Brush,
-    ID2D1Factory, ID2D1Geometry, ID2D1Layer, ID2D1PathGeometry, ID2D1RenderTarget,
-    ID2D1RoundedRectangleGeometry, ID2D1SolidColorBrush, ID2D1StrokeStyle,
+    ID2D1Factory, ID2D1Geometry, ID2D1Layer, ID2D1LinearGradientBrush, ID2D1PathGeometry,
+    ID2D1RenderTarget, ID2D1RoundedRectangleGeometry, ID2D1SolidColorBrush, ID2D1StrokeStyle,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::core::{Error, Interface};
@@ -555,30 +555,39 @@ impl<'a> Canvas<'a> {
         top: f32,
         bottom: f32,
     ) -> windows::core::Result<()> {
-        let stops: Vec<D2D1_GRADIENT_STOP> = stops
-            .iter()
-            .map(|stop| D2D1_GRADIENT_STOP {
-                position: stop.at,
-                color: d2d_color(stop.color.rgb, stop.color.alpha),
-            })
-            .collect();
-        // SAFETY: the stops outlive the call, which copies them.
-        let collection = unsafe {
-            self.target
-                .CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)
-        }?;
-        let mut line = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES::default();
-        line.startPoint.X = shape.rect.left;
-        line.startPoint.Y = top;
-        line.endPoint.X = shape.rect.left;
-        line.endPoint.Y = bottom;
-        // SAFETY: the line and the collection outlive the call, which keeps its own reference to the collection.
-        let brush = unsafe {
-            self.target
-                .CreateLinearGradientBrush(&line, None, &collection)
-        }?;
+        let brush = gradient(self.target, stops, shape.rect.left, top, bottom)?;
         // SAFETY: a drawing call on a live render target with arguments that outlive it, as in `fill`.
         unsafe { self.target.FillRoundedRectangle(shape, &brush) };
         Ok(())
     }
+}
+
+/// A brush for `target` of `stops` running down from `top` to `bottom` at `x`, in the target's pixels. Colors blend
+/// in sRGB, as CSS does, and the first and last colors go on past the ends. Settings' and the tray icon's menu's
+/// background is painted with it too (`look`).
+pub fn gradient(
+    target: &ID2D1RenderTarget,
+    stops: &[Stop],
+    x: f32,
+    top: f32,
+    bottom: f32,
+) -> windows::core::Result<ID2D1LinearGradientBrush> {
+    let stops: Vec<D2D1_GRADIENT_STOP> = stops
+        .iter()
+        .map(|stop| D2D1_GRADIENT_STOP {
+            position: stop.at,
+            color: d2d_color(stop.color.rgb, stop.color.alpha),
+        })
+        .collect();
+    // SAFETY: the stops outlive the call, which copies them.
+    let collection = unsafe {
+        target.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)
+    }?;
+    let mut line = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES::default();
+    line.startPoint.X = x;
+    line.startPoint.Y = top;
+    line.endPoint.X = x;
+    line.endPoint.Y = bottom;
+    // SAFETY: the line and the collection outlive the call, which keeps its own reference to the collection.
+    unsafe { target.CreateLinearGradientBrush(&line, None, &collection) }
 }

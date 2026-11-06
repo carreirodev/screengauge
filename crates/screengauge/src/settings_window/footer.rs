@@ -12,11 +12,10 @@ use windows::Win32::Graphics::Direct2D::{
 };
 use windows::Win32::Graphics::DirectWrite::{DWRITE_FONT_WEIGHT_NORMAL, IDWriteTextFormat};
 
-use super::controls::dpi_scale;
 use super::layout::{self, Span};
-use super::paint::{Palette, Placed, Surface, draw_text, place, px, text, whole, width_of};
-use super::{recorder_field, row_message};
+use super::paint::{Placed, Surface, draw_text, place, text, width_of};
 use crate::graphics::solid_brush;
+use crate::look::{self, Palette, dpi_scale, px, whole};
 use crate::update_check::Answer;
 
 /// The footer's left text: the version this exe was built as, and the license.
@@ -195,15 +194,15 @@ fn right_aligned(
                 let left = right - side;
                 // Centered on the text's line, as `align-items: center` puts it.
                 let top = (line.top + (line.height - side) / 2.0).round();
+                let palette = look::palette(on.mode);
                 let color = match sign {
-                    Sign::Ok => recorder_field::accent(on.mode),
-                    Sign::Alert => row_message::warn(on.mode),
+                    Sign::Ok => palette.accent,
+                    Sign::Alert => palette.warn,
                 };
-                let stroke = crate::sign::round_stroke(on.factory)?;
                 let pen = crate::sign::Pen {
                     target,
                     factory: on.factory,
-                    stroke: &stroke,
+                    stroke: on.stroke,
                 };
                 crate::sign::draw(&pen, &solid_brush(target, color)?, *sign, left, top, side)?;
                 right = left - line.gap;

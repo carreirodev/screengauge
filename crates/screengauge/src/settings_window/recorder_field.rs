@@ -16,6 +16,7 @@ use super::row_message::Text;
 use super::{layout, snip_card};
 
 use crate::graphics::{Color, color};
+use crate::look;
 use crate::relief::palette::{self as relief_palette, Shadow, Surface, shadow};
 use crate::relief::{self, Canvas};
 use crate::theme::Mode;
@@ -87,19 +88,8 @@ const BUTTON_HEIGHT: u32 = snip_card::FIELD_HEIGHT;
 const BUTTON_PADDING: u32 = snip_card::BUTTON_PADDING;
 const BUTTON_GAP: u32 = layout::ROW_GAP;
 
-/// `--accent` in the dark and the light palette, oklch(0.8 0.13 200) and oklch(0.55 0.15 235), as the tools' notices
-/// have it (`frozen_screen::overlay::palette`): the recording field's border, and its ring at 30%
+/// The recording field's ring: `look`'s `--accent` at 30%
 /// (`box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 30%, transparent)`).
-const DARK_ACCENT: Color = color(0x28, 0xd6, 0xdf, 1.0);
-const LIGHT_ACCENT: Color = color(0x00, 0x7c, 0xbb, 1.0);
-
-/// `--accent` in `mode`: also the check mark before "Check for updates"' "You're on the latest version." (`footer`).
-pub fn accent(mode: Mode) -> Color {
-    match mode {
-        Mode::Dark => DARK_ACCENT,
-        Mode::Light => LIGHT_ACCENT,
-    }
-}
 const DARK_RING: [Shadow; 1] = [shadow(0, 0, 3, color(0x28, 0xd6, 0xdf, 0.3))];
 const LIGHT_RING: [Shadow; 1] = [shadow(0, 0, 3, color(0x00, 0x7c, 0xbb, 0.3))];
 
@@ -298,9 +288,10 @@ impl Laid {
 pub fn paint(canvas: &Canvas, laid: &Laid, mode: Mode) -> windows::core::Result<()> {
     let relief = relief_palette::palette(mode);
     let well = controls::colors(mode).well;
-    let (accent, ring) = match mode {
-        Mode::Dark => (DARK_ACCENT, &DARK_RING),
-        Mode::Light => (LIGHT_ACCENT, &LIGHT_RING),
+    let accent = look::palette(mode).accent;
+    let ring = match mode {
+        Mode::Dark => &DARK_RING,
+        Mode::Light => &LIGHT_RING,
     };
     if laid.recording {
         // The ring replaces the well's inset shadow, and is cut out under the see-through well.
@@ -333,7 +324,7 @@ pub fn paint(canvas: &Canvas, laid: &Laid, mode: Mode) -> windows::core::Result<
 /// The words the field shows, in `mode`, centered in their boxes.
 pub fn labels(laid: &Laid, mode: Mode) -> Vec<Label> {
     let relief = relief_palette::palette(mode);
-    let dim = super::paint::palette(mode).dim;
+    let dim = look::palette(mode).dim;
     let label = |place: RECT, text: &str, ink: Color, kind: LabelKind| Label {
         place,
         text: text.to_owned(),

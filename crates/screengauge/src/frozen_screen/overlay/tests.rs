@@ -1,39 +1,24 @@
 //! What the overlay's tests share: a bitmap to draw on, the window they draw in, Dimensions' measurements to draw, and
 //! what their pixels should be.
 
-use std::ptr;
-
-use windows::Win32::Graphics::Direct2D::Common::{
-    D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
-};
-use windows::Win32::Graphics::Direct2D::{
-    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT, D2D1_RENDER_TARGET_PROPERTIES,
-    D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1_RENDER_TARGET_USAGE_NONE, D2D1CreateFactory,
-    ID2D1Factory,
-};
-use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
-use windows::Win32::Graphics::Imaging::{
-    CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICBitmap, IWICImagingFactory,
-    WICBitmapCacheOnDemand,
-};
-use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
 use super::*;
-use crate::com::TestCom;
+use crate::test_bitmap;
 use screengauge_core::session::Measured;
 
 pub(super) const CYAN: [u8; 3] = [0x22, 0xd3, 0xee];
 pub(super) const BACKGROUND: [u8; 3] = [200, 120, 60];
 
-/// A bitmap a render target draws on in software, so no monitor or graphics card is needed.
+/// A bitmap a render target draws on in software, so no monitor or graphics card is needed: `test_bitmap`'s, with the
+/// fonts the overlay is drawn with.
 pub(super) struct Canvas {
     pub(super) target: ID2D1RenderTarget,
-    bitmap: IWICBitmap,
     pub(super) fonts: Fonts,
     pub(super) width: u32,
     pub(super) height: u32,
-    /// Last, so it drops last.
-    _com: TestCom,
+    /// Last, so the bitmap and COM go once everything drawn with them is dropped.
+    bitmap: test_bitmap::Canvas,
 }
 
 /// The canvas as rows of [r, g, b] pixels.
@@ -50,47 +35,13 @@ impl Picture {
 
 impl Canvas {
     pub(super) fn new(width: u32, height: u32) -> Canvas {
-        let com = TestCom::start();
-        // SAFETY: COM is started for this thread.
-        let wic: IWICImagingFactory =
-            unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER) }
-                .expect("the WIC factory");
-        // SAFETY: plain values, and a pixel format that outlives the call.
-        let bitmap = unsafe {
-            wic.CreateBitmap(
-                width,
-                height,
-                &GUID_WICPixelFormat32bppPBGRA,
-                WICBitmapCacheOnDemand,
-            )
-        }
-        .expect("a WIC bitmap");
-        // SAFETY: a single-threaded factory used only on this thread.
-        let factory: ID2D1Factory =
-            unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None) }
-                .expect("the Direct2D factory");
-        // Software, and 96 DPI like the windows' render targets: one unit is one pixel.
-        let properties = D2D1_RENDER_TARGET_PROPERTIES {
-            r#type: D2D1_RENDER_TARGET_TYPE_SOFTWARE,
-            pixelFormat: D2D1_PIXEL_FORMAT {
-                format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
-            },
-            dpiX: 96.0,
-            dpiY: 96.0,
-            usage: D2D1_RENDER_TARGET_USAGE_NONE,
-            minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
-        };
-        // SAFETY: the bitmap and the properties outlive the call.
-        let target = unsafe { factory.CreateWicBitmapRenderTarget(&bitmap, &properties) }
-            .expect("a render target on the bitmap");
+        let bitmap = test_bitmap::Canvas::new(width, height);
         Canvas {
-            target,
-            bitmap,
+            target: bitmap.target.clone(),
             fonts: Fonts::new().expect("the fonts"),
             width,
             height,
-            _com: com,
+            bitmap,
         }
     }
 
@@ -123,32 +74,15 @@ impl Canvas {
             b: f32::from(b) / 255.0,
             a: 1.0,
         };
-        // SAFETY: drawing calls between BeginDraw and EndDraw on a live target.
-        unsafe {
-            self.target.BeginDraw();
-            self.target.Clear(Some(&background));
-        }
-        draw(&overlay, &self.target);
-        // SAFETY: ends the BeginDraw above.
-        unsafe { self.target.EndDraw(None, None) }.expect("the drawing is finished");
-        self.read()
-    }
-
-    fn read(&self) -> Picture {
-        let stride = self.width * 4;
-        let mut bytes = vec![0; (stride * self.height) as usize];
-        // SAFETY: no rectangle copies the whole bitmap, into a buffer of exactly its size.
-        unsafe { self.bitmap.CopyPixels(ptr::null(), stride, &mut bytes) }
-            .expect("the pixels are read");
+        let drawn = self.bitmap.draw(|target, _| {
+            // SAFETY: a drawing call between BeginDraw and EndDraw on a live target.
+            unsafe { target.Clear(Some(&background)) };
+            draw(&overlay, target);
+        });
         Picture {
-            width: self.width as usize,
-            // The bitmap is blue, green, red and alpha; every pixel here is opaque.
-            pixels: bytes
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|&[b, g, r, _]| [r, g, b])
-                .collect(),
+            width: usize::try_from(drawn.width).expect("a small canvas"),
+            // Every pixel here is opaque.
+            pixels: drawn.pixels,
         }
     }
 }

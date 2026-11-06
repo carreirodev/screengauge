@@ -12,6 +12,7 @@ use windows::Win32::Foundation::RECT;
 
 use super::snip_card;
 use crate::graphics::{Color, color};
+use crate::look::{self, dpi_scale};
 use crate::relief::palette::{self as relief_palette, Shadow, Stop, Surface, rgb, shadow, stop};
 use crate::relief::{Canvas, Motion};
 use crate::theme::Mode;
@@ -74,12 +75,12 @@ pub struct Colors {
 
 pub const DARK: Colors = Colors {
     well: color(0, 0, 0, 0.38),
-    ink: rgb(0xe9, 0xeb, 0xef),
+    ink: look::DARK.ink,
 };
 
 pub const LIGHT: Colors = Colors {
     well: color(70, 60, 45, 0.11),
-    ink: rgb(0x1d, 0x1c, 0x1a),
+    ink: look::LIGHT.ink,
 };
 
 pub fn colors(mode: Mode) -> &'static Colors {
@@ -236,12 +237,6 @@ pub fn rounded(logical: f32, dpi: u32) -> i32 {
     debug_assert!((0.0..1e6).contains(&pixels), "{pixels}");
     // A control's size is a few hundred pixels at most, which the cast keeps exactly.
     pixels as i32
-}
-
-/// How many pixels a logical pixel is at `dpi`.
-pub fn dpi_scale(dpi: u32) -> f32 {
-    // A DPI is a few hundred at most, which a float holds exactly, so the cast loses nothing.
-    dpi as f32 / 96.0
 }
 
 /// The switch at the right of the row from `top` to `bottom`, in the window's pixels.

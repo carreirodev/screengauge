@@ -1,8 +1,9 @@
 //! The tray icon's menu drawn onto any Direct2D render target at 96 DPI, so a test can render it on a bitmap and look at
-//! its pixels. Its looks come from Settings' (WPC-279's `#settings` tokens): the window's background, its rows' labels,
-//! and its cards' edge for the border Windows draws and for the row under the mouse or the arrow keys.
+//! its pixels. Its looks are the ones it shares with Settings (`look`, WPC-279's `#settings` tokens): the window's
+//! background, the rows' labels, and the cards' edge for the border Windows draws and for the row under the mouse or
+//! the arrow keys.
 
-use windows::Win32::Foundation::{E_FAIL, RECT};
+use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D1_FIGURE_BEGIN_HOLLOW, D2D1_FIGURE_END_OPEN,
 };
@@ -10,14 +11,14 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND,
     D2D1_ROUNDED_RECT, D2D1_STROKE_STYLE_PROPERTIES, ID2D1RenderTarget, ID2D1SolidColorBrush,
 };
-use windows::Win32::Graphics::DirectWrite::{DWRITE_FONT_WEIGHT_NORMAL, DWRITE_LINE_METRICS};
-use windows::core::Error;
+use windows::Win32::Graphics::DirectWrite::DWRITE_FONT_WEIGHT_NORMAL;
 
 use super::layout::{self, Item};
 use crate::graphics::{Fonts, over, solid_brush};
+use crate::look::{background, dpi_scale, palette, write};
 use crate::relief::{dot, px, scaled};
-use crate::settings_window::{background, dpi_scale, palette, write};
 use crate::theme::Mode;
+use crate::typeset::Typeset;
 
 /// Draws the menu at `dpi` in `mode`'s palette, with `lit`'s row tinted, and the check mark of "Start with Windows" when
 /// it is `checked`.
@@ -66,20 +67,11 @@ pub fn draw(
                 .factory
                 .CreateTextLayout(&text, &format, 4096.0, 4096.0)
         }?;
-        let mut metrics = [DWRITE_LINE_METRICS::default()];
-        let mut lines = 0;
-        // SAFETY: fills a one-line buffer, and fails should the label need more.
-        unsafe { label.GetLineMetrics(Some(&mut metrics), &mut lines) }?;
-        let [metrics] = metrics;
-        if lines != 1 {
-            return Err(Error::new(E_FAIL, "a menu label took more than one line"));
-        }
-        // Centered in its row, with the baseline on a whole pixel so the letters stay crisp, as Settings' labels.
-        let baseline =
-            (px(row.top) + (px(row.bottom - row.top) - metrics.height) / 2.0 + metrics.baseline)
-                .round();
+        // Centered in its row, with the baseline on a whole pixel so the letters stay crisp, as Settings' labels. A label
+        // that would need a second line fails to be measured.
         let left = px(row.left + scaled(layout::LABEL_INSET, dpi));
-        write(target, &label, left, baseline - metrics.baseline, &ink);
+        let placed = Typeset::of(label)?.in_line(left, px(row.top), px(row.bottom - row.top));
+        write(target, &placed.layout, placed.left, placed.top, &ink);
     }
     if checked {
         check_mark(
@@ -149,8 +141,8 @@ mod tests {
     use super::*;
     use crate::graphics::Fonts;
     use crate::graphics::over;
+    use crate::look::palette;
     use crate::relief::scaled;
-    use crate::settings_window::palette;
     use crate::test_bitmap::{Picture, drawn, near};
 
     fn menu(mode: Mode, dpi: u32, lit: Option<Item>) -> Picture {
