@@ -10,7 +10,9 @@ use windows::Win32::Graphics::DirectWrite::{
 
 use crate::graphics::font_family;
 
-use super::panel_tests::{MODES, at, inside, over, pixels, rect, strongest_green, tokens};
+use super::panel_tests::{
+    MODES, at, inside, over, panel_shadow_reach, pixels, rect, strongest_green, tokens,
+};
 use super::tests::{
     BACKGROUND, Canvas, MONITOR, Picture, SCALES, horizontal, near, point, text_width, with_logical,
 };
@@ -526,10 +528,9 @@ fn an_indicators_shadow_falls_below_it_and_nothing_is_drawn_beyond_it() {
             assert!(below[0] > 120, "{below:?} is only a shadow, {context}");
             // The shadow's reach beyond the panel on the sides and above it, and 10 further below. Beyond it the photo is as
             // it was, to the last pixel.
-            // Three deviations of the dark palette's blur (CSS 28px, a deviation of 14), less the spread of 8, and a pixel for
-            // the antialiased corners: the blur's own reach, since WPC-393 put the panels' shadow on `relief`'s blur. It reaches a
-            // few pixels further than the fixed layers did, which the owner approved on 2026-11-06 (WPC-393).
-            let reach = (84 * dpi).div_ceil(192).cast_signed() - scaled(8, dpi) + 1;
+            // The shadow's reach reaches a few pixels further than the fixed layers did before WPC-393, which the owner approved
+            // on 2026-11-06 (WPC-393).
+            let reach = panel_shadow_reach(dpi);
             let drop = scaled(10, dpi);
             let reached = rect(
                 d.panel.left - reach,

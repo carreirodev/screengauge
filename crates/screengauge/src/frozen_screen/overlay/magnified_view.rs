@@ -8,8 +8,6 @@
 //! model. Where the core hands over a rectangle, it is used as it is; the rest of the sizes below are the prototype's,
 //! in logical pixels, which `scaled` turns into physical pixels for the monitor's scale, each one on its own.
 
-use std::mem::ManuallyDrop;
-
 use screengauge_core::session::{
     ApproximateColor, ColorText, Coordinate, MagnifiedView, NoticeLine, PixelColor, Rect, Sign,
 };
@@ -17,9 +15,8 @@ use windows::Win32::Foundation::{E_FAIL, RECT};
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
     D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_DRAW_TEXT_OPTIONS_NONE,
-    D2D1_LAYER_OPTIONS_NONE, D2D1_LAYER_PARAMETERS, D2D1_ROUNDED_RECT,
-    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1Bitmap, ID2D1Geometry, ID2D1Layer, ID2D1RenderTarget,
-    ID2D1StrokeStyle,
+    D2D1_ROUNDED_RECT, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1Bitmap, ID2D1Geometry,
+    ID2D1RenderTarget, ID2D1StrokeStyle,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_BOLD, IDWriteTextFormat,
@@ -29,6 +26,7 @@ use windows::core::{Error, Interface};
 use super::geometry::{self, scaled};
 use super::{LOGICAL_OPACITY, Overlay, PlacedLogical, dot, px, ring, rounded_at};
 use crate::graphics::d2d_color;
+use crate::relief;
 use crate::typeset::{PlacedText, Typeset};
 
 // Every size below is in logical pixels, which `scaled` turns into physical pixels for the monitor's scale.
@@ -237,32 +235,13 @@ impl Overlay {
         self.draw_floating_panel(target, &geometry::bounds(view.panel)?, PANEL_RADIUS)?;
 
         let enlargement = self.in_window(&places.enlargement);
-        // `D2D1_LAYER_PARAMETERS::default()` is all zeros: no content, no opacity and a transform that squashes the mask
-        // to a point, so everything the layer is meant to carry is set.
-        let mut parameters = D2D1_LAYER_PARAMETERS {
-            contentBounds: enlargement,
-            geometricMask: ManuallyDrop::new(Some(mask)),
-            maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-            opacity: 1.0,
-            layerOptions: D2D1_LAYER_OPTIONS_NONE,
-            ..D2D1_LAYER_PARAMETERS::default()
-        };
-        // The mask is in the window's pixels already, so the transform leaves it where it is. The matrix is the windows
-        // crate's own type from windows-numerics, which ScreenGauge doesn't name; the default's entries are all zero.
-        parameters.maskTransform.M11 = 1.0;
-        parameters.maskTransform.M22 = 1.0;
-        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
-        // Direct2D only fails the frame at EndDraw. The layer is managed by Direct2D (it is Windows 8 and later, and
-        // ScreenGauge is Windows 11 only), and the pop below follows with nothing between that can return.
-        unsafe { target.PushLayer(&parameters, None::<&ID2D1Layer>) };
-        self.draw_enlargement(target, photo, &places, view);
-        if let Some(magnification_indicator) = &magnification_indicator {
-            self.draw_magnification_indicator(target, magnification_indicator);
-        }
-        // SAFETY: pops the layer pushed above, once.
-        unsafe { target.PopLayer() };
-        // The layer kept its own reference to the mask until the pop; this one is released here, once.
-        drop(ManuallyDrop::into_inner(parameters.geometricMask));
+        // The enlargement and the magnification indicator are clipped to the enlargement's rounded corners.
+        relief::in_layer(target, enlargement, Some(mask), || {
+            self.draw_enlargement(target, photo, &places, view);
+            if let Some(magnification_indicator) = &magnification_indicator {
+                self.draw_magnification_indicator(target, magnification_indicator);
+            }
+        });
 
         self.draw_readout(target, &lines);
         self.draw_color(target, &color);

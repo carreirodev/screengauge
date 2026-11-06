@@ -14,7 +14,7 @@ use windows::Win32::Graphics::Direct2D::Common::{
 use windows::Win32::Graphics::Direct2D::{D2D1_BITMAP_PROPERTIES, ID2D1Bitmap};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 
-use super::panel_tests::{MODES, inside, over, rect, tokens};
+use super::panel_tests::{MODES, inside, over, panel_shadow_reach, rect, tokens};
 use super::tests::{BACKGROUND, Canvas, Picture, near};
 use super::*;
 
@@ -1059,10 +1059,9 @@ fn the_panel_has_its_border_and_a_shadow_that_falls_below_it_and_reaches_no_furt
                 below[0] < BACKGROUND[0],
                 "{below:?} is not darkened, {context}"
             );
-            // Three deviations of the dark palette's blur (CSS 28px, a deviation of 14), less the spread of 8, and a pixel for
-            // the antialiased corners: the blur's own reach, since WPC-393 put the panels' shadow on `relief`'s blur. It reaches a
-            // few pixels further than the fixed layers did, which the owner approved on 2026-11-06 (WPC-393).
-            let reach = (84 * dpi).div_ceil(192).cast_signed() - scaled(8, dpi) + 1;
+            // The shadow's reach reaches a few pixels further than the fixed layers did before WPC-393, which the owner approved
+            // on 2026-11-06 (WPC-393).
+            let reach = panel_shadow_reach(dpi);
             let drop = scaled(10, dpi);
             let reached = rect(
                 panel.left - reach,
@@ -1089,7 +1088,8 @@ fn the_shadow_is_within_4_hundredths_of_opacity_of_the_prototypes_below_and_besi
     // of sigma half the blur radius, of the panel's box shrunk by 8 on every side and moved 10 down. The panel is much
     // taller than the blur, so down its middle the box is an edge: below the panel the edge is 2 further down than the
     // panel's bottom, and beside it 8 further in. The notice's layers made stronger, before WPC-393, were up to 0.06 lighter
-    // right under the panel; `relief`'s blur of the panel's own box is within 0.04 of it.
+    // right under the panel; `relief`'s blur of the panel's own box is within 0.04 of it, in the pixels the owner approved
+    // on 2026-11-06 (WPC-393).
     let canvas = Canvas::new(640, 640);
     let photo = photo(&canvas);
     for (mode, alpha, sigma, shadow) in [

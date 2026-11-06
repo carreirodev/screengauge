@@ -80,6 +80,13 @@ pub(super) fn pixels(area: RECT) -> impl Iterator<Item = (i32, i32)> {
     (area.top..area.bottom).flat_map(move |y| (area.left..area.right).map(move |x| (x, y)))
 }
 
+/// How far a floating panel's shadow reaches past the panel at `dpi`, on the sides and above it: three deviations of
+/// the dark palette's blur (CSS 28px, a deviation of 14, more than the light one's), less the spread of 8, and a pixel
+/// for the antialiased corners. Below, it reaches the drop of 10 further.
+pub(super) fn panel_shadow_reach(dpi: u32) -> i32 {
+    (84 * dpi).div_ceil(192).cast_signed() - scaled(8, dpi) + 1
+}
+
 pub(super) fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
     RECT {
         left,

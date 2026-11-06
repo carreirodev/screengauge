@@ -21,8 +21,8 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP,
     D2D1_GAMMA_2_2, D2D1_LAYER_OPTIONS_NONE, D2D1_LAYER_PARAMETERS,
     D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_ROUNDED_RECT, ID2D1BitmapRenderTarget, ID2D1Brush,
-    ID2D1Factory, ID2D1Geometry, ID2D1Layer, ID2D1RenderTarget, ID2D1RoundedRectangleGeometry,
-    ID2D1SolidColorBrush, ID2D1StrokeStyle,
+    ID2D1Factory, ID2D1Geometry, ID2D1Layer, ID2D1PathGeometry, ID2D1RenderTarget,
+    ID2D1RoundedRectangleGeometry, ID2D1SolidColorBrush, ID2D1StrokeStyle,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::core::{Error, Interface};
@@ -157,19 +157,64 @@ pub fn fill_except(
     brush: &ID2D1SolidColorBrush,
 ) -> windows::core::Result<()> {
     let shape = geometry_of(factory, shape)?;
+    let cut = excluding(factory, &shape, hole)?;
+    // SAFETY: a drawing call on a live render target with arguments that outlive it. Out of BeginDraw and EndDraw,
+    // Direct2D only fails the frame at EndDraw.
+    unsafe { target.FillGeometry(&cut, brush, None::<&ID2D1Brush>) };
+    Ok(())
+}
+
+/// `shape` less `hole`, as one geometry. Both are in the same pixels.
+pub fn excluding(
+    factory: &ID2D1Factory,
+    shape: &ID2D1Geometry,
+    hole: &ID2D1Geometry,
+) -> windows::core::Result<ID2D1PathGeometry> {
     // SAFETY: no arguments.
     let cut = unsafe { factory.CreatePathGeometry() }?;
     // SAFETY: no arguments.
     let sink = unsafe { cut.Open() }?;
     // SAFETY: the geometries and the sink outlive the call, which keeps nothing of them. No transform: both are already
-    // in the target's pixels.
+    // in the same pixels.
     unsafe { shape.CombineWithGeometry(hole, D2D1_COMBINE_MODE_EXCLUDE, None, FLATTENING, &sink) }?;
     // SAFETY: closes the sink opened above, once.
     unsafe { sink.Close() }?;
+    Ok(cut)
+}
+
+/// Runs `paint` with what it draws on `target` gathered on a transparent layer of its own, which is then laid over what
+/// the target holds: only inside `bounds`, in the target's pixels, and, when there is a `mask` (in the same pixels),
+/// only inside it, with its edge antialiased.
+pub fn in_layer<T>(
+    target: &ID2D1RenderTarget,
+    bounds: D2D_RECT_F,
+    mask: Option<ID2D1Geometry>,
+    paint: impl FnOnce() -> T,
+) -> T {
+    // `D2D1_LAYER_PARAMETERS::default()` is all zeros: no content, no opacity and a transform that squashes the mask to a
+    // point, so everything the layer is meant to carry is set.
+    let mut parameters = D2D1_LAYER_PARAMETERS {
+        contentBounds: bounds,
+        geometricMask: ManuallyDrop::new(mask),
+        maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+        opacity: 1.0,
+        layerOptions: D2D1_LAYER_OPTIONS_NONE,
+        ..D2D1_LAYER_PARAMETERS::default()
+    };
+    // The mask is in the target's pixels already, so the transform leaves it where it is. The matrix is the windows
+    // crate's own type from windows-numerics, which ScreenGauge doesn't name; the default's entries are all zero.
+    parameters.maskTransform.M11 = 1.0;
+    parameters.maskTransform.M22 = 1.0;
     // SAFETY: a drawing call on a live render target with arguments that outlive it. Out of BeginDraw and EndDraw,
-    // Direct2D only fails the frame at EndDraw.
-    unsafe { target.FillGeometry(&cut, brush, None::<&ID2D1Brush>) };
-    Ok(())
+    // Direct2D only fails the frame at EndDraw. The layer is managed by Direct2D (Windows 8 and later, and ScreenGauge
+    // is Windows 11 only), and it is popped below whatever `paint` returns.
+    unsafe { target.PushLayer(&parameters, None::<&ID2D1Layer>) };
+    let painted = paint();
+    // SAFETY: pops the layer pushed above, once.
+    unsafe { target.PopLayer() };
+    // The layer kept its own reference to the mask until the pop; this one is released here, once.
+    drop(ManuallyDrop::into_inner(parameters.geometricMask));
+    painted
 }
 
 /// A render target on a transparent bitmap of `width` by `height` pixels, compatible with `target`: what shadows are
@@ -417,49 +462,17 @@ impl<'a> Canvas<'a> {
         // Everything the layers cover, and a pixel more for their antialiased corners.
         let grown = outer.spread + outer.layers.reach() + 1;
         let reach = self.shape(rect, 0, grown, outer.drop).rect;
-        let mask: Option<ID2D1Geometry> = if see_through {
+        let mask = if see_through {
             let hole = geometry_of(self.factory, &self.shape(rect, radius, 0, 0))?;
             // SAFETY: the rectangle outlives the call, which keeps nothing of it.
             let all = unsafe { self.factory.CreateRectangleGeometry(&reach) }?;
-            // SAFETY: no arguments.
-            let cut = unsafe { self.factory.CreatePathGeometry() }?;
-            // SAFETY: no arguments.
-            let sink = unsafe { cut.Open() }?;
-            // SAFETY: the geometries and the sink outlive the call, which keeps nothing of them. No transform: both are
-            // already in the target's pixels.
-            unsafe {
-                all.CombineWithGeometry(&hole, D2D1_COMBINE_MODE_EXCLUDE, None, FLATTENING, &sink)
-            }?;
-            // SAFETY: closes the sink opened above, once.
-            unsafe { sink.Close() }?;
-            Some(cut.cast()?)
+            Some(excluding(self.factory, &all, &hole)?.cast()?)
         } else {
             None
         };
-        // `D2D1_LAYER_PARAMETERS::default()` is all zeros: no content, no opacity and a transform that squashes the mask
-        // to a point, so everything the layer is meant to carry is set.
-        let mut parameters = D2D1_LAYER_PARAMETERS {
-            contentBounds: reach,
-            geometricMask: ManuallyDrop::new(mask),
-            maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-            opacity: 1.0,
-            layerOptions: D2D1_LAYER_OPTIONS_NONE,
-            ..D2D1_LAYER_PARAMETERS::default()
-        };
-        // The mask is in the target's pixels already, so the transform leaves it where it is. The matrix is the windows
-        // crate's own type from windows-numerics, which ScreenGauge doesn't name; the default's entries are all zero.
-        parameters.maskTransform.M11 = 1.0;
-        parameters.maskTransform.M22 = 1.0;
-        // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
-        // Direct2D only fails the frame at EndDraw. The layer is managed by Direct2D (Windows 8 and later, and
-        // ScreenGauge is Windows 11 only), and it is popped below whatever painting the layers returned.
-        unsafe { self.target.PushLayer(&parameters, None::<&ID2D1Layer>) };
-        let painted = self.outer_layers(&outer, shadow.color.rgb, rect, radius, None);
-        // SAFETY: pops the layer pushed above, once.
-        unsafe { self.target.PopLayer() };
-        // The layer kept its own reference to the mask until the pop; this one is released here, once.
-        drop(ManuallyDrop::into_inner(parameters.geometricMask));
-        painted
+        in_layer(self.target, reach, mask, || {
+            self.outer_layers(&outer, shadow.color.rgb, rect, radius, None)
+        })
     }
 
     /// An outer shadow of the box `rect`: the box moved down by the shadow's drop and grown by its spread, blurred.
