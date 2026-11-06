@@ -1,5 +1,5 @@
-//! Render tests of the magnified view's readout, its coordinates and its color with the swatch and the Approximate color
-//! notice, on a WIC bitmap like the rest of `magnified_view_tests`, whose photo and fixtures they use.
+//! Render tests of the magnified view's readout, its coordinates and its color with the swatch and the Approximate
+//! color notice, on a WIC bitmap like the rest of `magnified_view_tests`, whose photo and fixtures they use.
 
 use screengauge_core::session::{Coordinate, Label, MagnifiedView};
 use screengauge_core::settings::Magnification;

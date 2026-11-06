@@ -44,9 +44,10 @@ impl Typeset {
         })
     }
 
-    /// Where the text's baseline goes for it to sit in a line `line` pixels tall whose top is at `top`, the way CSS puts
-    /// it there: the line's extra room, above and below the text's own height, is shared equally. It is on a whole pixel,
-    /// so the letters are crisp. Texts that share a line sit on the baseline one of them gets here (`on_baseline`).
+    /// Where the text's baseline goes for it to sit in a line `line` pixels tall whose top is at `top`, the way CSS
+    /// puts it there: the line's extra room, above and below the text's own height, is shared equally. It is on a
+    /// whole pixel, so the letters are crisp. Texts that share a line sit on the baseline one of them gets here
+    /// (`on_baseline`).
     pub fn baseline_in(&self, top: f32, line: f32) -> f32 {
         (top + (line - self.line_height) / 2.0 + self.baseline).round()
     }
