@@ -201,7 +201,8 @@ fn check_photos(photos: Vec<Option<Photo>>, cards: &[Card]) -> Vec<Vec<Check>> {
     checks
 }
 
-/// The pixel check of one card's photo. The photo's scale needs no check of its own: the labels' logical pixels show it.
+/// The pixel check of one card's photo. The photo's scale needs no check of its own: the labels' logical pixels show
+/// it.
 fn photo_checks(photo: Option<&Photo>, card: Card) -> Vec<Check> {
     match photo {
         Some(photo) => vec![identical_check(photo, card)],
@@ -295,8 +296,8 @@ fn session_at(session: &mut Session, at: Point) -> Result<Measurement, String> {
         .ok_or_else(|| format!("Dimensions measured nothing at ({}, {})", at.x, at.y))
 }
 
-/// Whether `measured` is the whole of `shape`, on the card's monitor, and its label says so: the physical pixels exactly,
-/// and the logical ones at the card's scale, to the tenth the label shows them.
+/// Whether `measured` is the whole of `shape`, on the card's monitor, and its label says so: the physical pixels
+/// exactly, and the logical ones at the card's scale, to the tenth the label shows them.
 fn measure_check(
     measured: Result<Measurement, String>,
     card: Card,

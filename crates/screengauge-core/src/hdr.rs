@@ -29,8 +29,8 @@ impl SdrWhiteLevel {
 
 /// The photo of a monitor from its 16-bit desktop image: `height` rows of `width` pixels from the top, `pitch` bytes
 /// apart in `rows`, each pixel the red, green, blue and alpha halves (IEEE 754, little-endian) of
-/// `DXGI_FORMAT_R16G16B16A16_FLOAT`. The alpha says nothing, and every pixel comes out opaque. `None` when `rows` is too
-/// short for that or the image too large to address.
+/// `DXGI_FORMAT_R16G16B16A16_FLOAT`. The alpha says nothing, and every pixel comes out opaque. `None` when `rows` is
+/// too short for that or the image too large to address.
 pub fn convert(
     rows: &[u8],
     pitch: usize,

@@ -18,8 +18,8 @@ use crate::win32::struct_size;
 /// How many times the list of monitors is asked for again when it changes between asking its size and reading it.
 const TRIES: usize = 3;
 
-/// The monitors showing the desktop, as DisplayConfig lists them: one path per monitor, from the desktop's source to the
-/// monitor that shows it.
+/// The monitors showing the desktop, as DisplayConfig lists them: one path per monitor, from the desktop's source to
+/// the monitor that shows it.
 pub(super) struct SdrWhiteLevels {
     paths: Vec<DISPLAYCONFIG_PATH_INFO>,
 }
