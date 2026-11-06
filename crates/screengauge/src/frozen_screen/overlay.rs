@@ -15,6 +15,8 @@ mod label_tests;
 mod line_tests;
 mod magnified_view;
 #[cfg(test)]
+mod magnified_view_readout_tests;
+#[cfg(test)]
 mod magnified_view_tests;
 mod notice;
 #[cfg(test)]
