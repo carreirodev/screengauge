@@ -56,19 +56,30 @@ const NOTICE_SECOND: &str = "(HDR on)";
 /// The lowest magnification with a grid between the enlarged pixels.
 const GRID_FROM: Magnification = Magnification::X8;
 
+/// How the readout shows the cursor's position and the color, as Settings says.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ReadoutOptions {
+    /// "Also show logical pixels": whether the position shows them too on a monitor whose scale isn't 100%.
+    pub(super) also_show_logical_pixels: bool,
+    /// "Color format": HEX, RGB or both.
+    pub(super) color_format: ColorFormat,
+}
+
 /// The magnified view around `center`, the pixel under the cursor, on `photo`'s monitor, the frozen screen's monitor
-/// `monitor`: at `magnification`, with its magnification indicator while `magnification_indicator`, the cursor's
-/// position with its logical pixels when `also_show_logical_pixels` and the monitor's scale isn't 100%, and the pixel's
-/// color in `color_format`.
+/// `monitor`: at `magnification`, with its magnification indicator while `magnification_indicator`, and the readout
+/// as `readout` says.
 pub(super) fn magnified_view(
     photo: &Photo,
     monitor: usize,
     center: Point,
     magnification: Magnification,
     magnification_indicator: bool,
-    also_show_logical_pixels: bool,
-    color_format: ColorFormat,
+    readout: ReadoutOptions,
 ) -> MagnifiedView {
+    let ReadoutOptions {
+        also_show_logical_pixels,
+        color_format,
+    } = readout;
     let dpi = photo.scale.dpi();
     let factor = magnification.factor();
     let across = pixels_across(dpi, magnification);

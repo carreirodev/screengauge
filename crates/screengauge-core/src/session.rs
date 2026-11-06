@@ -1214,8 +1214,10 @@ impl Session {
             center,
             self.remembered.magnification,
             self.magnification_indicator_until.is_some(),
-            self.also_show_logical_pixels,
-            self.color_format,
+            magnified_view::ReadoutOptions {
+                also_show_logical_pixels: self.also_show_logical_pixels,
+                color_format: self.color_format,
+            },
         ))
     }
 
