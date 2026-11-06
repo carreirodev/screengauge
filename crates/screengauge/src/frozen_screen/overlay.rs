@@ -745,7 +745,10 @@ impl Overlay {
 }
 
 /// A measured width rounded up to whole pixels, so the pill never cuts into the text. Widths are a few hundred pixels
-/// at most, far inside `i32`.
+/// at most, far inside `i32`, so the cast keeps the whole value; past `i32` it would saturate without a word, which
+/// only the assertion watches for, and only in a debug build.
+// TODO: convert with a checked float-to-integer conversion once the standard library has one, so a width past `i32`
+// fails instead of saturating.
 fn whole_up(width: f32) -> i32 {
     debug_assert!((0.0..1e6).contains(&width), "a label {width} pixels wide");
     width.ceil() as i32
