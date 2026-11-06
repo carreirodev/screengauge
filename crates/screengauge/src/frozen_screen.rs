@@ -40,10 +40,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, HWND_TOPMOST, IDC_ARROW, IDC_CROSS, KillTimer, LoadCursorW, PostMessageW,
     RegisterClassExW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetCursor,
     SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, USER_TIMER_MAXIMUM,
-    USER_TIMER_MINIMUM, WM_CAPTURECHANGED, WM_CLOSE, WM_DISPLAYCHANGE, WM_ERASEBKGND, WM_HOTKEY,
-    WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
-    WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDCLASSEXW,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    USER_TIMER_MINIMUM, WM_CLOSE, WM_DISPLAYCHANGE, WM_ERASEBKGND, WM_NCCREATE, WM_NCDESTROY,
+    WM_PAINT, WM_TIMER, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{Error, PCWSTR, w};
 
@@ -620,6 +618,11 @@ extern "system" fn window_proc(
         _ => {}
     }
     let handled = with_state(hwnd, |window| {
+        // The mouse, the wheel and the keys go to the core through `input`, which knows which messages they are. One it
+        // leaves to Windows' default, as a system key, comes on to the match below, which has no arm for it either.
+        if let Some(result) = input::route(hwnd, window, message, wparam, lparam) {
+            return Some(result);
+        }
         let deliver = |input: Input| {
             window.session.input(input);
             Some(LRESULT(0))
@@ -629,10 +632,6 @@ extern "system" fn window_proc(
             WM_PAINT => {
                 paint(hwnd, window);
                 Some(LRESULT(0))
-            }
-            WM_SETCURSOR | WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_CAPTURECHANGED
-            | WM_MOUSEWHEEL | WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP | WM_HOTKEY => {
-                input::route(hwnd, window, message, wparam, lparam)
             }
             // Alt+F4: the core closes the tools as a whole, never one monitor's window alone.
             WM_CLOSE => deliver(Input::CloseAsked),

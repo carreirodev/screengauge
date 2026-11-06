@@ -37,7 +37,7 @@ impl Pressed {
 }
 
 /// Hands `message` to the session core when it is the mouse, the wheel or a key over `window`, and says what the window
-/// procedure returns for it: `None` for Windows' default.
+/// procedure returns for it: `None` for Windows' default, and for any other message, which the procedure handles.
 pub(super) fn route(
     hwnd: HWND,
     window: &Window,
