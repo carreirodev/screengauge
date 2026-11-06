@@ -36,6 +36,8 @@ mod toolbar_cache;
 mod toolbar_icons;
 mod toolbar_paint;
 #[cfg(test)]
+mod toolbar_reaction_tests;
+#[cfg(test)]
 mod toolbar_tests;
 #[cfg(test)]
 mod typeset_tests;
