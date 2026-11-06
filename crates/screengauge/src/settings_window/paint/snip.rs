@@ -13,7 +13,7 @@ use windows::Win32::Graphics::DirectWrite::{
 use windows::core::Error;
 
 use super::{Placed, Rows, draw_text, place, px_i, text, to_i32, width_of};
-use crate::settings_window::controls::{self, Control, Laid};
+use crate::settings_window::controls::{self, Control, Laid, RowEnd};
 use crate::settings_window::layout::{self, Page, Span};
 use crate::settings_window::snip_card::{self, DESTINATIONS};
 
@@ -40,14 +40,15 @@ impl Rows<'_> {
         let top = snip_card::top_of(page)
             .ok_or_else(|| Error::new(E_FAIL, "the page has no Snip block"))?;
         let parts = snip_card::parts(top, snip_card::note_shown(options));
-        let rows = |span: Span| -> windows::core::Result<(i32, i32)> {
-            Ok((
-                to_i32(scaled(span.top, dpi))?,
-                to_i32(scaled(span.bottom, dpi))?,
-            ))
-        };
         let inner = to_i32(scaled(layout::ROW_INSET, dpi))?;
         let right = to_i32(on.width)? - inner;
+        let rows = |span: Span| -> windows::core::Result<RowEnd> {
+            Ok(RowEnd {
+                right,
+                top: to_i32(scaled(span.top, dpi))?,
+                bottom: to_i32(scaled(span.bottom, dpi))?,
+            })
+        };
         let (destination, save, field) = (
             rows(parts.destination)?,
             rows(parts.save)?,
@@ -55,47 +56,38 @@ impl Rows<'_> {
         );
 
         self.row_label(snip_card::DESTINATION_LABEL, inner, destination)?;
-        self.separator(to_i32(on.width)?, save.0)?;
+        self.separator(to_i32(on.width)?, save.top)?;
         self.row_label(snip_card::SAVE_LABEL, inner, save)?;
         if let Some(note) = parts.note {
-            let (top, bottom) = rows(note)?;
+            let note = rows(note)?;
             let line = place(
                 text(fonts, snip_card::NOTE, &self.note, None)?,
                 px_i(inner),
-                px_i(top),
-                px_i(bottom - top),
+                px_i(note.top),
+                px_i(note.bottom - note.top),
             )?;
             draw_text(on.target, &line, &self.dim);
         }
 
-        let mut choices = Vec::new();
-        for (destination, word) in DESTINATIONS {
-            let width = width_of(&text(fonts, word, &self.segment, None)?)?;
-            choices.push((
-                Control::SnipDestination(destination),
-                word,
-                width,
-                options.snip_destination == destination,
-            ));
-        }
         let button = controls::button_place(
             &self.canvas,
-            width_of(&text(fonts, snip_card::CHANGE_WORD, &self.segment, None)?)?,
-            right,
-            field.0,
-            field.1,
+            width_of(&self.segment_text(snip_card::CHANGE_WORD)?)?,
+            field,
         );
         let gap = to_i32(scaled(snip_card::FIELD_GAP, dpi))?;
-        let path = controls::path_place(&self.canvas, inner, button.left - gap, field.0, field.1);
+        let path = controls::path_place(&self.canvas, inner, field.ending_at(button.left - gap));
         let laid = vec![
-            controls::choice(&self.canvas, &choices, right, destination.0, destination.1),
+            self.choice(
+                &DESTINATIONS,
+                options.snip_destination,
+                Control::SnipDestination,
+                destination,
+            )?,
             controls::switch(
                 &self.canvas,
                 Control::SaveToDefaultFolder,
                 options.default_folder.is_on(),
-                right,
-                save.0,
-                save.1,
+                save,
             ),
             Laid::Path { place: path },
             Laid::Button {
@@ -115,14 +107,9 @@ impl Rows<'_> {
     }
 
     /// A row's label at `left`, centered in the row from top to bottom, as the other rows' are.
-    fn row_label(
-        &self,
-        words: &str,
-        left: i32,
-        (top, bottom): (i32, i32),
-    ) -> windows::core::Result<()> {
+    fn row_label(&self, words: &str, left: i32, row: RowEnd) -> windows::core::Result<()> {
         let line = layout::LABEL_LINE * self.scale;
-        let at = px_i(top) + (px_i(bottom - top) - line) / 2.0;
+        let at = px_i(row.top) + (px_i(row.bottom - row.top) - line) / 2.0;
         let label = place(
             text(self.on.fonts, words, &self.label, None)?,
             px_i(left),

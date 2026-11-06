@@ -220,14 +220,30 @@ impl Laid {
     }
 }
 
-/// A box `width` by `height` pixels whose right side is at `right`, centered in the row from `top` to `bottom`.
-pub fn at_right(right: i32, top: i32, bottom: i32, width: i32, height: i32) -> RECT {
-    let top = top + (bottom - top - height) / 2;
-    RECT {
-        left: right - width,
-        top,
-        right,
-        bottom: top + height,
+/// The right end of a row, where its control goes: the row runs from `top` to `bottom`, and the control ends at
+/// `right`, in the window's pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RowEnd {
+    pub right: i32,
+    pub top: i32,
+    pub bottom: i32,
+}
+
+impl RowEnd {
+    /// A box `width` by `height` pixels whose right side is at `right`, centered in the row.
+    pub fn place(self, width: i32, height: i32) -> RECT {
+        let top = self.top + (self.bottom - self.top - height) / 2;
+        RECT {
+            left: self.right - width,
+            top,
+            right: self.right,
+            bottom: top + height,
+        }
+    }
+
+    /// The same row, ending at `right` instead: for a control that sits left of another.
+    pub fn ending_at(self, right: i32) -> Self {
+        Self { right, ..self }
     }
 }
 
@@ -239,35 +255,20 @@ pub fn rounded(logical: f32, dpi: u32) -> i32 {
     pixels as i32
 }
 
-/// The switch at the right of the row from `top` to `bottom`, in the window's pixels.
-pub fn switch(
-    canvas: &Canvas,
-    control: Control,
-    on: bool,
-    right: i32,
-    top: i32,
-    bottom: i32,
-) -> Laid {
+/// The switch at the row's `end`.
+pub fn switch(canvas: &Canvas, control: Control, on: bool, end: RowEnd) -> Laid {
     Laid::Switch {
         control,
-        track: at_right(
-            right,
-            top,
-            bottom,
-            canvas.scaled(SWITCH_WIDTH),
-            canvas.scaled(SWITCH_HEIGHT),
-        ),
+        track: end.place(canvas.scaled(SWITCH_WIDTH), canvas.scaled(SWITCH_HEIGHT)),
         on,
     }
 }
 
-/// The choice at the right of the row, with `choices` and their words' widths in pixels, as DirectWrite lays them out.
+/// The choice at the row's `end`, with `choices` and their words' widths in pixels, as DirectWrite lays them out.
 pub fn choice(
     canvas: &Canvas,
     choices: &[(Control, &'static str, f32, bool)],
-    right: i32,
-    top: i32,
-    bottom: i32,
+    end: RowEnd,
 ) -> Laid {
     let padding = canvas.scaled(WELL_PADDING);
     let height = rounded(SEGMENT_HEIGHT, canvas.dpi);
@@ -278,7 +279,7 @@ pub fn choice(
         .collect();
     // The well's padding on the left, then each segment with the room after it.
     let width = padding + widths.iter().map(|width| width + padding).sum::<i32>();
-    let well = at_right(right, top, bottom, width, height + 2 * padding);
+    let well = end.place(width, height + 2 * padding);
     let mut left = well.left + padding;
     let segments = choices
         .iter()
@@ -297,19 +298,16 @@ pub fn choice(
     Laid::Choice { well, segments }
 }
 
-/// − / + at the right of the row, around `value`.
-pub fn stepper(canvas: &Canvas, value: u8, right: i32, top: i32, bottom: i32) -> Laid {
+/// − / + at the row's `end`, around `value`.
+pub fn stepper(canvas: &Canvas, value: u8, end: RowEnd) -> Laid {
     let side = canvas.scaled(STEP_BUTTON);
     let gap = canvas.scaled(STEP_GAP);
-    let plus = at_right(right, top, bottom, side, side);
-    let number = at_right(
-        plus.left - gap,
-        top,
-        bottom,
+    let plus = end.place(side, side);
+    let number = end.ending_at(plus.left - gap).place(
         canvas.scaled(NUMBER_WIDTH),
         rounded(NUMBER_HEIGHT, canvas.dpi),
     );
-    let minus = at_right(number.left - gap, top, bottom, side, side);
+    let minus = end.ending_at(number.left - gap).place(side, side);
     Laid::Stepper {
         minus,
         number,
@@ -318,18 +316,17 @@ pub fn stepper(canvas: &Canvas, value: u8, right: i32, top: i32, bottom: i32) ->
     }
 }
 
-/// Where a button whose word is `word_width` pixels wide goes: at the right of the row from `top` to `bottom`, as tall
-/// as the folder's line.
-pub fn button_place(canvas: &Canvas, word_width: f32, right: i32, top: i32, bottom: i32) -> RECT {
+/// Where a button whose word is `word_width` pixels wide goes: at the row's `end`, as tall as the folder's line.
+pub fn button_place(canvas: &Canvas, word_width: f32, end: RowEnd) -> RECT {
     let width = whole_up(word_width) + 2 * canvas.scaled(snip_card::BUTTON_PADDING);
     let height = canvas.scaled(snip_card::FIELD_HEIGHT);
-    at_right(right, top, bottom, width, height)
+    end.place(width, height)
 }
 
-/// Where the path's box goes: from `left` to `right`, as tall as the button beside it, in the row from `top` to `bottom`.
-pub fn path_place(canvas: &Canvas, left: i32, right: i32, top: i32, bottom: i32) -> RECT {
+/// Where the path's box goes: from `left` to the row's `end`, as tall as the button beside it.
+pub fn path_place(canvas: &Canvas, left: i32, end: RowEnd) -> RECT {
     let height = canvas.scaled(snip_card::FIELD_HEIGHT);
-    at_right(right, top, bottom, right - left, height)
+    end.place(end.right - left, height)
 }
 
 /// A measured width rounded up to whole pixels, so a segment never cuts into its word. Widths are a few hundred pixels
@@ -638,7 +635,12 @@ mod tests {
     #[test]
     fn a_box_at_the_right_is_centered_in_its_row() {
         assert_eq!(
-            at_right(500, 100, 142, 42, 24),
+            RowEnd {
+                right: 500,
+                top: 100,
+                bottom: 142
+            }
+            .place(42, 24),
             RECT {
                 left: 458,
                 top: 109,

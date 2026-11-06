@@ -20,7 +20,7 @@ use windows::Win32::Graphics::DirectWrite::{
 };
 use windows::core::{Error, Interface};
 
-use super::controls::{self, Control, Label, LabelKind, Laid, Pointer};
+use super::controls::{self, Control, Label, LabelKind, Laid, Pointer, RowEnd};
 use super::footer::{self, Link, Status};
 use super::layout::{self, Grown, Page, Row};
 use super::recorder_field::{self, View};
@@ -144,6 +144,28 @@ impl<'a> Rows<'a> {
         })
     }
 
+    /// The choice at the row's `end`: a segment for each of `options` with its word, the one equal to `chosen` lit,
+    /// and `control` naming what a click on each acts on.
+    fn choice<T: Copy + PartialEq>(
+        &self,
+        options: &[(T, &'static str)],
+        chosen: T,
+        control: fn(T) -> Control,
+        end: RowEnd,
+    ) -> windows::core::Result<Laid> {
+        let mut segments = Vec::with_capacity(options.len());
+        for &(option, word) in options {
+            let width = width_of(&self.segment_text(word)?)?;
+            segments.push((control(option), word, width, option == chosen));
+        }
+        Ok(controls::choice(&self.canvas, &segments, end))
+    }
+
+    /// `word` laid out in the font of a choice's segment.
+    fn segment_text(&self, word: &str) -> windows::core::Result<IDWriteTextLayout> {
+        text(self.on.fonts, word, &self.segment, None)
+    }
+
     /// Each row's band, line above it, label, note, message and control, and where its control's parts are, on `page`.
     fn draw(
         &self,
@@ -193,7 +215,7 @@ impl<'a> Rows<'a> {
             }
             self.texts(row, message.as_ref(), px_i(inner), top, bottom)?;
             // Each block's controls are laid out in the block's own file.
-            let place = (right, top, bottom);
+            let place = RowEnd { right, top, bottom };
             let control = match row {
                 Row::GlobalShortcut => self.shortcut(shown, &measure, place, &mut laid)?,
                 Row::StartWithWindows => self.start_with_windows(shown, place),

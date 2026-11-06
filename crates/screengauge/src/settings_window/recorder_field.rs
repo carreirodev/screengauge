@@ -11,7 +11,7 @@ use std::time::Duration;
 use screengauge_core::settings::{Modifiers, Refusal, Shortcut};
 use windows::Win32::Foundation::RECT;
 
-use super::controls::{self, Control, Label, LabelKind, at_right, rounded, whole_up};
+use super::controls::{self, Control, Label, LabelKind, RowEnd, rounded, whole_up};
 use super::row_message::Text;
 use super::{layout, snip_card};
 
@@ -185,19 +185,17 @@ fn words(view: &View) -> Vec<(LabelKind, String)> {
     words
 }
 
-/// Lays out the field and Reset at the right of the row from `top` to `bottom`, at `dpi`, with `measure` giving a word's
-/// width in pixels in the font of its kind: the field, and where Reset goes.
+/// Lays out the field and Reset at the row's `end`, at `dpi`, with `measure` giving a word's width in pixels in the font
+/// of its kind: the field, and where Reset goes.
 pub fn lay(
     view: &View,
     dpi: u32,
     measure: &dyn Fn(&str, LabelKind) -> windows::core::Result<f32>,
-    right: i32,
-    top: i32,
-    bottom: i32,
+    end: RowEnd,
 ) -> windows::core::Result<(Laid, RECT)> {
     let scaled = |logical: u32| relief::scaled(logical, dpi);
     let reset_width = whole_up(measure(RESET, LabelKind::Segment)?) + 2 * scaled(BUTTON_PADDING);
-    let reset = at_right(right, top, bottom, reset_width, scaled(BUTTON_HEIGHT));
+    let reset = end.place(reset_width, scaled(BUTTON_HEIGHT));
     let words = words(view);
     let mut widths = Vec::with_capacity(words.len());
     for (kind, word) in &words {
@@ -213,13 +211,9 @@ pub fn lay(
     let count = i32::try_from(widths.len()).unwrap_or(i32::MAX);
     let content = widths.iter().sum::<i32>() + gap * (count - 1).max(0);
     let width = (2 * (border + scaled(FIELD_PADDING)) + content).max(scaled(FIELD_MIN_WIDTH));
-    let field = at_right(
-        reset.left - scaled(BUTTON_GAP),
-        top,
-        bottom,
-        width,
-        scaled(FIELD_HEIGHT),
-    );
+    let field = end
+        .ending_at(reset.left - scaled(BUTTON_GAP))
+        .place(width, scaled(FIELD_HEIGHT));
     let keycap_height = rounded(KEYCAP_HEIGHT, dpi);
     let mut left = field.left + border + scaled(FIELD_PADDING);
     let pieces = words
@@ -234,10 +228,15 @@ pub fn lay(
             };
             left += width + gap;
             match kind {
-                LabelKind::Keycap => Piece::Key(
-                    at_right(line.right, field.top, field.bottom, width, keycap_height),
-                    word,
-                ),
+                LabelKind::Keycap => {
+                    // Centered in the field's height, which the line inside its border shares.
+                    let in_field = RowEnd {
+                        right: line.right,
+                        top: field.top,
+                        bottom: field.bottom,
+                    };
+                    Piece::Key(in_field.place(width, keycap_height), word)
+                }
                 LabelKind::Plus => Piece::Plus(line),
                 _ if word == WAITING => Piece::Waiting(line, WAITING),
                 _ => Piece::Waiting(line, PRESS_THE_KEYS),
@@ -284,7 +283,16 @@ pub fn message_room(
     let right = i32::try_from(layout::WIDTH - inner).unwrap_or(i32::MAX);
     let mut left_most = right;
     for view in [resting, recording] {
-        let (laid, _) = lay(&view, 96, measure, right, 0, 42)?;
+        let (laid, _) = lay(
+            &view,
+            96,
+            measure,
+            RowEnd {
+                right,
+                top: 0,
+                bottom: 42,
+            },
+        )?;
         left_most = left_most.min(laid.field.left);
     }
     let left = i32::try_from(inner).unwrap_or(0);
@@ -526,6 +534,13 @@ mod tests {
         );
     }
 
+    /// The row the tests lay the field in: 42 pixels tall, ending at 531.
+    const ROW: RowEnd = RowEnd {
+        right: 531,
+        top: 100,
+        bottom: 142,
+    };
+
     /// Every word 10 pixels wide, a key 30 with its room, at 100%.
     fn ten(_: &str, _: LabelKind) -> windows::core::Result<f32> {
         Ok(10.0)
@@ -533,8 +548,7 @@ mod tests {
 
     #[test]
     fn the_field_is_at_least_156_wide_left_of_reset_and_both_are_centered_in_the_row() {
-        let (laid, reset) =
-            lay(&view(false, Modifiers::default()), 96, &ten, 531, 100, 142).expect("laid");
+        let (laid, reset) = lay(&view(false, Modifiers::default()), 96, &ten, ROW).expect("laid");
         // Reset: its word and 11 either side, 30 tall, against the right; the field 10 left of it, 32 tall.
         assert_eq!(
             reset,
@@ -571,7 +585,7 @@ mod tests {
             .expect("allowed"),
             ..view(false, Modifiers::default())
         };
-        let (laid, _) = lay(&all, 96, &ten, 531, 100, 142).expect("laid");
+        let (laid, _) = lay(&all, 96, &ten, ROW).expect("laid");
         // Five keys of 24 (10 and 7 either side), four plus signs of 10, eight gaps of 4, 8 of room and a border either
         // side: 120 + 40 + 32 + 18.
         assert_eq!(laid.field.right - laid.field.left, 210);

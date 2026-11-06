@@ -2,23 +2,21 @@
 
 use screengauge_core::settings::Options;
 
-use super::{Rows, width_of};
-use crate::settings_window::controls::{self, COLOR_FORMATS, Control, Laid};
+use super::Rows;
+use crate::settings_window::controls::{COLOR_FORMATS, Control, Laid, RowEnd};
 
 impl Rows<'_> {
-    /// The color format's choice, with the format `options` hold lit, at the right of the row from `top` to `bottom`,
-    /// ending at `right`.
+    /// The color format's choice, with the format `options` hold lit, at the row's `end`.
     pub(super) fn color_format(
         &self,
         options: &Options,
-        (right, top, bottom): (i32, i32, i32),
+        end: RowEnd,
     ) -> windows::core::Result<Laid> {
-        let mut choices = Vec::new();
-        for (format, word) in COLOR_FORMATS {
-            let width = width_of(&self.segment_text(word)?)?;
-            let chosen = options.color_format == format;
-            choices.push((Control::ColorFormat(format), word, width, chosen));
-        }
-        Ok(controls::choice(&self.canvas, &choices, right, top, bottom))
+        self.choice(
+            &COLOR_FORMATS,
+            options.color_format,
+            Control::ColorFormat,
+            end,
+        )
     }
 }
