@@ -373,9 +373,9 @@ fn place(window: HWND, monitor: &Monitor) {
     }
 }
 
-/// The page alone, from ScreenGauge's photo of the monitor at `index` of `monitor`: from two photos in a row that agree,
-/// so Chrome is done drawing at the monitor's scale. Refused when the photo's colors aren't the ones drawn, or no
-/// photo shows the page in 10 s, with the last reason.
+/// The page alone, from ScreenGauge's photo of the monitor at `index` of `monitor`: from two photos in a row that
+/// agree, so Chrome is done drawing at the monitor's scale. Refused when the photo's colors aren't the ones drawn, or
+/// no photo shows the page in 10 s, with the last reason.
 fn photograph_page(index: usize, monitor: &Monitor) -> Result<(Image, String), String> {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut last: Option<Image> = None;
@@ -409,7 +409,8 @@ fn photograph_page(index: usize, monitor: &Monitor) -> Result<(Image, String), S
             Err(e) if Instant::now() >= deadline => {
                 return Err(with_photo(e, &photo.image, &monitor.device));
             }
-            // Chrome may still be moving the window or drawing at the new scale: the reason is kept only at the deadline.
+            // Chrome may still be moving the window or drawing at the new scale: the reason is kept only at the
+            // deadline.
             Err(_) => last = None,
         }
         if Instant::now() >= deadline {
@@ -579,7 +580,8 @@ mod tests {
     }
 
     /// The page as test-page.html draws it at 125%, as far as [`drawn_as_the_page`] looks: white, with the blue card
-    /// `card-200x120` at (30, 30) and 250 × 150, moved down by `shift` rows, and `then` applied as (x, y, blue-green-red).
+    /// `card-200x120` at (30, 30) and 250 × 150, moved down by `shift` rows, and `then` applied as (x, y,
+    /// blue-green-red).
     fn page_at_125(shift: u32, then: &[(u32, u32, [u8; 3])]) -> Image {
         // Written out, not taken from BLUE: #1E90FF as blue, green, red.
         let blue = [0xFF, 0x90, 0x1E];
