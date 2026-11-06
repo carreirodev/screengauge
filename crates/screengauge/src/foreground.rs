@@ -12,16 +12,15 @@
 
 use std::cell::Cell;
 
-use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM, WPARAM};
+use windows::Win32::Foundation::{E_FAIL, HWND};
 use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EVENT_SYSTEM_FOREGROUND, GetForegroundWindow, GetWindowThreadProcessId, PostMessageW,
-    WINEVENT_OUTOFCONTEXT,
+    EVENT_SYSTEM_FOREGROUND, GetForegroundWindow, GetWindowThreadProcessId, WINEVENT_OUTOFCONTEXT,
 };
 use windows::core::Error;
 
-use crate::app_message::{OTHER_PROGRAM_IN_FRONT, OWN_WINDOW_IN_FRONT};
+use crate::app_message::{self, OTHER_PROGRAM_IN_FRONT, OWN_WINDOW_IN_FRONT};
 use crate::{log, settings_window, tray_menu};
 
 thread_local! {
@@ -127,10 +126,8 @@ extern "system" fn on_foreground(
         this_process,
         settings_window::is(front) || settings_window::owns(front) || tray_menu::is(front),
     );
-    // SAFETY: a window of this thread; should it be closed already, PostMessageW fails and says so. The message
-    // carries nothing.
-    let posted = unsafe { PostMessageW(Some(window), message, WPARAM(0), LPARAM(0)) };
-    if let Err(e) = posted {
+    // A window of this thread; should it be closed already, the post fails and says so.
+    if let Err(e) = app_message::post(window, message) {
         log::failure("foreground: telling the frozen screen", &e);
     }
 }

@@ -21,12 +21,11 @@ use std::time::Duration;
 
 use screengauge_core::settings::Shortcut;
 use windows::UI::Notifications::ToastNotification;
-use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
+use windows::Win32::Foundation::{E_FAIL, HWND};
 use windows::core::Error;
 
 use self::toast::Clicks;
-use crate::app_message::{NOTIFICATION_EVENTS_READY, SHOW_WAITING_NOTIFICATIONS};
+use crate::app_message::{self, NOTIFICATION_EVENTS_READY, SHOW_WAITING_NOTIFICATIONS};
 use crate::{com, log, package, settings_file};
 
 /// A notification Windows dismissed sooner than this after it was shown never appeared in the corner: with "Do not
@@ -272,15 +271,7 @@ pub fn capture_succeeded() {
 /// Shows the notifications waiting once the messages already posted to `window` are handled: at startup, after the
 /// call's photo, so a notification never lands in it; when the call opened the tools, after they close.
 pub fn post_show_waiting(window: HWND) {
-    // SAFETY: the resident window; the message carries nothing.
-    if let Err(e) = unsafe {
-        PostMessageW(
-            Some(window),
-            SHOW_WAITING_NOTIFICATIONS,
-            WPARAM(0),
-            LPARAM(0),
-        )
-    } {
+    if let Err(e) = app_message::post(window, SHOW_WAITING_NOTIFICATIONS) {
         log::failure("notification: posting the ones waiting", &e);
     }
 }
@@ -330,16 +321,8 @@ fn report(event: Event) -> windows::core::Result<()> {
     if window.is_null() {
         return Err(Error::new(E_FAIL, "no resident window to tell"));
     }
-    // SAFETY: the resident window; the message carries nothing. Should it be gone, as at exit, the call fails, and the
-    // event stays queued for nothing.
-    unsafe {
-        PostMessageW(
-            Some(HWND(window)),
-            NOTIFICATION_EVENTS_READY,
-            WPARAM(0),
-            LPARAM(0),
-        )
-    }
+    // Should the window be gone, as at exit, the post fails, and the event stays queued for nothing.
+    app_message::post(HWND(window), NOTIFICATION_EVENTS_READY)
 }
 
 /// The latest notification of a kind shown by this process, and what Windows told of it.

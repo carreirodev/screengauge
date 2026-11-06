@@ -11,12 +11,11 @@ use std::panic;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
-use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
+use windows::Win32::Foundation::HWND;
 
 use super::footer::Status;
 use crate::update_check::{self, Answer, Click};
-use crate::{log, package};
+use crate::{app_message, log, package};
 
 thread_local! {
     /// What the line under the footer says, from the click on, while the window is open.
@@ -74,15 +73,8 @@ fn ask(hwnd: HWND) {
                 return;
             }
             let window = HWND(std::ptr::with_exposed_provenance_mut(window));
-            // SAFETY: a message with no pointers, to a window that may be gone already, which PostMessageW reports.
-            if let Err(e) = unsafe {
-                PostMessageW(
-                    Some(window),
-                    crate::app_message::UPDATE_CHECKED,
-                    WPARAM(0),
-                    LPARAM(0),
-                )
-            } {
+            // The window may be gone already, which the post reports.
+            if let Err(e) = app_message::post(window, app_message::UPDATE_CHECKED) {
                 log::failure("Check for updates: telling Settings the answer", &e);
             }
         });

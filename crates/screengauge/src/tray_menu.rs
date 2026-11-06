@@ -244,15 +244,7 @@ pub fn is_open() -> bool {
 
 /// Posts `OPENED_OR_CLOSED` to `resident`. A failure leaves the tray icon's tip as it was until the next one.
 fn tell_resident(resident: HWND) {
-    // SAFETY: the resident window, on this thread; the message carries nothing.
-    if let Err(e) = unsafe {
-        PostMessageW(
-            Some(resident),
-            app_message::TRAY_MENU_OPENED_OR_CLOSED,
-            WPARAM(0),
-            LPARAM(0),
-        )
-    } {
+    if let Err(e) = app_message::post(resident, app_message::TRAY_MENU_OPENED_OR_CLOSED) {
         log::failure("tray menu: telling the tray icon it opened or closed", &e);
     }
 }

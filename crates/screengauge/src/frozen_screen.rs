@@ -37,7 +37,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
-    GetWindowLongPtrW, HWND_TOPMOST, IDC_ARROW, IDC_CROSS, KillTimer, LoadCursorW, PostMessageW,
+    GetWindowLongPtrW, HWND_TOPMOST, IDC_ARROW, IDC_CROSS, KillTimer, LoadCursorW,
     RegisterClassExW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetCursor,
     SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, USER_TIMER_MAXIMUM,
     USER_TIMER_MINIMUM, WM_CLOSE, WM_DISPLAYCHANGE, WM_ERASEBKGND, WM_NCCREATE, WM_NCDESTROY,
@@ -474,16 +474,7 @@ impl SharedSession {
             }
         }
         // Should the message be lost, the resident window still takes the effects with the next global shortcut.
-        // SAFETY: posts to the resident window, which outlives the frozen screen.
-        let posted = unsafe {
-            PostMessageW(
-                Some(self.resident),
-                app_message::EFFECTS_READY,
-                WPARAM(0),
-                LPARAM(0),
-            )
-        };
-        if let Err(e) = posted {
+        if let Err(e) = app_message::post(self.resident, app_message::EFFECTS_READY) {
             log::failure("frozen screen: handing effects to the resident window", &e);
         }
     }
@@ -644,16 +635,7 @@ extern "system" fn window_proc(
             // the core from the message loop. Each window passes it on; the first closes the tools, and the core takes
             // nothing after.
             WM_DISPLAYCHANGE => {
-                // SAFETY: our own window; the message carries nothing.
-                let posted = unsafe {
-                    PostMessageW(
-                        Some(hwnd),
-                        app_message::MONITORS_CHANGED,
-                        WPARAM(0),
-                        LPARAM(0),
-                    )
-                };
-                if let Err(e) = posted {
+                if let Err(e) = app_message::post(hwnd, app_message::MONITORS_CHANGED) {
                     log::failure("frozen screen: passing on a change of monitors", &e);
                 }
                 Some(LRESULT(0))
