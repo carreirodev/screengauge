@@ -22,7 +22,7 @@ dependencies = [
 
 [[package]]
 name = "screengauge"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "screengauge-core",
  "windows",
@@ -31,11 +31,11 @@ dependencies = [
 
 [[package]]
 name = "screengauge-core"
-version = "0.1.0"
+version = "1.0.0"
 
 [[package]]
 name = "screengauge-icons"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "windows",
 ]

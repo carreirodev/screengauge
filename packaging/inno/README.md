@@ -50,7 +50,7 @@ pwsh -File packaging\inno\make-installer.ps1
 Run the installer, or install with no window at all:
 
 ```
-target\installer\ScreenGauge-0.1.0-setup.exe /VERYSILENT
+target\installer\ScreenGauge-1.0.0-setup.exe /VERYSILENT
 ```
 
 A silent install never opens ScreenGauge at the end.
