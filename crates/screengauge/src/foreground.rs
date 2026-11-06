@@ -17,17 +17,12 @@ use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
     EVENT_SYSTEM_FOREGROUND, GetForegroundWindow, GetWindowThreadProcessId, PostMessageW,
-    WINEVENT_OUTOFCONTEXT, WM_APP,
+    WINEVENT_OUTOFCONTEXT,
 };
 use windows::core::Error;
 
+use crate::app_message::{OTHER_PROGRAM_IN_FRONT, OWN_WINDOW_IN_FRONT};
 use crate::{log, settings_window, tray_menu};
-
-/// What a [`Watch`] posts to the window it tells when another program came to the front.
-pub const OTHER_PROGRAM_IN_FRONT: u32 = WM_APP + 3;
-
-/// What a [`Watch`] posts to the window it tells when one of ScreenGauge's own windows came to the front.
-pub const OWN_WINDOW_IN_FRONT: u32 = WM_APP + 6;
 
 thread_local! {
     /// The live [`Watch`]'s hook and the window it tells. The hook's callback gets no context of its own, so it finds

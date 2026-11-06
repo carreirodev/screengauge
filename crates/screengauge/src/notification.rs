@@ -21,18 +21,11 @@ use std::time::Duration;
 
 use screengauge_core::settings::Shortcut;
 use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
+use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 use windows::core::Error;
 
+use crate::app_message::{NOTIFICATION_EVENTS_READY, SHOW_WAITING_NOTIFICATIONS};
 use crate::{com, log, package, settings_file};
-
-/// Posted to the resident window to show the notifications waiting, once the messages posted before it are handled.
-/// WM_APP + 3 is taken by the frozen screen's "another program in front" (WPC-302).
-pub const SHOW_WAITING: u32 = WM_APP + 4;
-
-/// Posted to the resident window when Windows told something about a notification: its click, or that it went away.
-/// WM_APP + 1 to + 11 are taken.
-pub const EVENTS_READY: u32 = WM_APP + 12;
 
 /// A notification Windows dismissed sooner than this after it was shown never appeared in the corner: with "Do not
 /// disturb" on or a full-screen program in front, Windows dismisses it within about 10 ms and keeps it only in the
@@ -221,7 +214,7 @@ pub fn show(notification: Notification) {
     STATE.with_borrow_mut(|state| state.show(notification, &mut Windows));
 }
 
-/// Keeps `notification` until [`SHOW_WAITING`] or the tools closing shows it.
+/// Keeps `notification` until [`SHOW_WAITING_NOTIFICATIONS`] or the tools closing shows it.
 pub fn wait(notification: Notification) {
     STATE.with_borrow_mut(|state| state.waiting.push(notification));
 }
@@ -245,7 +238,14 @@ pub fn capture_succeeded() {
 /// call's photo, so a notification never lands in it; when the call opened the tools, after they close.
 pub fn post_show_waiting(window: HWND) {
     // SAFETY: the resident window; the message carries nothing.
-    if let Err(e) = unsafe { PostMessageW(Some(window), SHOW_WAITING, WPARAM(0), LPARAM(0)) } {
+    if let Err(e) = unsafe {
+        PostMessageW(
+            Some(window),
+            SHOW_WAITING_NOTIFICATIONS,
+            WPARAM(0),
+            LPARAM(0),
+        )
+    } {
         log::failure("notification: posting the ones waiting", &e);
     }
 }
@@ -267,8 +267,8 @@ pub fn seen(notification: Notification) -> Option<Seen> {
     STATE.with_borrow(|state| state.seen(notification))
 }
 
-/// Handles what Windows told about notifications since the last time ([`EVENTS_READY`]), and returns the ones
-/// clicked, in the order they were, for the resident window to do what their click asks.
+/// Handles what Windows told about notifications since the last time ([`NOTIFICATION_EVENTS_READY`]), and returns
+/// the ones clicked, in the order they were, for the resident window to do what their click asks.
 pub fn on_events_ready() -> Vec<Notification> {
     let events = std::mem::take(&mut *EVENTS.lock().unwrap_or_else(PoisonError::into_inner));
     events
@@ -297,7 +297,14 @@ fn report(event: Event) -> windows::core::Result<()> {
     }
     // SAFETY: the resident window; the message carries nothing. Should it be gone, as at exit, the call fails, and the
     // event stays queued for nothing.
-    unsafe { PostMessageW(Some(HWND(window)), EVENTS_READY, WPARAM(0), LPARAM(0)) }
+    unsafe {
+        PostMessageW(
+            Some(HWND(window)),
+            NOTIFICATION_EVENTS_READY,
+            WPARAM(0),
+            LPARAM(0),
+        )
+    }
 }
 
 /// The latest notification of a kind shown by this process, and what Windows told of it.

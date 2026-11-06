@@ -12,15 +12,11 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
+use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 
 use super::footer::Status;
 use crate::update_check::{self, Answer, Click};
 use crate::{log, package};
-
-/// What the check's thread posts to the Settings window once GitHub answered, or didn't: the answer waits in the
-/// channel this module keeps. WM_APP + 1 to + 13 are taken.
-pub const CHECKED: u32 = WM_APP + 14;
 
 thread_local! {
     /// What the line under the footer says, from the click on, while the window is open.
@@ -79,7 +75,14 @@ fn ask(hwnd: HWND) {
             }
             let window = HWND(std::ptr::with_exposed_provenance_mut(window));
             // SAFETY: a message with no pointers, to a window that may be gone already, which PostMessageW reports.
-            if let Err(e) = unsafe { PostMessageW(Some(window), CHECKED, WPARAM(0), LPARAM(0)) } {
+            if let Err(e) = unsafe {
+                PostMessageW(
+                    Some(window),
+                    crate::app_message::UPDATE_CHECKED,
+                    WPARAM(0),
+                    LPARAM(0),
+                )
+            } {
                 log::failure("Check for updates: telling Settings the answer", &e);
             }
         });

@@ -7,6 +7,7 @@
 #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
 compile_error!("ScreenGauge v1 is built for 64-bit Windows (x64) only.");
 
+mod app_message;
 mod capture;
 mod clipboard;
 mod com;

@@ -64,8 +64,8 @@ use windows::core::{BOOL, Error, HSTRING, PCWSTR, w};
 use crate::theme::Mode;
 use crate::win32::{contains, low_word, signed_words, struct_size};
 use crate::{
-    com, event, folder_picker, graphics, keyboard_hook, log, resident, settings_file, tray,
-    update_check,
+    app_message, com, event, folder_picker, graphics, keyboard_hook, log, resident, settings_file,
+    tray, update_check,
 };
 pub use controls::dpi_scale;
 use controls::{Control, Pointer};
@@ -634,15 +634,15 @@ extern "system" fn window_proc(
             recorder::hook_lost(hwnd);
             default(hwnd, message, wparam, lparam)
         }
-        keyboard_hook::KEY => {
+        app_message::HOOK_KEY => {
             recorder::on_key(hwnd, wparam, lparam);
             LRESULT(0)
         }
-        keyboard_hook::ENDED => {
+        app_message::HOOK_ENDED => {
             recorder::on_hook_ended(hwnd, wparam);
             LRESULT(0)
         }
-        updates::CHECKED => {
+        app_message::UPDATE_CHECKED => {
             updates::on_checked(hwnd);
             LRESULT(0)
         }

@@ -22,16 +22,12 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DestroyIcon, FindWindowW, HICON, IMAGE_ICON, KillTimer, LR_DEFAULTCOLOR, LoadImageW,
-    SM_CXSMICON, SetTimer, WM_APP,
+    SM_CXSMICON, SetTimer,
 };
 use windows::core::{Error, PCWSTR, w};
 
 use crate::log;
 use crate::win32::{low_word, signed_words, struct_size};
-
-/// What Windows sends the resident window for the icon's clicks. With version 4, the event (such as
-/// `WM_CONTEXTMENU` for a right click) is the low word of lParam.
-pub const CALLBACK_MESSAGE: u32 = WM_APP + 1;
 
 /// One icon per process, so its ID is a constant.
 const ICON_ID: u32 = 1;
@@ -157,7 +153,7 @@ pub fn set_tip(hwnd: HWND, tip: Tip) -> windows::core::Result<()> {
 fn full_data(hwnd: HWND, tip: Tip, icon: HICON) -> windows::core::Result<NOTIFYICONDATAW> {
     let mut data = icon_data(hwnd);
     data.uFlags = flags(tip);
-    data.uCallbackMessage = CALLBACK_MESSAGE;
+    data.uCallbackMessage = crate::app_message::TRAY_ICON;
     if !fill(&mut data.szTip, "ScreenGauge") {
         return Err(Error::new(E_FAIL, "the tooltip is too long"));
     }

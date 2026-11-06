@@ -37,28 +37,18 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_DROPSHADOW, CreateWindowExW, DefWindowProcW, DestroyWindow, IDC_ARROW, IsWindowVisible,
     LoadCursorW, PostMessageW, RegisterClassExW, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER,
-    SetForegroundWindow, SetWindowPos, ShowWindow, WA_INACTIVE, WM_ACTIVATE, WM_APP,
-    WM_CAPTURECHANGED, WM_CLOSE, WM_DESTROY, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    SetForegroundWindow, SetWindowPos, ShowWindow, WA_INACTIVE, WM_ACTIVATE, WM_CAPTURECHANGED,
+    WM_CLOSE, WM_DESTROY, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_PAINT, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{BOOL, Error, PCWSTR, w};
 
 use crate::theme::Mode;
 use crate::win32::{low_word, signed_words, struct_size};
-use crate::{graphics, log};
+use crate::{app_message, graphics, log};
 pub use layout::Item;
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.TrayMenu");
-
-/// What the menu posts the resident window once an item is chosen, with the item in wParam (`chosen`). WM_APP + 1 to
-/// + 12 are taken.
-pub const CHOSEN: u32 = WM_APP + 13;
-
-/// What the menu posts the resident window when it opens or closes, so the tray icon's tip follows (`is_open`): hidden
-/// while it is open, which it would otherwise cover (WPC-373). Posted rather than done here: the menu opens while
-/// Explorer waits for the icon's message to be answered, and closes on the way to the photo. WM_APP + 1 to + 14 are
-/// taken.
-pub const OPENED_OR_CLOSED: u32 = WM_APP + 15;
 
 /// The message TrackMouseEvent sends when the cursor leaves the window, as in Settings.
 const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -262,8 +252,14 @@ pub fn is_open() -> bool {
 /// Posts `OPENED_OR_CLOSED` to `resident`. A failure leaves the tray icon's tip as it was until the next one.
 fn tell_resident(resident: HWND) {
     // SAFETY: the resident window, on this thread; the message carries nothing.
-    if let Err(e) = unsafe { PostMessageW(Some(resident), OPENED_OR_CLOSED, WPARAM(0), LPARAM(0)) }
-    {
+    if let Err(e) = unsafe {
+        PostMessageW(
+            Some(resident),
+            app_message::TRAY_MENU_OPENED_OR_CLOSED,
+            WPARAM(0),
+            LPARAM(0),
+        )
+    } {
         log::failure("tray menu: telling the tray icon it opened or closed", &e);
     }
 }
@@ -416,7 +412,14 @@ fn choose(hwnd: HWND, item: Item) {
         Some(resident) => {
             let item = WPARAM(item.index());
             // SAFETY: the resident window, on this thread; the message carries the item's place in the list.
-            if let Err(e) = unsafe { PostMessageW(Some(resident), CHOSEN, item, LPARAM(0)) } {
+            if let Err(e) = unsafe {
+                PostMessageW(
+                    Some(resident),
+                    app_message::TRAY_MENU_CHOSEN,
+                    item,
+                    LPARAM(0),
+                )
+            } {
                 log::failure("tray menu: passing on the item chosen", &e);
             }
         }

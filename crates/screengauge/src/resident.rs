@@ -32,8 +32,8 @@ use crate::settings_file::{self, SettingsFile};
 use crate::start_with_windows;
 use crate::win32::{low_word, struct_size};
 use crate::{
-    capture, clipboard, event, folder_picker, global_shortcut, graphics, hidden_icons_panel, log,
-    png, save_as, settings_window, snip_file, theme, tray, tray_menu,
+    app_message, capture, clipboard, event, folder_picker, global_shortcut, graphics,
+    hidden_icons_panel, log, png, save_as, settings_window, snip_file, theme, tray, tray_menu,
 };
 
 /// The resident window's class, which a copy opened again looks for to call the running copy.
@@ -162,7 +162,7 @@ extern "system" fn window_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     match message {
-        tray::CALLBACK_MESSAGE => {
+        app_message::TRAY_ICON => {
             // Explorer sends this message and waits for the answer, so the call is posted and answered at once: the
             // photo is taken once the click is over, with only the icon's highlight left of it.
             if tray::is_call(lparam) {
@@ -175,7 +175,7 @@ extern "system" fn window_proc(
             }
             LRESULT(0)
         }
-        tray_menu::CHOSEN => {
+        app_message::TRAY_MENU_CHOSEN => {
             match tray_menu::chosen(wparam) {
                 Some(tray_menu::Item::Settings) => open_settings(),
                 Some(tray_menu::Item::StartWithWindows) => click_start_with_windows(),
@@ -190,7 +190,7 @@ extern "system" fn window_proc(
             LRESULT(0)
         }
         // Read when it comes, not when posted: a menu opened again closes the old one first, and both post it.
-        tray_menu::OPENED_OR_CLOSED => {
+        app_message::TRAY_MENU_OPENED_OR_CLOSED => {
             let tip = if tray_menu::is_open() {
                 tray::Tip::Hidden
             } else {
@@ -208,7 +208,7 @@ extern "system" fn window_proc(
             }
             LRESULT(0)
         }
-        frozen_screen::EFFECTS_READY => {
+        app_message::EFFECTS_READY => {
             let effects = FROZEN_SCREEN.with_borrow(|open| {
                 open.as_ref()
                     .map(FrozenScreen::take_effects)
@@ -217,11 +217,11 @@ extern "system" fn window_proc(
             carry_out(hwnd, effects);
             LRESULT(0)
         }
-        notification::SHOW_WAITING => {
+        app_message::SHOW_WAITING_NOTIFICATIONS => {
             notification::show_waiting();
             LRESULT(0)
         }
-        notification::EVENTS_READY => {
+        app_message::NOTIFICATION_EVENTS_READY => {
             // Once the notifications' state is no longer borrowed: opening Settings dispatches messages.
             for clicked in notification::on_events_ready() {
                 if clicked.opens_settings() {

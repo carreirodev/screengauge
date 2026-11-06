@@ -43,23 +43,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::Error;
 
+use crate::app_message::{HOOK_DONE, HOOK_DRAIN, HOOK_ENDED, HOOK_KEY, HOOK_RECORD};
 use crate::log;
 use crate::win32::struct_size;
-
-/// What the hook posts to the Settings window for a key that went down or up while the field records: the wParam is
-/// its virtual-key code, and the lParam whether it went down and the modifiers held after it ([`KeyEvent::of`]).
-/// WM_APP + 1 to + 6 are taken by the tray icon, the frozen screen, the notifications and the foreground watch.
-pub const KEY: u32 = WM_APP + 7;
-
-/// What the hook's thread posts to the Settings window once the hook is removed; the wParam is the number `start` was
-/// given, so a hook stopped before can't be taken for the one running.
-pub const ENDED: u32 = WM_APP + 8;
-
-/// What the Settings window asks of the hook's thread: record again, or let the keys go once they are up. And what the
-/// thread posts itself when the last key it kept is up.
-const RECORD: u32 = WM_APP + 9;
-const DRAIN: u32 = WM_APP + 10;
-const DONE: u32 = WM_APP + 11;
 
 /// The virtual-key code no key has, which a Win that passed comes up behind.
 pub const NO_KEY: u32 = 0xFF;
@@ -110,12 +96,12 @@ impl KeyboardHook {
     /// Records again, after `drain`: a click on the field before the keys of the last recording were all up. The
     /// hook is installed afresh.
     pub fn record(&self) -> windows::core::Result<()> {
-        self.post(RECORD)
+        self.post(HOOK_RECORD)
     }
 
     /// Recording stopped: the hook goes once the keys it kept are up.
     pub fn drain(&self) -> windows::core::Result<()> {
-        self.post(DRAIN)
+        self.post(HOOK_DRAIN)
     }
 
     fn post(&self, message: u32) -> windows::core::Result<()> {
@@ -419,7 +405,8 @@ fn run(window: usize, generation: usize, ready: &mpsc::Sender<windows::core::Res
     }
     let mut message = MSG::default();
     // Makes the thread's queue now, so the Settings window's first message to it can't fail for want of one.
-    // SAFETY: `message` is a valid MSG to fill; no message has this number, so nothing is taken out.
+    // SAFETY: `message` is a valid MSG to fill. WM_APP itself is no message of ours (`app_message` starts at WM_APP +
+    // 1), so nothing is taken out.
     let _ = unsafe { PeekMessageW(&mut message, None, WM_APP, WM_APP, PM_NOREMOVE) };
     let mut hook = match Hook::install() {
         Ok(hook) => hook,
@@ -468,7 +455,7 @@ fn run(window: usize, generation: usize, ready: &mpsc::Sender<windows::core::Res
             &format!("Windows refused {lost} of its messages or keys"),
         );
     }
-    post_to_window(ENDED, WPARAM(generation), LPARAM(0));
+    post_to_window(HOOK_ENDED, WPARAM(generation), LPARAM(0));
 }
 
 /// Handles a message to the thread itself, and says whether the loop ends.
@@ -477,7 +464,7 @@ fn on_thread_message(message: u32, hook: &mut Hook) -> bool {
         return true;
     };
     match message {
-        RECORD => {
+        HOOK_RECORD => {
             // A hook Windows removed for being slow is never told so: a fresh one replaces it for each recording.
             drop(std::mem::replace(
                 hook,
@@ -491,14 +478,14 @@ fn on_thread_message(message: u32, hook: &mut Hook) -> bool {
             ));
             state.record(keys_down());
         }
-        DRAIN => {
+        HOOK_DRAIN => {
             state.phase = Phase::Draining;
             if state.drained() {
                 post_done();
             }
         }
         // Checked again: a click on the field may have come between.
-        DONE => return state.drained(),
+        HOOK_DONE => return state.drained(),
         _ => {}
     }
     STATE.set(Some(state));
@@ -605,7 +592,7 @@ extern "system" fn procedure(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             STATE.set(Some(after));
             if verdict.report {
                 post_to_window(
-                    KEY,
+                    HOOK_KEY,
                     WPARAM(usize::try_from(info.vkCode).unwrap_or(usize::MAX)),
                     KeyEvent::lparam(down, after.modifiers()),
                 );
@@ -669,7 +656,7 @@ fn post_to_window(message: u32, wparam: WPARAM, lparam: LPARAM) {
 
 fn post_done() {
     // SAFETY: this thread, whose queue exists.
-    if unsafe { PostThreadMessageW(THREAD.get(), DONE, WPARAM(0), LPARAM(0)) }.is_err() {
+    if unsafe { PostThreadMessageW(THREAD.get(), HOOK_DONE, WPARAM(0), LPARAM(0)) }.is_err() {
         LOST.set(LOST.get().saturating_add(1));
     }
 }

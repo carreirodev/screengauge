@@ -52,7 +52,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, HTCLIENT, HWND_TOPMOST, IDC_ARROW, IDC_CROSS, KillTimer, LoadCursorW,
     PostMessageW, RegisterClassExW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-    USER_TIMER_MAXIMUM, USER_TIMER_MINIMUM, WM_APP, WM_CAPTURECHANGED, WM_CLOSE, WM_DISPLAYCHANGE,
+    USER_TIMER_MAXIMUM, USER_TIMER_MINIMUM, WM_CAPTURECHANGED, WM_CLOSE, WM_DISPLAYCHANGE,
     WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
     WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SYSKEYDOWN, WM_SYSKEYUP,
     WM_TIMER, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
@@ -61,19 +61,10 @@ use windows::core::{Error, PCWSTR, w};
 
 use crate::theme::Mode;
 use crate::win32::{low_word, struct_size};
-use crate::{event, foreground, graphics, log};
+use crate::{app_message, event, foreground, graphics, log};
 use overlay::Overlay;
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.FrozenScreen");
-
-/// What a frozen screen window posts to the resident window when the session core returned effects for it to carry
-/// out. Posted, never sent: closing the tools destroys these windows, which must not happen inside one of their own
-/// window procedures.
-pub const EFFECTS_READY: u32 = WM_APP + 2;
-
-/// What a frozen screen window posts to itself when Windows says the monitors changed. WM_APP + 4 is taken by the
-/// notifications waiting to show (`notification::SHOW_WAITING`).
-const MONITORS_CHANGED: u32 = WM_APP + 5;
 
 /// The first window's hot key while the tools are open: Alt+Esc. Windows acts on Alt+Esc itself, before any window gets
 /// the key, and brings another program to the front, which closes the tools; held by the first window, it reaches the
@@ -496,8 +487,14 @@ impl SharedSession {
         }
         // Should the message be lost, the resident window still takes the effects with the next global shortcut.
         // SAFETY: posts to the resident window, which outlives the frozen screen.
-        let posted =
-            unsafe { PostMessageW(Some(self.resident), EFFECTS_READY, WPARAM(0), LPARAM(0)) };
+        let posted = unsafe {
+            PostMessageW(
+                Some(self.resident),
+                app_message::EFFECTS_READY,
+                WPARAM(0),
+                LPARAM(0),
+            )
+        };
         if let Err(e) = posted {
             log::failure("frozen screen: handing effects to the resident window", &e);
         }
@@ -894,8 +891,8 @@ extern "system" fn window_proc(
             }
             // Alt+F4: the core closes the tools as a whole, never one monitor's window alone.
             WM_CLOSE => deliver(Input::CloseAsked),
-            foreground::OTHER_PROGRAM_IN_FRONT => deliver(Input::OtherProgramInFront),
-            foreground::OWN_WINDOW_IN_FRONT => deliver(Input::BackInFront),
+            app_message::OTHER_PROGRAM_IN_FRONT => deliver(Input::OtherProgramInFront),
+            app_message::OWN_WINDOW_IN_FRONT => deliver(Input::BackInFront),
             // Windows sends this to every top-level window for any change of monitors: one connected or disconnected,
             // a scale, resolution or arrangement changed, HDR turned on or off (seen in WPC-281 and WPC-289). Moving
             // the SDR content brightness sends nothing. It comes from another thread, so it may arrive inside any
@@ -904,14 +901,20 @@ extern "system" fn window_proc(
             // nothing after.
             WM_DISPLAYCHANGE => {
                 // SAFETY: our own window; the message carries nothing.
-                let posted =
-                    unsafe { PostMessageW(Some(hwnd), MONITORS_CHANGED, WPARAM(0), LPARAM(0)) };
+                let posted = unsafe {
+                    PostMessageW(
+                        Some(hwnd),
+                        app_message::MONITORS_CHANGED,
+                        WPARAM(0),
+                        LPARAM(0),
+                    )
+                };
                 if let Err(e) = posted {
                     log::failure("frozen screen: passing on a change of monitors", &e);
                 }
                 Some(LRESULT(0))
             }
-            MONITORS_CHANGED => deliver(Input::MonitorsChanged),
+            app_message::MONITORS_CHANGED => deliver(Input::MonitorsChanged),
             WM_TIMER if wparam.0 == WAKE_TIMER => {
                 // Once: the session asks again when it needs another wake.
                 // SAFETY: our own window's timer.
