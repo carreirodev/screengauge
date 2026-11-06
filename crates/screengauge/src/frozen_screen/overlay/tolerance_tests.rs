@@ -5,6 +5,7 @@ use screengauge_core::session::{NoticeSide, Point, Sign, ToleranceIndicator};
 use screengauge_core::settings::Tolerance;
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_SIMULATIONS_NONE, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+    DWRITE_TEXT_METRICS,
 };
 
 use crate::graphics::font_family;

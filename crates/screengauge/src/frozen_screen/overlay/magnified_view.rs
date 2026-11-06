@@ -27,10 +27,9 @@ use windows::Win32::Graphics::DirectWrite::{
 use windows::core::{Error, Interface};
 
 use super::geometry::{self, scaled};
-use super::{
-    LOGICAL_OPACITY, Overlay, PlacedLogical, PlacedText, Typeset, dot, px, ring, rounded_at,
-};
+use super::{LOGICAL_OPACITY, Overlay, PlacedLogical, dot, px, ring, rounded_at};
 use crate::graphics::d2d_color;
+use crate::typeset::{PlacedText, Typeset};
 
 // Every size below is in logical pixels, which `scaled` turns into physical pixels for the monitor's scale.
 
@@ -423,10 +422,6 @@ impl Overlay {
             ..corner
         };
         let window = self.in_window(&area);
-        // The text sits in its line the way CSS does it, as the notice's does: the line's extra room is shared equally,
-        // and the baseline is on a whole pixel.
-        let line_top = window.top + px(pad_y);
-        let baseline = text.baseline_in(line_top, px(line));
         Ok(PlacedIndicator {
             background: rounded_at(
                 self.window_origin(),
@@ -436,11 +431,8 @@ impl Overlay {
                 0,
                 false,
             ),
-            text: PlacedText {
-                left: window.left + px(pad_x),
-                top: baseline - text.baseline,
-                layout: text.layout,
-            },
+            // The text sits in its line the way CSS does it, as the notice's does.
+            text: text.in_line(window.left + px(pad_x), window.top + px(pad_y), px(line)),
         })
     }
 
@@ -492,11 +484,7 @@ impl Overlay {
         let line = geometry::bounds(coordinate.line)?;
         let window = self.in_window(&line);
         let baseline = physical.baseline_in(window.top, px(line.bottom - line.top));
-        let at = |text: Typeset, along: i32| PlacedText {
-            left: window.left + px(along),
-            top: baseline - text.baseline,
-            layout: text.layout,
-        };
+        let at = |text: Typeset, along: i32| text.on_baseline(window.left + px(along), baseline);
         let logical = logical.map(|text| {
             let height = scaled(geometry::BAR_HEIGHT, self.dpi());
             // Half the line's spare room above the bar, rounded up as Chromium puts a box on the pixel grid.
@@ -599,12 +587,7 @@ impl Overlay {
     fn placed_in(&self, typeset: Typeset, line: Rect) -> windows::core::Result<PlacedText> {
         let bounds = geometry::bounds(line)?;
         let window = self.in_window(&bounds);
-        let baseline = typeset.baseline_in(window.top, px(bounds.bottom - bounds.top));
-        Ok(PlacedText {
-            left: window.left,
-            top: baseline - typeset.baseline,
-            layout: typeset.layout,
-        })
+        Ok(typeset.in_line(window.left, window.top, px(bounds.bottom - bounds.top)))
     }
 
     /// The Approximate color notice's alert sign, the notices' own, and its two lines beside it, all in the warning's

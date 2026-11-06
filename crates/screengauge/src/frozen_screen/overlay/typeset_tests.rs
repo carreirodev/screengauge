@@ -2,6 +2,8 @@
 //! is the reference for a text with no digits: laid out with DirectWrite's default features, it matched Chromium in
 //! WPC-309 ("Tolerance" at 11px, 47.54 pixels wide).
 
+use windows::Win32::Graphics::DirectWrite::DWRITE_TEXT_METRICS;
+
 use super::tests::{Canvas, MONITOR, SCALES, horizontal, text_width, with_logical};
 use super::*;
 

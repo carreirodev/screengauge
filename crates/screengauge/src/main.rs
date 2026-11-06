@@ -43,6 +43,7 @@ mod test_process;
 mod theme;
 mod tray;
 mod tray_menu;
+mod typeset;
 mod update_check;
 mod win32;
 

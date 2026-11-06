@@ -58,9 +58,8 @@ use windows::Win32::Graphics::Direct2D::{
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_FEATURE, DWRITE_FONT_FEATURE_TAG_KERNING, DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES,
-    DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_MEDIUM, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-    DWRITE_LINE_METRICS, DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE, IDWriteTextFormat,
-    IDWriteTextLayout, IDWriteTypography,
+    DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_MEDIUM, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_RANGE,
+    IDWriteTextFormat, IDWriteTextLayout, IDWriteTypography,
 };
 use windows::core::Error;
 
@@ -68,6 +67,7 @@ use crate::graphics::{Color, Fonts, color, solid_brush};
 use crate::log;
 use crate::relief::{self, dot, in_surface, px, ring, rounded_at};
 use crate::theme::Mode;
+use crate::typeset::{PlacedText, Typeset};
 use geometry::{Parts, scaled};
 use palette::Surfaces;
 
@@ -172,57 +172,11 @@ struct PlacedLabel {
     logical: Option<PlacedLogical>,
 }
 
-/// A line of text with the place it is drawn at.
-struct PlacedText {
-    layout: IDWriteTextLayout,
-    /// Where the text's layout starts, in the window's own pixels. Its baseline is on a whole pixel.
-    left: f32,
-    top: f32,
-}
-
 /// What a label draws after its physical text when it has a logical part.
 struct PlacedLogical {
     /// The bar between the two parts, in the window's own pixels.
     bar: D2D_RECT_F,
     text: PlacedText,
-}
-
-/// A text laid out, with what the label needs to place it.
-struct Typeset {
-    layout: IDWriteTextLayout,
-    /// The text's width, in whole pixels: the room the box around it counts for it (see `Overlay::typeset`).
-    width: i32,
-    /// The distance from the layout's top to its baseline.
-    baseline: f32,
-    /// The line's height, which the notice centers in its own line.
-    line_height: f32,
-}
-
-impl Typeset {
-    /// Where the text's baseline goes for it to sit in a line `line` pixels tall whose top is at `top`, the way CSS puts
-    /// it there: the line's extra room, above and below the text's own height, is shared equally. It is on a whole pixel,
-    /// so the letters are crisp.
-    fn baseline_in(&self, top: f32, line: f32) -> f32 {
-        (top + (line - self.line_height) / 2.0 + self.baseline).round()
-    }
-
-    /// `layout`, measured.
-    fn of(layout: IDWriteTextLayout) -> windows::core::Result<Typeset> {
-        let mut metrics = DWRITE_TEXT_METRICS::default();
-        // SAFETY: fills a local.
-        unsafe { layout.GetMetrics(&mut metrics) }?;
-        let mut line = [DWRITE_LINE_METRICS::default()];
-        let mut lines = 0;
-        // SAFETY: fills a one-line buffer, and fails should the label need more.
-        unsafe { layout.GetLineMetrics(Some(&mut line), &mut lines) }?;
-        let [line] = line;
-        Ok(Typeset {
-            layout,
-            width: whole_up(metrics.width),
-            baseline: line.baseline,
-            line_height: line.height,
-        })
-    }
 }
 
 impl Overlay {
@@ -742,16 +696,6 @@ impl Overlay {
         // None of these shapes is shrunk past half its height, so none needs the toolbar's clamp.
         rounded_at(self.window_origin(), rect, radius, grow, down, false)
     }
-}
-
-/// A measured width rounded up to whole pixels, so the pill never cuts into the text. Widths are a few hundred pixels
-/// at most, far inside `i32`, so the cast keeps the whole value; past `i32` it would saturate without a word, which
-/// only the assertion watches for, and only in a debug build.
-// TODO: convert with a checked float-to-integer conversion once the standard library has one, so a width past `i32`
-// fails instead of saturating.
-fn whole_up(width: f32) -> i32 {
-    debug_assert!((0.0..1e6).contains(&width), "a label {width} pixels wide");
-    width.ceil() as i32
 }
 
 /// A position that is already a whole number of pixels, as the integer geometry takes it. Positions in a window are

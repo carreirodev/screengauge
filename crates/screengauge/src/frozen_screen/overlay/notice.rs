@@ -99,13 +99,11 @@ impl Overlay {
         // The text sits in its line the way CSS does it: the line's extra room, above and below the text's own height,
         // is shared equally. Its baseline is on a whole pixel, so the letters are crisp; "Copied" has a letter that
         // drops below the line, so the middle of its digits is no guide here, as it is for a measurement's label.
-        let line = px(scaled(LINE, self.dpi()));
-        let baseline = typeset.baseline_in(content_top, line);
-        let origin = dot(
+        let text = typeset.in_line(
             content_left + px(scaled(SIGN, self.dpi()) + scaled(GAP, self.dpi())),
-            baseline - typeset.baseline,
-        )
-        .point;
+            content_top,
+            px(scaled(LINE, self.dpi())),
+        );
         // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
         // Direct2D only fails the frame at EndDraw.
         unsafe {
@@ -114,8 +112,8 @@ impl Overlay {
             // The brush keeps the opacity of the last label's logical part.
             self.surfaces.ink.SetOpacity(1.0);
             target.DrawTextLayout(
-                origin,
-                &typeset.layout,
+                dot(text.left, text.top).point,
+                &text.layout,
                 &self.surfaces.ink,
                 D2D1_DRAW_TEXT_OPTIONS_NONE,
             );
