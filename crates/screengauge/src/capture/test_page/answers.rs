@@ -1,13 +1,13 @@
-//! The approved answers of the test page's captures (v1 spec WPC-296, test layer 1; ticket WPC-332): each case of
-//! `test-page/test-page.html`, measured with Dimensions and Bounds on the three captures in `test-page/captures/` at the
+//! The approved answers of the test page samples (v1 spec WPC-296, test layer 1; ticket WPC-332): each case of
+//! `test-page/test-page.html`, measured with Dimensions and Bounds on the three samples in `test-page/samples/` at the
 //! default tolerance, through the session core as the tools measure the real screen, and the answer the owner approved
-//! for it once. Snip takes the same area as Bounds, so each Bounds case checks that Snip's image is the capture's
+//! for it once. Snip takes the same area as Bounds, so each Bounds case checks that Snip's image is the sample's
 //! pixels in the rectangle Bounds measures.
 //!
 //! A change of rule or of the default tolerance that changes an answer fails here, with every changed answer listed
 //! next to the approved one: the new answers go back to the owner, and only their approval writes them into the table.
 //!
-//! The session is layer 1 and makes no Windows call; only reading the captures' PNGs uses WIC, which is why the tests
+//! The session is layer 1 and makes no Windows call; only reading the samples' PNGs uses WIC, which is why the tests
 //! live here and not in `screengauge-core`. `test-page/README.md` lists the cases and ADR 0005 records the calibration.
 
 use std::time::Duration;
@@ -21,9 +21,9 @@ use screengauge_core::settings::{DimensionsMode, Options, Remembered, Tolerance,
 use super::test_page_folder;
 use crate::png;
 
-/// The captures, in the order of each case's answers, with their monitors' DPI: the AOC at 175% and the ARZOPA at 125%
+/// The samples, in the order of each case's answers, with their monitors' DPI: the AOC at 175% and the ARZOPA at 125%
 /// and 100%.
-const SHOTS: [(&str, u32); 3] = [
+const SAMPLES: [(&str, u32); 3] = [
     ("3840x2160-175.png", 168),
     ("1920x1080-125.png", 120),
     ("1920x1080-100.png", 96),
@@ -41,9 +41,9 @@ struct Case {
     /// The element of test-page.html, and where on or around it the case measures.
     name: &'static str,
     gesture: Gesture,
-    /// The approved answer on each capture, in the order of [`SHOTS`]. Dimensions': the label's number, then the pixels
-    /// its line runs over, from the first to the last, along the cursor's row and its column, in physical pixels of
-    /// the capture. Bounds': the text a release copies and the result's top left corner, or the notice of an empty
+    /// The approved answer on each sample, in the order of [`SAMPLES`]. Dimensions': the label's number, then the
+    /// pixels its line runs over, from the first to the last, along the cursor's row and its column, in physical pixels
+    /// of the sample. Bounds': the text a release copies and the result's top left corner, or the notice of an empty
     /// area.
     answers: [&'static str; 3],
 }
@@ -61,8 +61,8 @@ fn the_answers_were_approved_at_the_default_tolerance() {
 fn every_case_of_the_test_page_gives_the_answer_the_owner_approved() {
     crate::com::ensure_started().expect("COM starts on a test thread");
     let mut changed = Vec::new();
-    for (index, &(name, dpi)) in SHOTS.iter().enumerate() {
-        let photo = capture(name, dpi);
+    for (index, &(name, dpi)) in SAMPLES.iter().enumerate() {
+        let photo = sample(name, dpi);
         for case in &CASES {
             let now = answer(&photo, &case.gesture, dpi);
             let approved = case.answers[index];
@@ -92,16 +92,16 @@ fn the_table_has_a_case_for_each_kind_the_page_draws() {
     assert_eq!((dimensions, CASES.len() - dimensions), (19, 37));
 }
 
-/// The capture `name` as the photo of a monitor at `dpi` whose top left corner is the virtual screen's origin.
-fn capture(name: &str, dpi: u32) -> Photo {
-    let bytes = std::fs::read(test_page_folder().join("captures").join(name)).expect("the capture");
+/// The sample `name` as the photo of a monitor at `dpi` whose top left corner is the virtual screen's origin.
+fn sample(name: &str, dpi: u32) -> Photo {
+    let bytes = std::fs::read(test_page_folder().join("samples").join(name)).expect("the sample");
     let decoded = png::read_back::decode(&bytes);
     let image = Image::new(
         decoded.width,
         decoded.height,
         decoded.bgra.iter().flatten().copied().collect(),
     )
-    .expect("the pixels fill the capture");
+    .expect("the pixels fill the sample");
     Photo {
         rect: Rect {
             left: 0,
@@ -115,11 +115,11 @@ fn capture(name: &str, dpi: u32) -> Photo {
     }
 }
 
-/// A plain white monitor at 100% right of the capture, where the toolbar opens, so it covers no case: it stays there
-/// while the tools measure the capture.
+/// A plain white monitor at 100% right of the sample, where the toolbar opens, so it covers no case: it stays there
+/// while the tools measure the sample.
 fn toolbar_monitor(page: &Photo) -> Photo {
     let rect = Rect {
-        left: i32::try_from(page.rect.width).expect("a small capture"),
+        left: i32::try_from(page.rect.width).expect("a small sample"),
         top: 0,
         width: 800,
         height: 600,
@@ -134,7 +134,7 @@ fn toolbar_monitor(page: &Photo) -> Photo {
     }
 }
 
-/// A point of the stage, `x` and `y` in CSS px, at `dpi`: the physical pixel of the capture it falls in, so rounded
+/// A point of the stage, `x` and `y` in CSS px, at `dpi`: the physical pixel of the sample it falls in, so rounded
 /// down.
 fn physical((x, y): (i32, i32), dpi: u32) -> Point {
     let dpi = i32::try_from(dpi).expect("a Windows DPI");
@@ -183,15 +183,15 @@ fn open(page: &Photo, tool: Tool, mode: DimensionsMode) -> Session {
     .expect("a frozen screen the session takes")
 }
 
-/// What `gesture` answers on `page`, a capture at `dpi`, in the form of [`Case::answers`].
+/// What `gesture` answers on `page`, a sample at `dpi`, in the form of [`Case::answers`].
 fn answer(page: &Photo, gesture: &Gesture, dpi: u32) -> String {
     match *gesture {
         Gesture::Dimensions(mode, at) => dimensions(page, mode, physical(at, dpi)),
         Gesture::Bounds(from, to) => {
             let (from, to) = (physical(from, dpi), physical(to, dpi));
             let (bounds, content) = bounds(page, from, to);
-            // Snip takes the same area: its image is the capture's pixels in the rectangle Bounds measures, and there is
-            // none where Bounds finds no content.
+            // Snip takes the same area: its image is the sample's pixels in the rectangle Bounds measures, and there
+            // is none where Bounds finds no content.
             let snip = snip(page, from, to);
             let wanted = content.map(|content| crop(page, content));
             if snip == wanted {
@@ -200,7 +200,7 @@ fn answer(page: &Photo, gesture: &Gesture, dpi: u32) -> String {
                 let taken = snip.map_or("no image".to_owned(), |image| {
                     format!("an image of {} x {}", image.width(), image.height())
                 });
-                format!("{bounds}, but Snip takes {taken} that isn't the capture's pixels there")
+                format!("{bounds}, but Snip takes {taken} that isn't the sample's pixels there")
             }
         }
     }
@@ -257,10 +257,10 @@ fn bounds(page: &Photo, from: Point, to: Point) -> (String, Option<Rect>) {
 
 /// The pixels of `page` in `rect`, which lies on it, as an image of their own.
 fn crop(page: &Photo, rect: Rect) -> Image {
-    let width = usize::try_from(page.rect.width).expect("a small capture");
+    let width = usize::try_from(page.rect.width).expect("a small sample");
     let (left, top) = (
-        usize::try_from(rect.left).expect("on the capture"),
-        usize::try_from(rect.top).expect("on the capture"),
+        usize::try_from(rect.left).expect("on the sample"),
+        usize::try_from(rect.top).expect("on the sample"),
     );
     let columns = usize::try_from(rect.width).expect("a small rectangle");
     let rows = usize::try_from(rect.height).expect("a small rectangle");

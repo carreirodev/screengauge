@@ -1,5 +1,5 @@
 //! Layer 1 tests of Inspect's color (v1 spec WPC-296, Inspect; ticket WPC-316): the color of the exact pixel under the
-//! cursor, in HEX and in RGB as Color format says, on the magnified view's strip and in what the click copies, with
+//! cursor, in HEX and in RGB as Color format says, on the magnified view's readout and in what the click copies, with
 //! Shift copying the other format. They look only at the scene the session would draw and at the effects it returns, on
 //! frozen screens made up here, without a screen.
 
@@ -257,7 +257,7 @@ fn view(session: &Session) -> MagnifiedView {
         .expect("Inspect shows its magnified view")
 }
 
-/// What the strip's color reads: its first text, and the one under it when there is one.
+/// What the readout's color reads: its first text, and the one under it when there is one.
 fn reads(view: &MagnifiedView) -> (&str, Option<&str>) {
     (
         view.color.first.text.as_str(),
@@ -269,7 +269,7 @@ fn reads(view: &MagnifiedView) -> (&str, Option<&str>) {
 }
 
 #[test]
-fn the_strip_shows_the_exact_pixels_swatch_and_its_color_in_color_format() {
+fn the_readout_shows_the_exact_pixels_swatch_and_its_color_in_color_format() {
     for (format, shown) in [
         (ColorFormat::Both, ("#1E90FF", Some("30, 144, 255"))),
         (ColorFormat::Hex, ("#1E90FF", None)),
@@ -282,7 +282,7 @@ fn the_strip_shows_the_exact_pixels_swatch_and_its_color_in_color_format() {
 }
 
 #[test]
-fn the_click_copies_the_strips_first_text_and_shift_and_click_its_second_when_it_shows() {
+fn the_click_copies_the_readouts_first_text_and_shift_and_click_its_second_when_it_shows() {
     for format in [ColorFormat::Both, ColorFormat::Hex, ColorFormat::Rgb] {
         let mut session = open(item(DODGER_BLUE), format);
         let view = view(&session);
@@ -312,10 +312,10 @@ fn rect(left: i32, top: i32, width: u32, height: u32) -> Rect {
 
 #[test]
 fn with_both_formats_hex_and_rgb_take_a_line_each_beside_the_swatch_centered_between_them() {
-    // At 100% and 8× with the cursor at (700, 500): the frame of 168 starts at (729, 529), and X and Y share the line
-    // 7 below it, 16 tall, from 704. The color's row follows 5 below, at 725: two lines of 16 beside the swatch of 22,
-    // which sits 5 down to be centered in their 32. The strip's text starts 4 in from the frame, at 733, and the
-    // color's 22 + 8 after it, at 763, as wide as the 160 of text less those 30.
+    // At 100% and 8× with the cursor at (700, 500): the enlargement of 168 starts at (729, 529), and X and Y share the
+    // line 7 below it, 16 tall, from 704. The color's row follows 5 below, at 725: two lines of 16 beside the swatch of
+    // 22, which sits 5 down to be centered in their 32. The readout's text starts 4 in from the enlargement, at 733,
+    // and the color's 22 + 8 after it, at 763, as wide as the 160 of text less those 30.
     let view = view(&open(item(DODGER_BLUE), ColorFormat::Both));
     assert_eq!(view.x.line, rect(733, 704, 76, 16));
     assert_eq!(view.color.swatch, rect(733, 725 + 5, 22, 22));
@@ -348,10 +348,10 @@ fn with_one_format_its_line_is_centered_beside_the_swatch() {
 
 #[test]
 fn at_150_percent_every_size_of_the_color_row_is_scaled_on_its_own() {
-    // At 150% the frame of 264 starts 44 right of and below the cursor, at (744, 544), and X and Y take a line of 24
-    // (24.3) each, 11 below it, from 819. The row follows 8 (7.5) below them, at 875: two lines of 24 beside the swatch
-    // of 33, which sits 8 down (7.5, rounded up) to be centered in their 48. The strip's text starts 6 in, at 750, and
-    // the color's 33 + 12 after it, at 795, as wide as the 252 of text less those 45.
+    // At 150% the enlargement of 264 starts 44 right of and below the cursor, at (744, 544), and X and Y take a line of
+    // 24 (24.3) each, 11 below it, from 819. The row follows 8 (7.5) below them, at 875: two lines of 24 beside the
+    // swatch of 33, which sits 8 down (7.5, rounded up) to be centered in their 48. The readout's text starts 6 in, at
+    // 750, and the color's 33 + 12 after it, at 795, as wide as the 252 of text less those 45.
     let mut photo = item(DODGER_BLUE);
     photo.scale = Scale::from_dpi(144).expect("a real scale");
     let view = view(&open(photo, ColorFormat::Both));

@@ -1,7 +1,7 @@
 //! Layer 1 tests of the cases around Bounds' drag (v1 spec WPC-296, Bounds and Fechar as ferramentas; ticket WPC-314):
 //! Alt held measures exactly the drawn rectangle, an area of nothing but the reference color shows "No content found",
-//! a click or a tremble does nothing, and Esc with the button held cancels only the drag. On frozen screens drawn here,
-//! without a screen; they look only at the scene the session would draw and at the effects it returns.
+//! a click does nothing, and Esc with the button held cancels only the drag. On frozen screens drawn here, without a
+//! screen; they look only at the scene the session would draw and at the effects it returns.
 
 use std::time::Duration;
 
@@ -469,9 +469,9 @@ fn drag_through(
 }
 
 #[test]
-fn a_click_or_a_tremble_does_nothing_with_or_without_alt_and_shows_no_notice() {
-    // Begun on the white three pixels up and left of the button, a tremble of up to 4 pixels each way reaches into its
-    // corner: without the limit, it would pin 2 × 2 of it, or the 5 × 5 drawn with Alt.
+fn a_click_within_the_drag_distance_does_nothing_with_or_without_alt_and_shows_no_notice() {
+    // Begun on the white three pixels up and left of the button, a press that moves up to 4 pixels each way reaches
+    // into its corner: without the drag distance, it would pin 2 × 2 of it, or the 5 × 5 drawn with Alt.
     for held in [Held::default(), ALT] {
         for path in [
             vec![],
@@ -489,7 +489,7 @@ fn a_click_or_a_tremble_does_nothing_with_or_without_alt_and_shows_no_notice() {
 
 #[test]
 fn a_drag_counts_once_the_cursor_goes_more_than_4_pixels_from_the_press_along_either_axis() {
-    // 4 pixels right and 4 down of the press is still a tremble.
+    // 4 pixels right and 4 down of the press is still within the drag distance.
     let mut session = open(vec![button()], at(997, 597));
     assert_eq!(
         drag_through(

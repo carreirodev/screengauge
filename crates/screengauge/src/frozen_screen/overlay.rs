@@ -122,8 +122,8 @@ pub struct Overlay {
     /// face the prototype's `<b>` gets (see `tolerance`).
     word_format: IDWriteTextFormat,
     number_format: IDWriteTextFormat,
-    /// The magnified view's tag: bold, at its own size.
-    tag_format: IDWriteTextFormat,
+    /// The magnification indicator: bold, at its own size.
+    magnification_indicator_format: IDWriteTextFormat,
     /// The magnified view's Approximate color notice: semibold, at its own size.
     approximate_format: IDWriteTextFormat,
     /// Asks for tabular figures, and for the kerning that asking for any feature would otherwise drop; applied to each
@@ -262,10 +262,10 @@ impl Overlay {
             logical_format: text_format(fonts, LOGICAL_WEIGHT, geometry::TEXT, dpi)?,
             word_format: text_format(fonts, DWRITE_FONT_WEIGHT_SEMI_BOLD, tolerance::TEXT, dpi)?,
             number_format: text_format(fonts, tolerance::NUMBER_WEIGHT, tolerance::TEXT, dpi)?,
-            tag_format: text_format(
+            magnification_indicator_format: text_format(
                 fonts,
-                magnified_view::TAG_WEIGHT,
-                magnified_view::TAG_TEXT,
+                magnified_view::INDICATOR_WEIGHT,
+                magnified_view::INDICATOR_TEXT,
                 dpi,
             )?,
             approximate_format: text_format(

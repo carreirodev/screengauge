@@ -1,9 +1,9 @@
 //! Layer 1 tests of Inspect's magnified view and magnification (v1 spec WPC-296, Inspect; ticket WPC-315): the square
 //! of pixels around the cursor and its size at each magnification and scale, the panel below and to the right of the
 //! cursor that changes side near the monitor's limits and never leaves the current monitor, the part past that limit
-//! left empty, the magnification the mouse wheel changes and the tag that says it, the cursor's position on the strip,
-//! and the keys. They look only at the scene the session would draw and at the effects it returns, on frozen screens
-//! made up here, without a screen.
+//! left empty, the magnification the mouse wheel changes and the magnification indicator that says it, the cursor's
+//! position on the readout, and the keys. They look only at the scene the session would draw and at the effects it
+//! returns, on frozen screens made up here, without a screen.
 
 use std::time::Duration;
 
@@ -87,9 +87,15 @@ fn opened_for_the_first_time_inspect_shows_21_pixels_a_side_around_the_cursor_at
     // middle: 10 on each side of it, 168 physical pixels a side.
     assert_eq!(view.source, square(890, 590, 21));
     assert_eq!(view.shown, view.source);
-    assert_eq!((view.frame.width, view.frame.height), (168, 168));
+    assert_eq!(
+        (view.enlargement.width, view.enlargement.height),
+        (168, 168)
+    );
     assert!(view.grid);
-    assert!(!view.tag, "the tag shows only once the wheel turns");
+    assert!(
+        !view.magnification_indicator,
+        "the magnification indicator shows only once the wheel turns"
+    );
 }
 
 /// `input` with the cursor at `cursor`, no modifier held, `milliseconds` after Windows started.
@@ -133,9 +139,9 @@ fn open_with(dpi: u32, magnification: Magnification, cursor: Point) -> Session {
 
 #[test]
 fn the_view_holds_the_most_whole_pixels_that_fit_176_logical_pixels_an_odd_number_of_them() {
-    // For each scale, the pixels a side and the frame's side in physical pixels at 2×, 4×, 8×, 16× and 32×, worked out
-    // by hand from 176 logical pixels: at 150% they are 264 physical pixels, which hold 132 pixels at 2×, made 131 to be
-    // odd, and 8.25 at 32×, so 7.
+    // For each scale, the pixels a side and the enlargement's side in physical pixels at 2×, 4×, 8×, 16× and 32×,
+    // worked out by hand from 176 logical pixels: at 150% they are 264 physical pixels, which hold 132 pixels at 2×,
+    // made 131 to be odd, and 8.25 at 32×, so 7.
     let expected: [(u32, [(u32, u32); 5]); 5] = [
         (96, [(87, 174), (43, 172), (21, 168), (11, 176), (5, 160)]),
         (120, [(109, 218), (55, 220), (27, 216), (13, 208), (5, 160)]),
@@ -156,7 +162,7 @@ fn the_view_holds_the_most_whole_pixels_that_fit_176_logical_pixels_an_odd_numbe
                 "{dpi} dpi, {magnification:?}"
             );
             assert_eq!(
-                (view.frame.width, view.frame.height),
+                (view.enlargement.width, view.enlargement.height),
                 (side, side),
                 "{dpi} dpi, {magnification:?}"
             );
@@ -172,9 +178,10 @@ fn the_grid_parts_the_pixels_from_8x_up() {
 }
 
 #[test]
-fn the_panel_is_22_logical_pixels_below_and_right_of_the_cursor_around_the_frame_and_the_strip() {
-    // At 100%: a border of 1 and a padding of 6 around the frame of 168, which the strip follows: 7 above its line of
-    // 16 (12px text at a line height of 1.35, 16.2), 5 above the color's row, as tall as HEX above RGB in Color
+fn the_panel_is_22_logical_pixels_below_and_right_of_the_cursor_around_the_enlargement_and_the_readout()
+ {
+    // At 100%: a border of 1 and a padding of 6 around the enlargement of 168, which the readout follows: 7 above its
+    // line of 16 (12px text at a line height of 1.35, 16.2), 5 above the color's row, as tall as HEX above RGB in Color
     // format's default, Both, two lines of 16, and 2 below it.
     let view = view(&open_at(MIDDLE));
     assert_eq!(
@@ -186,13 +193,13 @@ fn the_panel_is_22_logical_pixels_below_and_right_of_the_cursor_around_the_frame
             height: 7 + 168 + 7 + 16 + 5 + 2 * 16 + 2 + 7,
         }
     );
-    assert_eq!(view.frame, square(929, 629, 168));
+    assert_eq!(view.enlargement, square(929, 629, 168));
 }
 
 #[test]
 fn at_150_percent_every_size_of_the_panel_is_scaled_on_its_own() {
     // Each size halves up on its own: a border of 2 (1.5) and a padding of 9, 33 above and right of the cursor, and the
-    // strip's 11 above its two lines of 24 (24.3), 8 (7.5) above the color's two lines of 24, and 3 below them. The
+    // readout's 11 above its two lines of 24 (24.3), 8 (7.5) above the color's two lines of 24, and 3 below them. The
     // logical pixels show, so X and Y take a line each.
     let view = view(&open_with(144, Magnification::X8, MIDDLE));
     assert_eq!(
@@ -204,7 +211,7 @@ fn at_150_percent_every_size_of_the_panel_is_scaled_on_its_own() {
             height: 11 + 264 + 11 + 2 * 24 + 8 + 2 * 24 + 3 + 11,
         }
     );
-    assert_eq!(view.frame, square(944, 644, 264));
+    assert_eq!(view.enlargement, square(944, 644, 264));
 }
 
 /// Where the panel's top left corner is.
@@ -329,7 +336,7 @@ fn the_panel_never_leaves_the_current_monitor() {
 #[test]
 fn in_the_monitors_corner_only_the_pixels_on_it_are_shown() {
     // The cursor on the top left pixel: of the 21 × 21 around it, the 11 × 11 from it right and down are on the monitor,
-    // and the rest of the frame stays empty.
+    // and the rest of the enlargement stays empty.
     let view = view(&open_at(at(0, 0)));
     assert_eq!(view.source, square(-10, -10, 21));
     assert_eq!(view.shown, square(0, 0, 11));
@@ -391,7 +398,7 @@ const LEFT_4K: Rect = Rect {
     height: 2160,
 };
 
-/// What a coordinate on the strip reads: its physical pixels, and its logical pixels when they show.
+/// What a coordinate on the readout reads: its physical pixels, and its logical pixels when they show.
 fn reads(coordinate: &screengauge_core::session::Coordinate) -> (&str, Option<&str>) {
     (
         coordinate.label.physical.as_str(),
@@ -452,7 +459,7 @@ fn with_also_show_logical_pixels_off_the_position_has_no_logical_part() {
 
 #[test]
 fn without_logical_pixels_x_and_y_share_a_line_in_two_columns() {
-    // At 100% the strip's text is 168 less 4 on each side, 160 wide: two columns of 76, 8 apart.
+    // At 100% the readout's text is 168 less 4 on each side, 160 wide: two columns of 76, 8 apart.
     let view = view(&open_at(MIDDLE));
     assert_eq!(
         view.x.line,
@@ -474,7 +481,8 @@ fn without_logical_pixels_x_and_y_share_a_line_in_two_columns() {
 
 #[test]
 fn with_logical_pixels_x_and_y_take_a_line_each_x_above() {
-    // At 150% the strip's text is 264 less 6 on each side, 252 wide, on lines of 24 (24.3) below the frame's 11 above.
+    // At 150% the readout's text is 264 less 6 on each side, 252 wide, on lines of 24 (24.3) below the enlargement's 11
+    // above.
     let view = view(&open_with(144, Magnification::X8, MIDDLE));
     assert_eq!(
         view.x.line,
@@ -546,51 +554,51 @@ fn turning_past_a_limit_does_nothing_and_the_first_notch_back_is_a_level() {
     assert_eq!(magnification(&session), Magnification::X4);
 }
 
-fn tag(session: &Session) -> bool {
-    view(session).tag
+fn magnification_indicator(session: &Session) -> bool {
+    view(session).magnification_indicator
 }
 
 #[test]
-fn the_tag_shows_when_the_wheel_turns_and_goes_a_second_after_it_stops() {
+fn the_magnification_indicator_shows_when_the_wheel_turns_and_goes_a_second_after_it_stops() {
     let mut session = open_at(MIDDLE);
     let effects = session.handle(wheel(NOTCH, 1000));
-    assert!(tag(&session));
+    assert!(magnification_indicator(&session));
     assert_eq!(effects, [Effect::WakeAt(Duration::from_millis(2000))]);
     // A timer that comes a little early leaves it, and asks again for the moment it goes.
     let effects = session.handle(event(MIDDLE, 1990, Input::Wake));
-    assert!(tag(&session));
+    assert!(magnification_indicator(&session));
     assert_eq!(effects, [Effect::WakeAt(Duration::from_millis(2000))]);
     let effects = session.handle(event(MIDDLE, 2000, Input::Wake));
-    assert!(!tag(&session));
+    assert!(!magnification_indicator(&session));
     assert_eq!(effects, []);
 }
 
 #[test]
-fn another_notch_keeps_the_tag_a_second_more() {
+fn another_notch_keeps_the_magnification_indicator_a_second_more() {
     let mut session = open_at(MIDDLE);
     session.handle(wheel(NOTCH, 1000));
     let effects = session.handle(wheel(NOTCH, 1600));
     assert_eq!(effects, [Effect::WakeAt(Duration::from_millis(2600))]);
     session.handle(event(MIDDLE, 2000, Input::Wake));
-    assert!(tag(&session));
+    assert!(magnification_indicator(&session));
 }
 
 #[test]
-fn turning_past_a_limit_shows_the_tag_all_the_same() {
-    // The owner's choice in WPC-315: the tag tells the magnification is already at its highest.
+fn turning_past_a_limit_shows_the_magnification_indicator_all_the_same() {
+    // The owner's choice in WPC-315: the magnification indicator tells the magnification is already at its highest.
     let mut session = open_with(96, Magnification::X32, MIDDLE);
     let effects = session.handle(wheel(NOTCH, 1000));
-    assert!(tag(&session));
+    assert!(magnification_indicator(&session));
     assert_eq!(effects, [Effect::WakeAt(Duration::from_millis(2000))]);
 }
 
 #[test]
-fn the_tag_goes_with_whatever_event_comes_after_its_second() {
-    // Should the wake be lost, the next move takes the tag away.
+fn the_magnification_indicator_goes_with_whatever_event_comes_after_its_second() {
+    // Should the wake be lost, the next move takes the magnification indicator away.
     let mut session = open_at(MIDDLE);
     session.handle(wheel(NOTCH, 1000));
     session.handle(move_to(at(901, 600), 2500));
-    assert!(!tag(&session));
+    assert!(!magnification_indicator(&session));
 }
 
 /// The effects of closing the tools with Esc, `milliseconds` after Windows started.
@@ -633,7 +641,7 @@ fn the_wheel_on_the_toolbar_changes_no_magnification() {
     let effects = session.handle(event(on_inspect, 1100, Input::Wheel(NOTCH)));
     assert_eq!(effects, []);
     assert_eq!(magnification(&session), Magnification::X8);
-    assert!(!tag(&session));
+    assert!(!magnification_indicator(&session));
 }
 
 /// Where the core puts the toolbar on the Full HD monitor the first time.

@@ -378,7 +378,7 @@ fn with_alt_an_area_of_nothing_but_background_becomes_an_image() {
 
 #[test]
 fn a_tiny_drag_takes_no_image_and_shows_no_notice_with_or_without_alt() {
-    // Four pixels along both axes is still a click or a tremble of the mouse; five along either is a drag.
+    // Four pixels along both axes is still within the drag distance, so a click; five along either is a drag.
     for held in [Held::default(), ALT] {
         let mut session = open(vec![button()], at(1050, 620));
         session.handle(event(at(1050, 620), 1000, Input::Move));

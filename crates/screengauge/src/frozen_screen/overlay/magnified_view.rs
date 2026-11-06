@@ -1,8 +1,8 @@
 //! Inspect's magnified view (v1 spec WPC-296, Inspect; the prototype's variant A, WPC-279): the floating panel, the
 //! frozen screen's pixels enlarged without smoothing, the grid, the outline around the pixel under the cursor, the
-//! magnification's tag and the strip with the cursor's position, the color of the pixel under it and, on a monitor
-//! whose photo didn't come through the exact path, the Approximate color notice. Every rectangle comes from the session
-//! core's [`MagnifiedView`]; this only draws them onto the overlay's render target.
+//! magnification indicator and the readout with the cursor's position, the color of the pixel under it and, on a
+//! monitor whose photo didn't come through the exact path, the Approximate color notice. Every rectangle comes from the
+//! session core's [`MagnifiedView`]; this only draws them onto the overlay's render target.
 //!
 //! The prototype's `drawMag` and its CSS (`.panel`, `.magframe`, `.magtag`, `.info`, `.sw`, `.hdr`) are the
 //! model. Where the core hands over a rectangle, it is used as it is; the rest of the sizes below are the prototype's,
@@ -34,16 +34,16 @@ use crate::graphics::d2d_color;
 
 // Every size below is in logical pixels, which `scaled` turns into physical pixels for the monitor's scale.
 
-/// The panel's corner radius, and the frame's (CSS `.magframe { border-radius: 9px; overflow: hidden }`).
+/// The panel's corner radius, and the enlargement's (CSS `.magframe { border-radius: 9px; overflow: hidden }`).
 const PANEL_RADIUS: u32 = 14;
-const FRAME_RADIUS: u32 = 9;
+const ENLARGEMENT_RADIUS: u32 = 9;
 
 /// How much of the notice's shadow this panel casts. The notice's layers are fitted to a shadow box 15px tall (the
-/// notice's 31px less the spread of 8 on each side). This panel is up to 190 by 303 logical pixels (a frame of 176 or
-/// less, a strip of 113 at most, the position and the color on two lines each and the Approximate color notice's two
-/// under them), so its box is up to 174 by 287: as good as an edge, as far as a blur of sigma 14 (dark) or 13 (light)
-/// can tell. A box that tall casts a shadow stronger than the layers give at full strength, so they are made stronger,
-/// as the tolerance indicator's, a lower panel than the notice, makes them fainter (see `SHADOW_STRENGTH` in
+/// notice's 31px less the spread of 8 on each side). This panel is up to 190 by 303 logical pixels (an enlargement of
+/// 176 or less, a readout of 113 at most, the position and the color on two lines each and the Approximate color
+/// notice's two under them), so its box is up to 174 by 287: as good as an edge, as far as a blur of sigma 14 (dark) or
+/// 13 (light) can tell. A box that tall casts a shadow stronger than the layers give at full strength, so they are made
+/// stronger, as the tolerance indicator's, a lower panel than the notice, makes them fainter (see `SHADOW_STRENGTH` in
 /// `tolerance`).
 ///
 /// Fitted by least squares, the layers laid over each other as Direct2D lays them, against CSS's true blur of the box
@@ -67,19 +67,20 @@ pub(super) const SHADOW_STRENGTH: f32 = 1.25;
 /// How much of the grid's black shows over the pixels (CSS `rgba(0,0,0,.2)`).
 const GRID_OPACITY: f32 = 0.2;
 
-/// The tag: `.magtag`, `left: 6px; top: 6px`, a padding of 4px above and below and 6px at the sides, corners of 6px, a
-/// background of black at .6, and its text in white, 700 weight and 11px with a line as tall as itself.
-const TAG_INSET: u32 = 6;
-const TAG_PAD_X: u32 = 6;
-const TAG_PAD_Y: u32 = 4;
-const TAG_RADIUS: u32 = 6;
-const TAG_FILL_OPACITY: f32 = 0.6;
-pub const TAG_TEXT: u32 = 11;
-pub const TAG_WEIGHT: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT_BOLD;
+/// The magnification indicator: `.magtag`, `left: 6px; top: 6px`, a padding of 4px above and below and 6px at the
+/// sides, corners of 6px, a background of black at .6, and its text in white, 700 weight and 11px with a line as tall
+/// as itself.
+const INDICATOR_INSET: u32 = 6;
+const INDICATOR_PAD_X: u32 = 6;
+const INDICATOR_PAD_Y: u32 = 4;
+const INDICATOR_RADIUS: u32 = 6;
+const INDICATOR_FILL_OPACITY: f32 = 0.6;
+pub const INDICATOR_TEXT: u32 = 11;
+pub const INDICATOR_WEIGHT: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT_BOLD;
 
-/// The strip's rows (`.info .row`): the key `X` or `Y` in a box at least this wide, then a gap, then the physical number.
-/// A logical part follows after a gap and a margin, the label's bar (`geometry::BAR_WIDTH` wide and `geometry::BAR_HEIGHT`
-/// tall), a margin and a gap.
+/// The readout's rows (`.info .row`): the key `X` or `Y` in a box at least this wide, then a gap, then the physical
+/// number. A logical part follows after a gap and a margin, the label's bar (`geometry::BAR_WIDTH` wide and
+/// `geometry::BAR_HEIGHT` tall), a margin and a gap.
 const KEY_WIDTH: u32 = 14;
 const GAP: u32 = 8;
 const BAR_MARGIN: u32 = 7;
@@ -92,14 +93,15 @@ const SWATCH_RING: u32 = 1;
 /// The Approximate color notice's text (the prototype's `.hdr`): semibold, 11px, in `--warn`, as its sign is.
 pub const APPROXIMATE_TEXT: u32 = 11;
 
-/// Where the frame's parts go, in physical pixels of the virtual screen, right and bottom one past the last pixel.
+/// Where the enlargement's parts go, in physical pixels of the virtual screen, right and bottom one past the last
+/// pixel.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Places {
     /// The magnification: how many physical pixels a side each enlarged pixel takes.
     factor: i32,
-    /// The whole frame, where the blank color goes.
-    frame: RECT,
-    /// The part of the frame the monitor's pixels fill: each of the photo's pixels in `shown` is a square of the
+    /// The whole enlargement, where the blank color goes.
+    enlargement: RECT,
+    /// The part of the enlargement the monitor's pixels fill: each of the photo's pixels in `shown` is a square of the
     /// magnification's side here.
     drawn: RECT,
     /// The photo's pixels that are enlarged: the view's `shown`.
@@ -108,28 +110,28 @@ struct Places {
     cell: RECT,
 }
 
-/// Where the parts of `view`'s frame go. Fails for a view so large that its pixels don't fit a coordinate.
+/// Where the parts of `view`'s enlargement go. Fails for a view so large that its pixels don't fit a coordinate.
 fn places(view: &MagnifiedView) -> windows::core::Result<Places> {
     let too_large = || Error::new(E_FAIL, "the magnified view is too large to draw");
     let whole = |value: i64| i32::try_from(value).map_err(|_| too_large());
     let factor = whole(i64::from(view.magnification.factor()))?;
-    let frame = geometry::bounds(view.frame)?;
+    let enlargement = geometry::bounds(view.enlargement)?;
     // Where the enlarged pixel of the frozen screen's pixel at `at` starts along an axis: its distance from the source's
-    // first pixel, enlarged, from the frame's first pixel.
-    let start = |frame: i32, source: i32, at: i32| {
-        whole(i64::from(frame) + (i64::from(at) - i64::from(source)) * i64::from(factor))
+    // first pixel, enlarged, from the enlargement's first pixel.
+    let start = |enlargement: i32, source: i32, at: i32| {
+        whole(i64::from(enlargement) + (i64::from(at) - i64::from(source)) * i64::from(factor))
     };
     let (source, shown) = (view.source, view.shown);
-    let left = start(frame.left, source.left, shown.left)?;
-    let top = start(frame.top, source.top, shown.top)?;
+    let left = start(enlargement.left, source.left, shown.left)?;
+    let top = start(enlargement.top, source.top, shown.top)?;
     let drawn = RECT {
         left,
         top,
         right: whole(i64::from(left) + i64::from(shown.width) * i64::from(factor))?,
         bottom: whole(i64::from(top) + i64::from(shown.height) * i64::from(factor))?,
     };
-    let left = start(frame.left, source.left, view.center.x)?;
-    let top = start(frame.top, source.top, view.center.y)?;
+    let left = start(enlargement.left, source.left, view.center.x)?;
+    let top = start(enlargement.top, source.top, view.center.y)?;
     let cell = RECT {
         left,
         top,
@@ -138,7 +140,7 @@ fn places(view: &MagnifiedView) -> windows::core::Result<Places> {
     };
     Ok(Places {
         factor,
-        frame,
+        enlargement,
         drawn,
         shown: geometry::bounds(shown)?,
         cell,
@@ -200,13 +202,13 @@ fn line_columns(key: i32, physical: i32, dpi: u32) -> LineColumns {
     }
 }
 
-/// The tag, ready to draw.
-struct PlacedTag {
+/// The magnification indicator, ready to draw.
+struct PlacedIndicator {
     background: D2D1_ROUNDED_RECT,
     text: PlacedText,
 }
 
-/// One of the strip's lines, ready to draw: the key, the physical number, and the bar and the logical number when the
+/// One of the readout's lines, ready to draw: the key, the physical number, and the bar and the logical number when the
 /// coordinate has them.
 struct PlacedLine {
     key: PlacedText,
@@ -220,7 +222,7 @@ struct PlacedApproximate {
     lines: [PlacedText; 2],
 }
 
-/// The color's part of the strip, ready to draw: the swatch and its ring, and the texts beside it.
+/// The color's part of the readout, ready to draw: the swatch and its ring, and the texts beside it.
 struct PlacedColor {
     swatch: D2D1_ROUNDED_RECT,
     ring: i32,
@@ -233,8 +235,8 @@ impl Overlay {
     /// Draws `view` over the measurements and under the toolbar, between BeginDraw and EndDraw, enlarging the pixels of
     /// `photo`, the window's monitor's photo with its pixel (0, 0) at the monitor's top left corner.
     ///
-    /// Everything that can fail is done before the first thing is drawn into the frame: a clip is pushed and popped
-    /// with nothing between that could return early, so the frame is never left with a clip pushed.
+    /// Everything that can fail is done before the first thing is drawn into the enlargement: a clip is pushed and
+    /// popped with nothing between that could return early, so the enlargement is never left with a clip pushed.
     pub fn draw_magnified_view(
         &self,
         target: &ID2D1RenderTarget,
@@ -242,8 +244,8 @@ impl Overlay {
         photo: &ID2D1Bitmap,
     ) -> windows::core::Result<()> {
         let places = places(view)?;
-        let tag = if view.tag {
-            Some(self.tag(&places.frame, places.factor)?)
+        let magnification_indicator = if view.magnification_indicator {
+            Some(self.magnification_indicator(&places.enlargement, places.factor)?)
         } else {
             None
         };
@@ -254,9 +256,9 @@ impl Overlay {
             .as_ref()
             .map(|notice| self.approximate(notice))
             .transpose()?;
-        let radius = scaled(FRAME_RADIUS, self.dpi);
+        let radius = scaled(ENLARGEMENT_RADIUS, self.dpi);
         let mask: ID2D1Geometry = self
-            .geometry_of(&self.shaped(&places.frame, radius, 0, 0))?
+            .geometry_of(&self.shaped(&places.enlargement, radius, 0, 0))?
             .cast()?;
 
         self.draw_floating_panel(
@@ -266,11 +268,11 @@ impl Overlay {
             SHADOW_STRENGTH,
         )?;
 
-        let frame = self.in_window(&places.frame);
+        let enlargement = self.in_window(&places.enlargement);
         // `D2D1_LAYER_PARAMETERS::default()` is all zeros: no content, no opacity and a transform that squashes the mask
         // to a point, so everything the layer is meant to carry is set.
         let mut parameters = D2D1_LAYER_PARAMETERS {
-            contentBounds: frame,
+            contentBounds: enlargement,
             geometricMask: ManuallyDrop::new(Some(mask)),
             maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
             opacity: 1.0,
@@ -285,16 +287,16 @@ impl Overlay {
         // Direct2D only fails the frame at EndDraw. The layer is managed by Direct2D (it is Windows 8 and later, and
         // ScreenGauge is Windows 11 only), and the pop below follows with nothing between that can return.
         unsafe { target.PushLayer(&parameters, None::<&ID2D1Layer>) };
-        self.draw_frame(target, photo, &places, view);
-        if let Some(tag) = &tag {
-            self.draw_tag(target, tag);
+        self.draw_enlargement(target, photo, &places, view);
+        if let Some(magnification_indicator) = &magnification_indicator {
+            self.draw_magnification_indicator(target, magnification_indicator);
         }
         // SAFETY: pops the layer pushed above, once.
         unsafe { target.PopLayer() };
         // The layer kept its own reference to the mask until the pop; this one is released here, once.
         drop(ManuallyDrop::into_inner(parameters.geometricMask));
 
-        self.draw_strip(target, &lines);
+        self.draw_readout(target, &lines);
         self.draw_color(target, &color);
         if let Some(approximate) = &approximate {
             self.draw_approximate(target, approximate)?;
@@ -302,9 +304,9 @@ impl Overlay {
         Ok(())
     }
 
-    /// What the frame holds, clipped to its rounded corners by the layer the caller pushed: the blank color, the monitor's
-    /// pixels enlarged, the grid and the outline of the pixel under the cursor.
-    fn draw_frame(
+    /// What the enlargement holds, clipped to its rounded corners by the layer the caller pushed: the blank color, the
+    /// monitor's pixels enlarged, the grid and the outline of the pixel under the cursor.
+    fn draw_enlargement(
         &self,
         target: &ID2D1RenderTarget,
         photo: &ID2D1Bitmap,
@@ -318,9 +320,9 @@ impl Overlay {
         // whole pixels, the destination a whole multiple of the source's size, so nearest neighbor makes each source
         // pixel a square of exactly one color.
         unsafe {
-            // Aliased, so the blank color covers exactly the frame's pixels: the layer rounds the corners.
+            // Aliased, so the blank color covers exactly the enlargement's pixels: the layer rounds the corners.
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-            target.FillRectangle(&self.in_window(&places.frame), &self.surfaces.blank);
+            target.FillRectangle(&self.in_window(&places.enlargement), &self.surfaces.blank);
             target.DrawBitmap(
                 photo,
                 Some(&drawn),
@@ -333,13 +335,13 @@ impl Overlay {
             self.draw_grid(target, &places.drawn, places.factor);
         }
         self.draw_center_outline(target, &places.cell);
-        // SAFETY: as above. Back to Direct2D's default, which the tag's corners need.
+        // SAFETY: as above. Back to Direct2D's default, which the magnification indicator's corners need.
         unsafe { target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };
     }
 
-    /// The grid over `drawn`, the part of the frame that holds the monitor's pixels: a line one pixel wide in black at
-    /// 20% on the first column of each enlarged pixel but the first, and the same along the rows. Where a vertical line
-    /// and a horizontal one cross, the pixel is filled twice, as the prototype's canvas does.
+    /// The grid over `drawn`, the part of the enlargement that holds the monitor's pixels: a line one pixel wide in
+    /// black at 20% on the first column of each enlarged pixel but the first, and the same along the rows. Where a
+    /// vertical line and a horizontal one cross, the pixel is filled twice, as the prototype's canvas does.
     fn draw_grid(&self, target: &ID2D1RenderTarget, drawn: &RECT, step: i32) {
         // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
         // Direct2D only fails the frame at EndDraw. Aliased fills of rectangles on whole pixels cover exactly those
@@ -393,14 +395,25 @@ impl Overlay {
         }
     }
 
-    /// The tag with the magnification, `factor`, laid out with its top left corner `TAG_INSET` inside `frame`'s.
-    fn tag(&self, frame: &RECT, factor: i32) -> windows::core::Result<PlacedTag> {
-        let text = self.typeset_plain(&format!("{factor}\u{d7}"), &self.tag_format)?;
-        let (pad_x, pad_y) = (scaled(TAG_PAD_X, self.dpi), scaled(TAG_PAD_Y, self.dpi));
-        let line = scaled(TAG_TEXT, self.dpi);
+    /// The magnification indicator for `factor`, laid out with its top left corner `INDICATOR_INSET` inside
+    /// `enlargement`'s.
+    fn magnification_indicator(
+        &self,
+        enlargement: &RECT,
+        factor: i32,
+    ) -> windows::core::Result<PlacedIndicator> {
+        let text = self.typeset_plain(
+            &format!("{factor}\u{d7}"),
+            &self.magnification_indicator_format,
+        )?;
+        let (pad_x, pad_y) = (
+            scaled(INDICATOR_PAD_X, self.dpi),
+            scaled(INDICATOR_PAD_Y, self.dpi),
+        );
+        let line = scaled(INDICATOR_TEXT, self.dpi);
         let corner = RECT {
-            left: frame.left + scaled(TAG_INSET, self.dpi),
-            top: frame.top + scaled(TAG_INSET, self.dpi),
+            left: enlargement.left + scaled(INDICATOR_INSET, self.dpi),
+            top: enlargement.top + scaled(INDICATOR_INSET, self.dpi),
             right: 0,
             bottom: 0,
         };
@@ -414,11 +427,11 @@ impl Overlay {
         // and the baseline is on a whole pixel.
         let line_top = window.top + px(pad_y);
         let baseline = text.baseline_in(line_top, px(line));
-        Ok(PlacedTag {
+        Ok(PlacedIndicator {
             background: rounded_at(
                 self.window_origin(),
                 &area,
-                scaled(TAG_RADIUS, self.dpi),
+                scaled(INDICATOR_RADIUS, self.dpi),
                 0,
                 0,
                 false,
@@ -431,28 +444,37 @@ impl Overlay {
         })
     }
 
-    /// The tag over the frame: a rounded rectangle of black at 60%, and the magnification in white on it.
-    fn draw_tag(&self, target: &ID2D1RenderTarget, tag: &PlacedTag) {
+    /// The magnification indicator over the enlargement: a rounded rectangle of black at 60%, and the magnification in
+    /// white on it.
+    fn draw_magnification_indicator(
+        &self,
+        target: &ID2D1RenderTarget,
+        magnification_indicator: &PlacedIndicator,
+    ) {
         // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
         // Direct2D only fails the frame at EndDraw. Each brush's opacity is set before it is used.
         unsafe {
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            self.shade.SetOpacity(TAG_FILL_OPACITY);
-            target.FillRoundedRectangle(&tag.background, &self.shade);
+            self.shade.SetOpacity(INDICATOR_FILL_OPACITY);
+            target.FillRoundedRectangle(&magnification_indicator.background, &self.shade);
             // Grayscale, not ClearType: color fringes would show on the see-through black.
             target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             self.white.SetOpacity(1.0);
             target.DrawTextLayout(
-                dot(tag.text.left, tag.text.top).point,
-                &tag.text.layout,
+                dot(
+                    magnification_indicator.text.left,
+                    magnification_indicator.text.top,
+                )
+                .point,
+                &magnification_indicator.text.layout,
                 &self.white,
                 D2D1_DRAW_TEXT_OPTIONS_NONE,
             );
         }
     }
 
-    /// The strip's line for `coordinate`, whose key is `key` (`X` or `Y`), laid out in the coordinate's line. The key is
-    /// medium and dim, the physical number semibold in the ink, and the logical one, after a bar, medium at
+    /// The readout's line for `coordinate`, whose key is `key` (`X` or `Y`), laid out in the coordinate's line. The key
+    /// is medium and dim, the physical number semibold in the ink, and the logical one, after a bar, medium at
     /// `LOGICAL_OPACITY`, as in a pinned label. The texts share one baseline, on a whole pixel, which centers the
     /// physical number in the line the way CSS does it; the bar is centered in the line, as a flex item is.
     fn line(&self, key: &str, coordinate: &Coordinate) -> windows::core::Result<PlacedLine> {
@@ -498,9 +520,9 @@ impl Overlay {
         })
     }
 
-    /// The strip's lines: for each, the key in the dim ink, the physical number in the ink and, when there is one, the
-    /// bar and the logical number fainter, as a pinned label draws them.
-    fn draw_strip(&self, target: &ID2D1RenderTarget, lines: &[PlacedLine]) {
+    /// The readout's lines: for each, the key in the dim ink, the physical number in the ink and, when there is one,
+    /// the bar and the logical number fainter, as a pinned label draws them.
+    fn draw_readout(&self, target: &ID2D1RenderTarget, lines: &[PlacedLine]) {
         let origin = |text: &PlacedText| dot(text.left, text.top).point;
         for line in lines {
             // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and
@@ -687,13 +709,13 @@ mod tests {
         MagnifiedView {
             monitor: 0,
             panel: rect(104, 264, 182, 230),
-            frame: rect(110, 270, 168, 168),
+            enlargement: rect(110, 270, 168, 168),
             source: rect(50, 60, 21, 21),
             shown: rect(55, 60, 16, 21),
             center: Point { x: 60, y: 70 },
             magnification: Magnification::X8,
             grid: true,
-            tag: false,
+            magnification_indicator: false,
             x: coordinate.clone(),
             y: coordinate,
             color,
@@ -706,18 +728,18 @@ mod tests {
     }
 
     #[test]
-    fn the_monitors_part_of_the_frame_starts_where_the_source_reaches_the_monitor() {
+    fn the_monitors_part_of_the_enlargement_starts_where_the_source_reaches_the_monitor() {
         let places = places(&near_the_left_side()).expect("places");
         assert_eq!(places.factor, 8);
-        // 5 pixels of the source are past the monitor's left side, so 5 enlarged pixels of the frame are blank; the
-        // rest reaches the frame's right and bottom sides, 16 and 21 pixels enlarged.
-        let frame = RECT {
+        // 5 pixels of the source are past the monitor's left side, so 5 enlarged pixels of the enlargement are blank;
+        // the rest reaches the enlargement's right and bottom sides, 16 and 21 pixels enlarged.
+        let enlargement = RECT {
             left: 110,
             top: 270,
             right: 278,
             bottom: 438,
         };
-        assert_eq!(places.frame, frame);
+        assert_eq!(places.enlargement, enlargement);
         assert_eq!(
             places.drawn,
             RECT {
@@ -737,7 +759,8 @@ mod tests {
                 bottom: 81,
             }
         );
-        // The pixel under the cursor is the middle one of the 21, the eleventh, 10 enlarged pixels from the frame's left.
+        // The pixel under the cursor is the middle one of the 21, the eleventh, 10 enlarged pixels from the
+        // enlargement's left.
         assert_eq!(
             places.cell,
             RECT {

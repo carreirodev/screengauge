@@ -395,8 +395,8 @@ fn render(
 /// The most levels the notice's soft shadow may darken a pixel of the view's text, as it does any panel under it.
 const SHADOW: u8 = 24;
 
-/// How far from the strip's background a pixel of a text's line must be to count as ink, in any channel: the strip's
-/// own background shades by less.
+/// How far from the readout's background a pixel of a text's line must be to count as ink, in any channel: the
+/// readout's own background shades by less.
 const INK: u8 = 40;
 
 /// How many pixels of `part`'s ink the notice may hide with the cursor at `y`, at `dpi`, in `format`: none, but at
@@ -435,7 +435,7 @@ fn on_the_last_rows_the_colors_text_and_the_position_stay_whole() {
                     let alone = render(&canvas, crop, mode, dpi, &view, None);
                     let covered = render(&canvas, crop, mode, dpi, &view, Some(&shown));
                     let case = format!("{click_at:?} at {dpi} DPI, {format:?}, {mode:?}");
-                    // The ink of each text's line, the pixels well apart from the strip's background (the line's top
+                    // The ink of each text's line, the pixels well apart from the readout's background (the line's top
                     // left pixel, above any letter), is as it was without the notice, but for the notice's shadow.
                     for (part, rect) in parts(&view).into_iter().filter(|(part, _)| *part != SWATCH)
                     {

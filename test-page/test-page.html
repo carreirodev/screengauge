@@ -1,11 +1,11 @@
 <!doctype html>
 <!--
   ScreenGauge's test page (ticket WPC-331): the hard cases to measure, drawn by Chrome, photographed on the owner's
-  monitors and kept in captures/ for the tests without a screen. README.md records how.
+  monitors and kept in samples/ for the tests without a screen. README.md records how.
 
   The page is a 1200 x 720 CSS px stage, 16 CSS px from the window's top-left corner, on a pure magenta (#FF00FF)
-  background. The capture program finds the stage as the one rectangle of that size, times the monitor's scale, with
-  magenta all around it, and keeps only the stage: anything outside it never reaches a capture. So:
+  background. The program that takes the samples finds the stage as the one rectangle of that size, times the
+  monitor's scale, with magenta all around it, and keeps only the stage: anything outside it never reaches a sample. So:
   - nothing on the stage is #FF00FF, and its edge pixels are white;
   - every size and place on the stage is a whole number of CSS px, and the stage's own are multiples of 4, so at every
     Windows scale (a multiple of 25%) the stage lands on whole physical pixels;
@@ -13,7 +13,7 @@
 
   Each case has an id, and its place and size on the stage are written in its own style, in CSS px from the stage's
   top-left corner: this file is the list of cases. Places and sizes at odd values are on purpose: at 125% and 175% they
-  would fall between physical pixels, and the captures show where Chrome puts them instead.
+  would fall between physical pixels, and the samples show where Chrome puts them instead.
 -->
 <html lang="en" translate="no">
 <head>

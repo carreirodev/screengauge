@@ -2,14 +2,14 @@
 
 use crate::settings::ColorFormat;
 
-/// A color's two texts in Color format's order. The strip and the clipboard both take their text from here, so what is
-/// copied is always what is on screen.
+/// A color's two texts in Color format's order. The readout and the clipboard both take their text from here, so what
+/// is copied is always what is on screen.
 pub(super) struct Texts {
-    /// The one the strip shows first and the click copies: HEX, or RGB when Color format is RGB.
+    /// The one the readout shows first and the click copies: HEX, or RGB when Color format is RGB.
     pub(super) first: String,
     /// The other one, which Shift + click copies whether it shows or not.
     pub(super) other: String,
-    /// Whether the strip shows `other` under `first`: with Color format at Both, HEX above RGB (the owner's choice in
+    /// Whether the readout shows `other` under `first`: with Color format at Both, HEX above RGB (the owner's choice in
     /// WPC-316).
     pub(super) other_shows: bool,
 }

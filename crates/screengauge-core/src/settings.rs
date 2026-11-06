@@ -181,7 +181,7 @@ impl Folder {
 }
 
 /// A tolerance: how far a pixel's red, green or blue may be from the reference color's, as Inspect shows them, with
-/// the pixel still the same area. The limits, the default and the steps were calibrated with the test page's captures
+/// the pixel still the same area. The limits, the default and the steps were calibrated with the test page samples
 /// and approved by the owner (WPC-332; ADR 0005).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Tolerance(u8);
@@ -228,7 +228,7 @@ impl Tolerance {
 }
 
 /// The last of the steps of 1: from 0 to it, a notch of the mouse wheel and Settings' − / + move the tolerance by 1,
-/// where the captures show light cards, faint shadows and subtle gradients being told apart (WPC-332). From it, + goes
+/// where the samples show light cards, faint shadows and subtle gradients being told apart (WPC-332). From it, + goes
 /// to 15.
 const LAST_FINE_STEP: u8 = 10;
 

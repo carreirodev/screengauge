@@ -50,6 +50,10 @@ _Avoid_: border, boundary
 The rectangle the user drags out with the mouse, exactly as drawn, before any shrinking to the content.
 _Avoid_: rough rectangle, selection, marquee
 
+**Drag distance**:
+How far the cursor may go from where the mouse button went down, 4 physical pixels each way as in Windows, with the press still a click; in Bounds and Snip a click draws nothing.
+_Avoid_: click limit, tremble (a press that stays within the drag distance is simply a click), threshold
+
 **Content**:
 Every pixel inside a drawn rectangle whose color differs from the reference color by more than the tolerance, whether it forms one object or several.
 _Avoid_: object, element
@@ -139,12 +143,28 @@ The tool that shows a magnified view of the area around the cursor, with the cur
 _Avoid_: zoom, magnifier, lupa
 
 **Magnified view**:
-The enlarged picture of the pixels around the cursor that Inspect shows, with the pixel under the cursor always at its center.
+The panel Inspect shows next to the cursor, with the enlargement on top and the readout under it.
 _Avoid_: loupe, zoom window
 
+**Enlargement**:
+The square of the magnified view where the pixels around the cursor appear enlarged, with the pixel under the cursor always at its center.
+_Avoid_: frame (one drawing on screen, a different thing), lens, zoom
+
 **Magnification**:
-How many times larger each physical pixel appears in the magnified view.
+How many times larger each physical pixel appears in the enlargement.
 _Avoid_: zoom, scale (the monitor's scale is a different thing)
+
+**Magnification indicator**:
+The magnification, such as 8×, in the enlargement's top left corner for a second after the mouse wheel turns.
+_Avoid_: tag, badge
+
+**Readout**:
+The band of the magnified view under the enlargement with the cursor's position and the color of the pixel under it.
+_Avoid_: strip, info bar
+
+**Swatch**:
+The small square in the readout filled with the color of the pixel under the cursor, beside its HEX or RGB.
+_Avoid_: color sample, chip
 
 **Snip**:
 The tool that takes an image of the content a drawn rectangle shrinks to, or of the drawn rectangle itself when shrinking is off.
@@ -215,5 +235,13 @@ Everything the tools show at one moment, as the session core describes it for dr
 _Avoid_: view model, render state, frame (one drawing of it on screen, a different thing)
 
 **Effect**:
-Something the session core asks the rest of ScreenGauge to do in Windows, in the order it asks, such as copying to the clipboard, writing the Snip's PNG file, opening Save As or Settings, keeping the remembered state or closing the tools.
+Something the session core asks the Windows layer to do in Windows, in the order it asks, such as copying to the clipboard, writing the Snip's PNG file, opening Save As or Settings, keeping the remembered state or closing the tools.
 _Avoid_: command, side effect, request
+
+**Windows layer**:
+The part of ScreenGauge that deals with Windows on the session core's behalf: it turns the mouse and the keys into what the session core reads, draws the scene and carries out the effects.
+_Avoid_: platform layer, shell (Windows' own shell is a different thing), the rest of ScreenGauge
+
+**Test page sample**:
+A picture of ScreenGauge's test page as ScreenGauge photographed it on one of the owner's monitors at one scale, kept in the repository so the tools can be tested without a screen.
+_Avoid_: capture (the taking of the photos, not what they are), test page photo (a photo is erased when the tools close), shot

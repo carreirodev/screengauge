@@ -107,7 +107,7 @@ pub struct ToleranceIndicator {
 /// Inspect's magnified view (v1 spec WPC-296, Inspect; the prototype's variant A, WPC-279): a panel a little below and
 /// to the right of the cursor, or on the other side of it near the monitor's limits, never leaving the current monitor.
 /// It holds a square of the frozen screen's pixels around the cursor, each enlarged to a square of the magnification's
-/// side without smoothing, and under it a strip with the cursor's position and the color of the pixel under it. Every
+/// side without smoothing, and under it a readout with the cursor's position and the color of the pixel under it. Every
 /// rectangle is in physical pixels of the virtual screen, worked out in the session core from sizes in logical pixels,
 /// so nothing in it depends on a font.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,42 +118,42 @@ pub struct MagnifiedView {
     pub panel: Rect,
     /// Where the enlarged pixels go, inside the panel: a square `source.width` times the magnification a side, its
     /// corners rounded by 9 logical pixels.
-    pub frame: Rect,
-    /// The frozen screen's pixels the frame stands for: an odd number of them a side, so the pixel under the cursor is
-    /// the exact middle one. Near the current monitor's limit part of it is past that limit: the frame is plain and
-    /// empty there, in the palette's blank color, with no grid and no pixel of the monitor beside it.
+    pub enlargement: Rect,
+    /// The frozen screen's pixels the enlargement stands for: an odd number of them a side, so the pixel under the
+    /// cursor is the exact middle one. Near the current monitor's limit part of it is past that limit: the enlargement
+    /// is plain and empty there, in the palette's blank color, with no grid and no pixel of the monitor beside it.
     pub source: Rect,
-    /// The part of `source` on the current monitor, which is what the frame draws, each pixel enlarged to a square of
-    /// the magnification's side. Never empty: the pixel under the cursor is on it.
+    /// The part of `source` on the current monitor, which is what the enlargement draws, each pixel enlarged to a
+    /// square of the magnification's side. Never empty: the pixel under the cursor is on it.
     pub shown: Rect,
-    /// The pixel under the cursor, in the middle of `source`, outlined in black and then white in the frame.
+    /// The pixel under the cursor, in the middle of `source`, outlined in black and then white in the enlargement.
     pub center: Point,
     pub magnification: Magnification,
     /// Whether a 1-pixel grid parts the enlarged pixels: from 8× up. It covers `shown` alone.
     pub grid: bool,
-    /// Whether the magnification shows, as `8×`, in the frame's top left corner: for a second after the mouse wheel
-    /// turns, even when it turned past a limit and changed nothing (the owner's choice in WPC-315).
-    pub tag: bool,
-    /// The cursor's position on the strip under the frame: how far it is from the current monitor's left side.
+    /// Whether the magnification shows, as `8×`, in the enlargement's top left corner: for a second after the mouse
+    /// wheel turns, even when it turned past a limit and changed nothing (the owner's choice in WPC-315).
+    pub magnification_indicator: bool,
+    /// The cursor's position on the readout under the enlargement: how far it is from the current monitor's left side.
     pub x: Coordinate,
     /// How far it is from the current monitor's top.
     pub y: Coordinate,
-    /// The color of the pixel under the cursor, on the strip under its position.
+    /// The color of the pixel under the cursor, on the readout under its position.
     pub color: PixelColor,
     /// The Approximate color notice under the color, while the view is on a monitor whose photo didn't come through
-    /// the exact path. `None` on every other monitor, where the strip ends with the color.
+    /// the exact path. `None` on every other monitor, where the readout ends with the color.
     pub approximate_color: Option<ApproximateColor>,
 }
 
-/// The Approximate color notice on the magnified view's strip (v1 spec WPC-296, Inspect and Colors and HDR): the alert
-/// sign in the warning's amber, and beside it "Approximate color" above "(HDR on)", semibold, 11 logical pixels tall
-/// and in the amber too (the prototype's `.hdr`). It is the one notice that stays, for as long as the view is on that
-/// monitor, and Inspect works as ever: the click still copies the color. The text takes two lines whatever the
+/// The Approximate color notice on the magnified view's readout (v1 spec WPC-296, Inspect and Colors and HDR): the
+/// alert sign in the warning's amber, and beside it "Approximate color" above "(HDR on)", semibold, 11 logical pixels
+/// tall and in the amber too (the prototype's `.hdr`). It is the one notice that stays, for as long as the view is on
+/// that monitor, and Inspect works as ever: the click still copies the color. The text takes two lines whatever the
 /// magnification, since it doesn't fit one at every magnification and scale (the owner's choice in WPC-328), so on that
 /// monitor the panel keeps its height as the mouse wheel turns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApproximateColor {
-    /// The alert sign's square, 13 logical pixels a side, at the strip's left and centered beside the two lines: the
+    /// The alert sign's square, 13 logical pixels a side, at the readout's left and centered beside the two lines: the
     /// notices' exclamation mark in a circle.
     pub sign: Rect,
     /// "Approximate color", then "(HDR on)" under it, after the sign.
@@ -169,10 +169,10 @@ pub struct NoticeLine {
     pub line: Rect,
 }
 
-/// The color of the pixel under the cursor on the magnified view's strip (v1 spec WPC-296, Inspect): a swatch of it at
-/// the strip's left, and beside it its HEX, its RGB, or its HEX above its RGB, as Color format says. HEX, RGB and the
-/// swatch don't fit one line of the strip at every magnification and scale, so with both formats HEX and RGB take a
-/// line each, whatever the color, and the panel keeps its size as the cursor moves (the owner's choice in WPC-316).
+/// The color of the pixel under the cursor on the magnified view's readout (v1 spec WPC-296, Inspect): a swatch of it
+/// at the readout's left, and beside it its HEX, its RGB, or its HEX above its RGB, as Color format says. HEX, RGB and
+/// the swatch don't fit one line of the readout at every magnification and scale, so with both formats HEX and RGB take
+/// a line each, whatever the color, and the panel keeps its size as the cursor moves (the owner's choice in WPC-316).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PixelColor {
     /// Its red, green and blue, exactly as the frozen screen has the pixel: never averaged with its neighbors.
@@ -187,7 +187,7 @@ pub struct PixelColor {
     pub second: Option<ColorText>,
 }
 
-/// One of the color's texts on the magnified view's strip.
+/// One of the color's texts on the magnified view's readout.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColorText {
     /// `#1E90FF` or `30, 144, 255`, exactly what the click or Shift + click copies.
@@ -196,16 +196,16 @@ pub struct ColorText {
     pub line: Rect,
 }
 
-/// One of the cursor's coordinates on the magnified view's strip: `X` or `Y`, the physical pixels, and, after a thin
+/// One of the cursor's coordinates on the magnified view's readout: `X` or `Y`, the physical pixels, and, after a thin
 /// bar and fainter, the logical pixels, by the rule of Units (v1 spec WPC-296, Inspect).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Coordinate {
     /// Counted from the current monitor's left side (X) or top (Y), so it is never below zero, whichever monitor it
     /// is: the monitor's first column is 0.
     pub label: Label,
-    /// Where its text goes on the strip: the line's height, starting at the text's left. X and Y share a line, side by
-    /// side, when the label has no logical part, and take one line each, X above Y, when it has (the owner's choice in
-    /// WPC-315: both side by side don't fit the strip).
+    /// Where its text goes on the readout: the line's height, starting at the text's left. X and Y share a line, side
+    /// by side, when the label has no logical part, and take one line each, X above Y, when it has (the owner's choice
+    /// in WPC-315: both side by side don't fit the readout).
     pub line: Rect,
 }
 

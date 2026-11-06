@@ -113,7 +113,7 @@ struct Fixture {
     magnification: Magnification,
     center: Point,
     grid: bool,
-    tag: bool,
+    magnification_indicator: bool,
     logical: bool,
     /// What X and Y say: the physical number, and the logical one when `logical`.
     labels: [(&'static str, &'static str); 2],
@@ -122,14 +122,14 @@ struct Fixture {
     rgb: [u8; 3],
     /// What the color's lines say: the first, and the one under it with both formats.
     color: (&'static str, Option<&'static str>),
-    /// Whether the strip ends with the Approximate color notice, as on a monitor whose photo didn't come through the
+    /// Whether the readout ends with the Approximate color notice, as on a monitor whose photo didn't come through the
     /// exact path.
     approximate: bool,
 }
 
 impl Fixture {
-    /// A view in the middle of the monitor, with the grid wherever the core gives it (8x and up), no tag, and a logical
-    /// part wherever the scale is not 100%.
+    /// A view in the middle of the monitor, with the grid wherever the core gives it (8x and up), no magnification
+    /// indicator, and a logical part wherever the scale is not 100%.
     fn new(dpi: u32, magnification: Magnification) -> Fixture {
         Fixture {
             dpi,
@@ -139,7 +139,7 @@ impl Fixture {
                 y: SCREEN.top + 300,
             },
             grid: magnification.factor() >= 8,
-            tag: false,
+            magnification_indicator: false,
             logical: dpi > 96,
             labels: [("1234", "1234.5"), ("1010", "1010.1")],
             rgb: [30, 144, 255],
@@ -165,13 +165,13 @@ impl Fixture {
         n.max(3)
     }
 
-    /// The height of one line of the strip: CSS 12px at 1.35, scaled and rounded to whole pixels.
+    /// The height of one line of the readout: CSS 12px at 1.35, scaled and rounded to whole pixels.
     fn line_height(&self) -> i32 {
         i32::try_from((162 * self.dpi + 480) / 960).expect("a small height")
     }
 
-    /// The height of one line of the Approximate color notice: CSS 11px at the strip's 1.35, scaled and rounded to whole
-    /// pixels.
+    /// The height of one line of the Approximate color notice: CSS 11px at the readout's 1.35, scaled and rounded to
+    /// whole pixels.
     fn notice_line_height(&self) -> i32 {
         i32::try_from((1485 * self.dpi + 4800) / 9600).expect("a small height")
     }
@@ -194,17 +194,17 @@ impl Fixture {
         } else {
             0
         };
-        let strip =
+        let readout =
             scaled(7, dpi) + lines * line_height + scaled(5, dpi) + row + notice + scaled(2, dpi);
         let (left, top) = (SCREEN.left + 100, SCREEN.top + 70);
         let panel = core_rect(
             left,
             top,
             ring + pad + side + pad + ring,
-            ring + pad + side + strip + pad + ring,
+            ring + pad + side + readout + pad + ring,
         );
-        let (frame_left, frame_top) = (left + scaled(7, dpi), top + scaled(7, dpi));
-        let frame = core_rect(frame_left, frame_top, side, side);
+        let (enlargement_left, enlargement_top) = (left + scaled(7, dpi), top + scaled(7, dpi));
+        let enlargement = core_rect(enlargement_left, enlargement_top, side, side);
 
         let half = n / 2;
         let (source_left, source_top) = (self.center.x - half, self.center.y - half);
@@ -219,16 +219,16 @@ impl Fixture {
             (source_top + n).min(screen.bottom) - shown_top,
         );
 
-        // The strip: right under the frame, as wide as it, its content inset 4 at each side.
+        // The readout: right under the enlargement, as wide as it, its content inset 4 at each side.
         let inset = scaled(4, dpi);
         let width = side - 2 * inset;
-        let strip_top = frame_top + side + scaled(7, dpi);
+        let readout_top = enlargement_top + side + scaled(7, dpi);
         let (x_line, y_line) = if self.logical {
             (
-                core_rect(frame_left + inset, strip_top, width, line_height),
+                core_rect(enlargement_left + inset, readout_top, width, line_height),
                 core_rect(
-                    frame_left + inset,
-                    strip_top + line_height,
+                    enlargement_left + inset,
+                    readout_top + line_height,
                     width,
                     line_height,
                 ),
@@ -237,10 +237,10 @@ impl Fixture {
             // Two columns, 8 apart.
             let column = (width - scaled(8, dpi)) / 2;
             (
-                core_rect(frame_left + inset, strip_top, column, line_height),
+                core_rect(enlargement_left + inset, readout_top, column, line_height),
                 core_rect(
-                    frame_left + inset + column + scaled(8, dpi),
-                    strip_top,
+                    enlargement_left + inset + column + scaled(8, dpi),
+                    readout_top,
                     column,
                     line_height,
                 ),
@@ -255,10 +255,10 @@ impl Fixture {
         };
         // The color's row is 5 under the position, the swatch at its left and the text 8 after it, each centered in the
         // row with the odd pixel below.
-        let row_top = strip_top + lines * line_height + scaled(5, dpi);
+        let row_top = readout_top + lines * line_height + scaled(5, dpi);
         let beside = swatch_side + scaled(8, dpi);
         let swatch = core_rect(
-            frame_left + inset,
+            enlargement_left + inset,
             row_top + (row - swatch_side + 1) / 2,
             swatch_side,
             swatch_side,
@@ -266,7 +266,7 @@ impl Fixture {
         let first_top = row_top + (row - color_lines * line_height + 1) / 2;
         let color_line = |top| {
             core_rect(
-                frame_left + inset + beside,
+                enlargement_left + inset + beside,
                 top,
                 width - beside,
                 line_height,
@@ -287,26 +287,26 @@ impl Fixture {
         MagnifiedView {
             monitor: 0,
             panel,
-            frame,
+            enlargement,
             source,
             shown,
             center: self.center,
             magnification: self.magnification,
             grid: self.grid,
-            tag: self.tag,
+            magnification_indicator: self.magnification_indicator,
             x: coordinate(self.labels[0], x_line),
             y: coordinate(self.labels[1], y_line),
             color,
             approximate_color: self.approximate.then(|| {
-                // The sign at the strip's left, centered beside the two lines with the odd pixel below, and the text 5
-                // after it.
+                // The sign at the readout's left, centered beside the two lines with the odd pixel below, and the text
+                // 5 after it.
                 let top = row_top + row + scaled(4, dpi);
                 let sign_side = scaled(13, dpi);
                 let after_sign = sign_side + scaled(5, dpi);
                 let line = |top, text| NoticeLine {
                     text,
                     line: core_rect(
-                        frame_left + inset + after_sign,
+                        enlargement_left + inset + after_sign,
                         top,
                         width - after_sign,
                         notice_line,
@@ -314,7 +314,7 @@ impl Fixture {
                 };
                 ApproximateColor {
                     sign: core_rect(
-                        frame_left + inset,
+                        enlargement_left + inset,
                         top + (2 * notice_line - sign_side + 1) / 2,
                         sign_side,
                         sign_side,
@@ -366,15 +366,15 @@ fn gridded(color: [u8; 3], lines: u32) -> [u8; 3] {
     })
 }
 
-/// What the prototype's `drawMag` leaves at the frame's pixel (`x`, `y`), and how far off a pixel may be: the outline's
-/// two rings over everything, then the photo's pixel enlarged with the grid over it, or the blank color where the frame
-/// is past the monitor.
+/// What the prototype's `drawMag` leaves at the enlargement's pixel (`x`, `y`), and how far off a pixel may be: the
+/// outline's two rings over everything, then the photo's pixel enlarged with the grid over it, or the blank color where
+/// the enlargement is past the monitor.
 fn wanted(view: &MagnifiedView, mode: Mode, x: i32, y: i32) -> ([u8; 3], u8) {
     let factor = i32::try_from(view.magnification.factor()).expect("a small factor");
-    let (frame, source, shown) = (ints(view.frame), view.source, view.shown);
+    let (enlargement, source, shown) = (ints(view.enlargement), view.source, view.shown);
     let (cell_left, cell_top) = (
-        frame.left + (view.center.x - source.left) * factor,
-        frame.top + (view.center.y - source.top) * factor,
+        enlargement.left + (view.center.x - source.left) * factor,
+        enlargement.top + (view.center.y - source.top) * factor,
     );
     let beyond = |at: i32, first: i32| (first - at).max(at - (first + factor - 1)).max(0);
     match beyond(x, cell_left).max(beyond(y, cell_top)) {
@@ -383,8 +383,8 @@ fn wanted(view: &MagnifiedView, mode: Mode, x: i32, y: i32) -> ([u8; 3], u8) {
         _ => {}
     }
     let (left, top) = (
-        frame.left + (shown.left - source.left) * factor,
-        frame.top + (shown.top - source.top) * factor,
+        enlargement.left + (shown.left - source.left) * factor,
+        enlargement.top + (shown.top - source.top) * factor,
     );
     let width = i32::try_from(shown.width).expect("a width") * factor;
     let height = i32::try_from(shown.height).expect("a height") * factor;
@@ -405,26 +405,32 @@ fn wanted(view: &MagnifiedView, mode: Mode, x: i32, y: i32) -> ([u8; 3], u8) {
     }
 }
 
-/// Whether (`x`, `y`) is in one of `frame`'s four rounded corners, where the clip lets the panel show.
-fn in_corner(frame: &RECT, radius: i32, x: i32, y: i32) -> bool {
-    let across = (x - frame.left).min(frame.right - 1 - x);
-    let down = (y - frame.top).min(frame.bottom - 1 - y);
+/// Whether (`x`, `y`) is in one of `enlargement`'s four rounded corners, where the clip lets the panel show.
+fn in_corner(enlargement: &RECT, radius: i32, x: i32, y: i32) -> bool {
+    let across = (x - enlargement.left).min(enlargement.right - 1 - x);
+    let down = (y - enlargement.top).min(enlargement.bottom - 1 - y);
     across < radius && down < radius
 }
 
-/// Checks every pixel of the frame outside the corners, and outside `skip`, against the prototype's model.
-fn check_frame(picture: &Picture, view: &MagnifiedView, mode: Mode, dpi: u32, skip: Option<RECT>) {
-    let frame = ints(view.frame);
+/// Checks every pixel of the enlargement outside the corners, and outside `skip`, against the prototype's model.
+fn check_enlargement(
+    picture: &Picture,
+    view: &MagnifiedView,
+    mode: Mode,
+    dpi: u32,
+    skip: Option<RECT>,
+) {
+    let enlargement = ints(view.enlargement);
     let radius = scaled(9, dpi);
     let factor = view.magnification.factor();
-    for (x, y) in pixels(frame) {
-        if in_corner(&frame, radius, x, y) || skip.is_some_and(|skip| inside(&skip, x, y)) {
+    for (x, y) in pixels(enlargement) {
+        if in_corner(&enlargement, radius, x, y) || skip.is_some_and(|skip| inside(&skip, x, y)) {
             continue;
         }
         let (color, tolerance) = wanted(view, mode, x, y);
         assert!(
             near(at(picture, x, y), color, tolerance),
-            "pixel ({x}, {y}) of the frame is {:?}, wanted {color:?} at {factor}x, {mode:?}, {dpi} DPI, grid {}",
+            "pixel ({x}, {y}) of the enlargement is {:?}, wanted {color:?} at {factor}x, {mode:?}, {dpi} DPI, grid {}",
             at(picture, x, y),
             view.grid
         );
@@ -449,7 +455,7 @@ fn every_enlarged_pixel_is_a_square_of_exactly_its_color_without_smoothing() {
         for magnification in [Magnification::X2, Magnification::X8, Magnification::X32] {
             let view = Fixture::new(dpi, magnification).view();
             let picture = render(&canvas, &photo, Mode::Dark, dpi, &view);
-            check_frame(&picture, &view, Mode::Dark, dpi, None);
+            check_enlargement(&picture, &view, Mode::Dark, dpi, None);
         }
     }
 }
@@ -465,9 +471,9 @@ fn a_block_is_the_same_color_all_through() {
     };
     let view = fixture.view();
     let picture = render(&canvas, &photo, Mode::Dark, 96, &view);
-    let frame = ints(view.frame);
-    // The third block from the frame's left, in the fifth row of blocks: a block of 8 by 8.
-    let (left, top) = (frame.left + 2 * 8, frame.top + 4 * 8);
+    let enlargement = ints(view.enlargement);
+    // The third block from the enlargement's left, in the fifth row of blocks: a block of 8 by 8.
+    let (left, top) = (enlargement.left + 2 * 8, enlargement.top + 4 * 8);
     let color = photo_color(view.source.left + 2, view.source.top + 4);
     for (x, y) in pixels(rect(left, top, left + 8, top + 8)) {
         assert_eq!(at(&picture, x, y), color, "({x}, {y})");
@@ -491,7 +497,7 @@ fn near_the_edges(dpi: u32, magnification: Magnification) -> [Fixture; 2] {
 }
 
 #[test]
-fn past_the_monitors_edge_the_frame_is_the_blank_color_with_no_grid_on_it() {
+fn past_the_monitors_edge_the_enlargement_is_the_blank_color_with_no_grid_on_it() {
     let canvas = Canvas::new(640, 640);
     let photo = photo(&canvas);
     for mode in MODES {
@@ -503,10 +509,10 @@ fn past_the_monitors_edge_the_frame_is_the_blank_color_with_no_grid_on_it() {
                     view.shown.width < view.source.width || view.shown.height < view.source.height
                 );
                 let picture = render(&canvas, &photo, mode, 96, &view);
-                check_frame(&picture, &view, mode, 96, None);
-                // And the blank color is really there: a good many pixels of the frame, not one stray.
-                let frame = ints(view.frame);
-                let blanks = pixels(frame)
+                check_enlargement(&picture, &view, mode, 96, None);
+                // And the blank color is really there: a good many pixels of the enlargement, not one stray.
+                let enlargement = ints(view.enlargement);
+                let blanks = pixels(enlargement)
                     .filter(|&(x, y)| at(&picture, x, y) == blank(mode))
                     .count();
                 assert!(
@@ -527,11 +533,11 @@ fn the_grid_is_drawn_from_8x_and_not_at_2x_and_4x() {
         let fixture = Fixture::new(96, magnification);
         let view = fixture.view();
         let picture = render(&canvas, &photo, Mode::Dark, 96, &view);
-        check_frame(&picture, &view, Mode::Dark, 96, None);
+        check_enlargement(&picture, &view, Mode::Dark, 96, None);
         // Lines are where the model says, and nowhere in a view without a grid: count the darkened pixels.
-        let frame = ints(view.frame);
-        let darkened = pixels(frame)
-            .filter(|&(x, y)| !in_corner(&frame, scaled(9, 96), x, y))
+        let enlargement = ints(view.enlargement);
+        let darkened = pixels(enlargement)
+            .filter(|&(x, y)| !in_corner(&enlargement, scaled(9, 96), x, y))
             .filter(|&(x, y)| {
                 let (color, _) = wanted(
                     &Fixture {
@@ -570,7 +576,7 @@ fn the_grid_follows_the_views_flag_and_not_the_magnification() {
         };
         let view = fixture.view();
         let picture = render(&canvas, &photo, Mode::Dark, 96, &view);
-        check_frame(&picture, &view, Mode::Dark, 96, None);
+        check_enlargement(&picture, &view, Mode::Dark, 96, None);
     }
 }
 
@@ -581,10 +587,10 @@ fn a_grid_line_is_black_at_20_percent_one_pixel_wide_and_darker_where_two_cross(
     for dpi in [96, 168] {
         let view = Fixture::new(dpi, Magnification::X16).view();
         let picture = render(&canvas, &photo, Mode::Dark, dpi, &view);
-        let frame = ints(view.frame);
+        let enlargement = ints(view.enlargement);
         let (left, top) = (
-            frame.left + (view.shown.left - view.source.left) * 16,
-            frame.top + (view.shown.top - view.source.top) * 16,
+            enlargement.left + (view.shown.left - view.source.left) * 16,
+            enlargement.top + (view.shown.top - view.source.top) * 16,
         );
         // The enlarged pixel in the fourth column and row of the shown part, well inside the corners: its middle is the
         // photo's color, for the lines part pixels and don't frame them.
@@ -642,9 +648,9 @@ fn the_center_pixel_has_a_black_ring_and_a_white_one_just_outside_one_physical_p
                 let view = fixture.view();
                 let picture = render(&canvas, &photo, Mode::Dark, dpi, &view);
                 let factor = fixture.factor();
-                let frame = ints(view.frame);
-                let cell_left = frame.left + (view.center.x - view.source.left) * factor;
-                let cell_top = frame.top + (view.center.y - view.source.top) * factor;
+                let enlargement = ints(view.enlargement);
+                let cell_left = enlargement.left + (view.center.x - view.source.left) * factor;
+                let cell_top = enlargement.top + (view.center.y - view.source.top) * factor;
                 let cell = rect(cell_left, cell_top, cell_left + factor, cell_top + factor);
                 let context = format!("{factor}x at {dpi} DPI, grid {grid}");
                 // Around the cell, to 4 pixels out: black, then white, then the photo again, none of it any thicker.
@@ -676,7 +682,7 @@ fn the_center_pixel_has_a_black_ring_and_a_white_one_just_outside_one_physical_p
 }
 
 #[test]
-fn the_outline_stays_on_the_center_pixel_when_the_frame_is_blank_around_it() {
+fn the_outline_stays_on_the_center_pixel_when_the_enlargement_is_blank_around_it() {
     // At the monitor's corner the rings are drawn over the blank color, and over nothing else.
     let canvas = Canvas::new(640, 640);
     let photo = photo(&canvas);
@@ -684,10 +690,10 @@ fn the_outline_stays_on_the_center_pixel_when_the_frame_is_blank_around_it() {
         let fixture = Fixture::new(96, Magnification::X32).at(SCREEN.left, SCREEN.top);
         let view = fixture.view();
         let picture = render(&canvas, &photo, mode, 96, &view);
-        check_frame(&picture, &view, mode, 96, None);
-        let frame = ints(view.frame);
-        let cell_left = frame.left + (view.center.x - view.source.left) * 32;
-        let cell_top = frame.top + (view.center.y - view.source.top) * 32;
+        check_enlargement(&picture, &view, mode, 96, None);
+        let enlargement = ints(view.enlargement);
+        let cell_left = enlargement.left + (view.center.x - view.source.left) * 32;
+        let cell_top = enlargement.top + (view.center.y - view.source.top) * 32;
         assert_eq!(at(&picture, cell_left - 1, cell_top + 5), BLACK);
         assert_eq!(at(&picture, cell_left - 2, cell_top + 5), WHITE);
         assert_eq!(at(&picture, cell_left - 3, cell_top + 5), blank(mode));
@@ -695,7 +701,7 @@ fn the_outline_stays_on_the_center_pixel_when_the_frame_is_blank_around_it() {
 }
 
 #[test]
-fn the_frames_corners_are_round_and_the_rest_of_its_edge_is_the_photo() {
+fn the_enlargements_corners_are_round_and_the_rest_of_its_edge_is_the_photo() {
     let canvas = Canvas::new(640, 640);
     let photo = photo(&canvas);
     for mode in MODES {
@@ -703,16 +709,16 @@ fn the_frames_corners_are_round_and_the_rest_of_its_edge_is_the_photo() {
         for dpi in [96, 168] {
             let view = Fixture::new(dpi, Magnification::X8).view();
             let picture = render(&canvas, &photo, mode, dpi, &view);
-            let frame = ints(view.frame);
+            let enlargement = ints(view.enlargement);
             let radius = scaled(9, dpi);
             let context = format!("{mode:?} at {dpi} DPI");
             // The corner pixel is the panel, not the photo's color, and so is the one diagonally inside it, which the
             // arc has not reached.
             for (x, y) in [
-                (frame.left, frame.top),
-                (frame.right - 1, frame.top),
-                (frame.left, frame.bottom - 1),
-                (frame.right - 1, frame.bottom - 1),
+                (enlargement.left, enlargement.top),
+                (enlargement.right - 1, enlargement.top),
+                (enlargement.left, enlargement.bottom - 1),
+                (enlargement.right - 1, enlargement.bottom - 1),
             ] {
                 assert!(
                     near(at(&picture, x, y), panel_color, 2),
@@ -722,21 +728,29 @@ fn the_frames_corners_are_round_and_the_rest_of_its_edge_is_the_photo() {
             }
             // Along the top edge the photo is back by the radius, and the arc between is antialiased: neither all panel
             // nor all photo.
-            let (color, _) = wanted(&view, mode, frame.left + radius + 1, frame.top);
+            let (color, _) = wanted(&view, mode, enlargement.left + radius + 1, enlargement.top);
             assert!(
-                near(at(&picture, frame.left + radius + 1, frame.top), color, 6),
+                near(
+                    at(&picture, enlargement.left + radius + 1, enlargement.top),
+                    color,
+                    6
+                ),
                 "{context}"
             );
-            let (color, _) = wanted(&view, mode, frame.left, frame.top + radius + 1);
+            let (color, _) = wanted(&view, mode, enlargement.left, enlargement.top + radius + 1);
             assert!(
-                near(at(&picture, frame.left, frame.top + radius + 1), color, 6),
+                near(
+                    at(&picture, enlargement.left, enlargement.top + radius + 1),
+                    color,
+                    6
+                ),
                 "{context}"
             );
             let partly = pixels(rect(
-                frame.left,
-                frame.top,
-                frame.left + radius,
-                frame.top + radius,
+                enlargement.left,
+                enlargement.top,
+                enlargement.left + radius,
+                enlargement.top + radius,
             ))
             .filter(|&(x, y)| {
                 let found = at(&picture, x, y);
@@ -751,11 +765,14 @@ fn the_frames_corners_are_round_and_the_rest_of_its_edge_is_the_photo() {
     }
 }
 
-/// The tag's rectangle for a text `text_width` pixels wide: its top left `scaled(6)` inside the frame's, padded 4 above
-/// and below and 6 at the sides around a line 11 tall.
-fn tag_rect(view: &MagnifiedView, dpi: u32, text_width: i32) -> RECT {
-    let frame = ints(view.frame);
-    let (left, top) = (frame.left + scaled(6, dpi), frame.top + scaled(6, dpi));
+/// The magnification indicator's rectangle for a text `text_width` pixels wide: its top left `scaled(6)` inside the
+/// enlargement's, padded 4 above and below and 6 at the sides around a line 11 tall.
+fn magnification_indicator_rect(view: &MagnifiedView, dpi: u32, text_width: i32) -> RECT {
+    let enlargement = ints(view.enlargement);
+    let (left, top) = (
+        enlargement.left + scaled(6, dpi),
+        enlargement.top + scaled(6, dpi),
+    );
     rect(
         left,
         top,
@@ -764,8 +781,9 @@ fn tag_rect(view: &MagnifiedView, dpi: u32, text_width: i32) -> RECT {
     )
 }
 
-/// `fixture` drawn as `render` draws it, with its view, and how wide the tag's text is when laid out on its own.
-fn render_with_tag(
+/// `fixture` drawn as `render` draws it, with its view, and how wide the magnification indicator's text is when laid
+/// out on its own.
+fn render_with_magnification_indicator(
     canvas: &Canvas,
     photo: &ID2D1Bitmap,
     mode: Mode,
@@ -780,16 +798,16 @@ fn render_with_tag(
         let text = format!("{}\u{d7}", fixture.factor());
         width = Some(
             overlay
-                .typeset_plain(&text, &overlay.tag_format)
-                .expect("the tag's text")
+                .typeset_plain(&text, &overlay.magnification_indicator_format)
+                .expect("the magnification indicator's text")
                 .width,
         );
     });
     (picture, view, width.expect("the view was drawn"))
 }
 
-/// The pixels of `area` that are nearly white: the tag's text over the photo darkened by the tag's black at 60%, which is
-/// nowhere near that bright.
+/// The pixels of `area` that are nearly white: the magnification indicator's text over the photo darkened by its black
+/// at 60%, which is nowhere near that bright.
 fn white_ink(picture: &Picture, area: RECT) -> Vec<(i32, i32)> {
     pixels(area)
         .filter(|&(x, y)| at(picture, x, y).iter().all(|&c| c >= 180))
@@ -797,26 +815,33 @@ fn white_ink(picture: &Picture, area: RECT) -> Vec<(i32, i32)> {
 }
 
 #[test]
-fn the_tag_is_black_at_60_percent_in_a_rounded_rectangle_with_the_magnification_in_white() {
+fn the_magnification_indicator_is_black_at_60_percent_in_a_rounded_rectangle_with_the_magnification_in_white()
+ {
     let canvas = Canvas::new(640, 640);
     let photo = photo(&canvas);
     // The same in both palettes.
     for mode in MODES {
         for dpi in [96, 168] {
             let fixture = Fixture {
-                tag: true,
+                magnification_indicator: true,
                 ..Fixture::new(dpi, Magnification::X8)
             };
-            let (picture, view, text) = render_with_tag(&canvas, &photo, mode, &fixture);
-            let tag = tag_rect(&view, dpi, text);
+            let (picture, view, text) =
+                render_with_magnification_indicator(&canvas, &photo, mode, &fixture);
+            let indicator = magnification_indicator_rect(&view, dpi, text);
             let context = format!("{mode:?} at {dpi} DPI");
-            // The photo under it, as it is without a tag.
+            // The photo under it, as it is without a magnification indicator.
             let under = |x: i32, y: i32| wanted(&view, mode, x, y).0;
             let darkened = |x: i32, y: i32| over([0, 0, 0], 0.6, under(x, y));
-            // The padding above and below the text, past the corner's arc: the photo at 40%, from the tag's first row to
-            // its last.
-            let x = tag.left + scaled(6, dpi) + 1;
-            for y in [tag.top, tag.top + 1, tag.bottom - 2, tag.bottom - 1] {
+            // The padding above and below the text, past the corner's arc: the photo at 40%, from the magnification
+            // indicator's first row to its last.
+            let x = indicator.left + scaled(6, dpi) + 1;
+            for y in [
+                indicator.top,
+                indicator.top + 1,
+                indicator.bottom - 2,
+                indicator.bottom - 1,
+            ] {
                 assert!(
                     near(at(&picture, x, y), darkened(x, y), 2),
                     "({x}, {y}) is {:?}, wanted {:?}, {context}",
@@ -825,54 +850,56 @@ fn the_tag_is_black_at_60_percent_in_a_rounded_rectangle_with_the_magnification_
                 );
             }
             // The rectangle is exactly this tall and as wide as its text and padding: the pixels beside it are the photo.
-            let middle = (tag.top + tag.bottom) / 2;
+            let middle = (indicator.top + indicator.bottom) / 2;
             for (x, y) in [
-                (x, tag.top - 1),
-                (x, tag.bottom),
-                (tag.left - 1, middle),
-                (tag.right, middle),
+                (x, indicator.top - 1),
+                (x, indicator.bottom),
+                (indicator.left - 1, middle),
+                (indicator.right, middle),
             ] {
                 assert!(
                     near(at(&picture, x, y), under(x, y), 1),
-                    "({x}, {y}), beside the tag, is {:?}, wanted {:?}, {context}",
+                    "({x}, {y}), beside the magnification indicator, is {:?}, wanted {:?}, {context}",
                     at(&picture, x, y),
                     under(x, y)
                 );
             }
-            for x in [tag.left + 1, tag.right - 2] {
+            for x in [indicator.left + 1, indicator.right - 2] {
                 assert!(
                     near(at(&picture, x, middle), darkened(x, middle), 2),
-                    "({x}, {middle}), in the tag's padding, is {:?}, {context}",
+                    "({x}, {middle}), in the magnification indicator's padding, is {:?}, {context}",
                     at(&picture, x, middle)
                 );
             }
-            // Its corners are round: the corner pixel is the photo's, not the tag's.
+            // Its corners are round: the corner pixel is the photo's, not the magnification indicator's.
             for (x, y) in [
-                (tag.left, tag.top),
-                (tag.right - 1, tag.top),
-                (tag.left, tag.bottom - 1),
-                (tag.right - 1, tag.bottom - 1),
+                (indicator.left, indicator.top),
+                (indicator.right - 1, indicator.top),
+                (indicator.left, indicator.bottom - 1),
+                (indicator.right - 1, indicator.bottom - 1),
             ] {
                 assert!(
                     near(at(&picture, x, y), under(x, y), 8),
-                    "the tag's corner ({x}, {y}) is {:?}, wanted the photo's {:?}, {context}",
+                    "the magnification indicator's corner ({x}, {y}) is {:?}, wanted the photo's {:?}, {context}",
                     at(&picture, x, y),
                     under(x, y)
                 );
             }
-            // Its text is white, inside the padding, and nowhere else in the tag is anything that white.
+            // Its text is white, inside the padding, and nowhere else in the magnification indicator is anything that
+            // white.
             let text_area = rect(
-                tag.left + scaled(6, dpi) - 1,
-                tag.top + scaled(4, dpi) - 1,
-                tag.right - scaled(6, dpi) + 1,
-                tag.bottom - scaled(4, dpi) + 1,
+                indicator.left + scaled(6, dpi) - 1,
+                indicator.top + scaled(4, dpi) - 1,
+                indicator.right - scaled(6, dpi) + 1,
+                indicator.bottom - scaled(4, dpi) + 1,
             );
-            // Over the photo's own pixels, which can be bright, white says nothing; in the tag, the photo is at 40%.
-            let ink = white_ink(&picture, tag);
+            // Over the photo's own pixels, which can be bright, white says nothing; in the magnification indicator, the
+            // photo is at 40%.
+            let ink = white_ink(&picture, indicator);
             assert!(ink.len() > 20, "{} white pixels, {context}", ink.len());
             assert!(
                 ink.iter().all(|&(x, y)| inside(&text_area, x, y)),
-                "white pixels outside the tag's text area, {context}"
+                "white pixels outside the magnification indicator's text area, {context}"
             );
             // The white is the full white of the text where a stroke covers a pixel all through.
             assert!(
@@ -884,46 +911,50 @@ fn the_tag_is_black_at_60_percent_in_a_rounded_rectangle_with_the_magnification_
 }
 
 #[test]
-fn the_tag_is_there_when_the_view_says_so_and_not_otherwise() {
+fn the_magnification_indicator_is_there_when_the_view_says_so_and_not_otherwise() {
     let canvas = Canvas::new(640, 640);
     let photo = photo(&canvas);
-    for tag in [false, true] {
+    for magnification_indicator in [false, true] {
         let fixture = Fixture {
-            tag,
+            magnification_indicator,
             ..Fixture::new(96, Magnification::X8)
         };
-        let (picture, view, text) = render_with_tag(&canvas, &photo, Mode::Dark, &fixture);
-        let area = tag_rect(&view, 96, text);
-        // The whole frame outside the tag is the model's, tag or no tag; inside it, without a tag, too.
-        let skip = tag.then_some(area);
-        check_frame(&picture, &view, Mode::Dark, 96, skip);
+        let (picture, view, text) =
+            render_with_magnification_indicator(&canvas, &photo, Mode::Dark, &fixture);
+        let area = magnification_indicator_rect(&view, 96, text);
+        // The whole enlargement outside the magnification indicator is the model's, with the magnification indicator or
+        // without; inside it, without one, too.
+        let skip = magnification_indicator.then_some(area);
+        check_enlargement(&picture, &view, Mode::Dark, 96, skip);
         let ink = white_ink(&picture, area).len();
         assert_eq!(
             ink > 0,
-            tag,
-            "{ink} white pixels in the tag's place, tag {tag}"
+            magnification_indicator,
+            "{ink} white pixels in the magnification indicator's place, shown: {magnification_indicator}"
         );
     }
 }
 
 #[test]
-fn the_tags_text_is_the_magnification_and_a_times_sign() {
+fn the_magnification_indicators_text_is_the_magnification_and_a_times_sign() {
     let canvas = Canvas::new(640, 640);
     let photo = photo(&canvas);
-    let mut tags = Vec::new();
+    let mut magnification_indicators = Vec::new();
     for magnification in magnifications() {
         let fixture = Fixture {
-            tag: true,
+            magnification_indicator: true,
             ..Fixture::new(96, magnification)
         };
-        let (picture, view, text) = render_with_tag(&canvas, &photo, Mode::Dark, &fixture);
-        let area = tag_rect(&view, 96, text);
-        tags.push((magnification.factor(), text, white_ink(&picture, area)));
+        let (picture, view, text) =
+            render_with_magnification_indicator(&canvas, &photo, Mode::Dark, &fixture);
+        let area = magnification_indicator_rect(&view, 96, text);
+        magnification_indicators.push((magnification.factor(), text, white_ink(&picture, area)));
     }
     let found = |factor: u32| {
-        tags.iter()
+        magnification_indicators
+            .iter()
             .find(|(f, ..)| *f == factor)
-            .expect("a tag for every magnification")
+            .expect("a magnification indicator for every magnification")
     };
     // Two digits take more room than one, and "32" has the strokes of the "2" and more.
     assert!(
@@ -953,7 +984,7 @@ struct Widths {
     logical: i32,
 }
 
-/// A view drawn, with what the tests know about its strip from outside the drawing code.
+/// A view drawn, with what the tests know about its readout from outside the drawing code.
 struct Drawn {
     picture: Picture,
     view: MagnifiedView,
@@ -963,7 +994,7 @@ struct Drawn {
     y: Widths,
 }
 
-/// `view` drawn in `mode` at `dpi`, with the widths of its strip's texts.
+/// `view` drawn in `mode` at `dpi`, with the widths of its readout's texts.
 fn draw_view(
     canvas: &Canvas,
     photo: &ID2D1Bitmap,
@@ -1006,15 +1037,16 @@ impl Drawn {
         scaled(logical, self.dpi)
     }
 
-    /// The strip: under the frame, which holds the lines and the padding around them and nothing else. A few pixels in
-    /// from the panel's border and its rounded corners, where the border's own antialiasing would look like ink.
-    fn strip(&self) -> RECT {
-        let (panel, frame) = (ints(self.view.panel), ints(self.view.frame));
+    /// The readout: under the enlargement, which holds the lines and the padding around them and nothing else. A few
+    /// pixels in from the panel's border and its rounded corners, where the border's own antialiasing would look like
+    /// ink.
+    fn readout(&self) -> RECT {
+        let (panel, enlargement) = (ints(self.view.panel), ints(self.view.enlargement));
         let side = self.sized(1) + self.sized(3);
         let below = self.sized(1) + self.sized(6);
         rect(
             panel.left + side,
-            frame.bottom,
+            enlargement.bottom,
             panel.right - side,
             panel.bottom - below,
         )
@@ -1063,7 +1095,7 @@ impl Drawn {
     }
 }
 
-/// The widest realistic strip: a monitor 3840 by 2560 at 150% or 175%, the cursor in the far corner, on a light gray.
+/// The widest realistic readout: a monitor 3840 by 2560 at 150% or 175%, the cursor in the far corner, on a light gray.
 /// At 100% there is no logical part. `#DDDDDD` is the widest HEX in Segoe UI semibold, and every RGB of three
 /// three-digit channels is as wide as `255, 255, 255`, the digits being tabular.
 fn widest(dpi: u32, magnification: Magnification) -> Fixture {
@@ -1093,7 +1125,7 @@ fn color_parts(view: &MagnifiedView) -> Vec<RECT> {
 fn the_colors_texts_stay_inside_their_lines_for_the_widest_values_in_every_color_format() {
     let canvas = Canvas::new(640, 640);
     let photo = photo(&canvas);
-    // Color format at Both, HEX and RGB, at 32x, the narrowest strip: at 120 DPI its 5 pixels a side are 160 physical
+    // Color format at Both, HEX and RGB, at 32x, the narrowest readout: at 120 DPI its 5 pixels a side are 160 physical
     // pixels, 128 logical.
     let formats = [
         ("#DDDDDD", Some("221, 221, 221")),
@@ -1109,10 +1141,10 @@ fn the_colors_texts_stay_inside_their_lines_for_the_widest_values_in_every_color
                 };
                 let drawn = draw_view(&canvas, &photo, mode, dpi, fixture.view());
                 let context = format!("{color:?}, {mode:?} at {dpi} DPI");
-                let strip = drawn.strip();
+                let readout = drawn.readout();
                 let swatch = ints(drawn.view.color.swatch);
                 // Each text is what changes when it is blanked, and it is inside its own line, which starts after the
-                // swatch and ends before the strip does.
+                // swatch and ends before the readout does.
                 for second in [false, true] {
                     let mut blanked = drawn.view.clone();
                     let text = if second {
@@ -1126,7 +1158,7 @@ fn the_colors_texts_stay_inside_their_lines_for_the_widest_values_in_every_color
                     let line = ints(text.line);
                     text.text = " ".to_owned();
                     let without = draw_view(&canvas, &photo, mode, dpi, blanked);
-                    let changed: Vec<(i32, i32)> = pixels(strip)
+                    let changed: Vec<(i32, i32)> = pixels(readout)
                         .filter(|&(x, y)| at(&drawn.picture, x, y) != at(&without.picture, x, y))
                         .collect();
                     assert!(changed.len() > 30, "{} pixels, {context}", changed.len());
@@ -1139,8 +1171,8 @@ fn the_colors_texts_stay_inside_their_lines_for_the_widest_values_in_every_color
                     let left = changed.iter().map(|&(x, _)| x).min().expect("ink");
                     let right = changed.iter().map(|&(x, _)| x).max().expect("ink");
                     assert!(
-                        left >= swatch.right && right < line.right && line.right <= strip.right,
-                        "ink from column {left} to {right}, swatch {swatch:?}, line {line:?}, strip {strip:?}, \
+                        left >= swatch.right && right < line.right && line.right <= readout.right,
+                        "ink from column {left} to {right}, swatch {swatch:?}, line {line:?}, readout {readout:?}, \
                          {context}"
                     );
                 }
@@ -1200,10 +1232,11 @@ fn the_hex_is_in_the_ink_and_the_rgb_under_it_fainter() {
 }
 
 #[test]
-fn the_strips_texts_stay_inside_their_lines_and_the_panel_for_the_widest_numbers() {
+fn the_readouts_texts_stay_inside_their_lines_and_the_panel_for_the_widest_numbers() {
     let canvas = Canvas::new(640, 640);
     let photo = photo(&canvas);
-    // 32x is the narrowest frame, so the narrowest strip. 100% has the lines side by side, the others one under the other.
+    // 32x is the narrowest enlargement, so the narrowest readout. 100% has the lines side by side, the others one under
+    // the other.
     for mode in MODES {
         for dpi in [96, 120, 144, 168] {
             let fixture = widest(dpi, Magnification::X32);
@@ -1211,9 +1244,10 @@ fn the_strips_texts_stay_inside_their_lines_and_the_panel_for_the_widest_numbers
             let context = format!("{mode:?} at {dpi} DPI");
             let (x_line, y_line) = (ints(drawn.view.x.line), ints(drawn.view.y.line));
             let color = color_parts(&drawn.view);
-            let strip = drawn.strip();
-            // Everything in the strip is in one of the two lines or in the color's row, all inside the panel's border.
-            let ink = drawn.ink(strip, 8);
+            let readout = drawn.readout();
+            // Everything in the readout is in one of the two lines or in the color's row, all inside the panel's
+            // border.
+            let ink = drawn.ink(readout, 8);
             assert!(ink.len() > 100, "{} ink pixels, {context}", ink.len());
             for &(x, y) in &ink {
                 assert!(
@@ -1237,7 +1271,7 @@ fn the_strips_texts_stay_inside_their_lines_and_the_panel_for_the_widest_numbers
                     logical: None,
                 };
                 let without = draw_view(&canvas, &photo, mode, dpi, blanked);
-                let changed: Vec<(i32, i32)> = pixels(strip)
+                let changed: Vec<(i32, i32)> = pixels(readout)
                     .filter(|&(x, y)| at(&drawn.picture, x, y) != at(&without.picture, x, y))
                     .collect();
                 assert!(changed.len() > 30, "{} pixels, {context}", changed.len());
@@ -1484,12 +1518,12 @@ fn nothing_is_drawn_outside_the_panel_but_its_shadow() {
             (168, Magnification::X8),
         ] {
             let fixture = Fixture {
-                tag: true,
+                magnification_indicator: true,
                 labels: [("3839", "2559.3"), ("2159", "1439.3")],
                 ..Fixture::new(dpi, magnification)
             };
-            // The view with the cursor in the middle, and with it near the monitor's corner, where the frame is partly
-            // blank: the frame's clip and the tag are at the edges of what is drawn.
+            // The view with the cursor in the middle, and with it near the monitor's corner, where the enlargement is
+            // partly blank: the enlargement's clip and the magnification indicator are at the edges of what is drawn.
             let views = [
                 fixture.view(),
                 fixture.clone().at(SCREEN.left + 1, SCREEN.top + 1).view(),
@@ -1666,12 +1700,12 @@ fn the_swatch_is_exactly_the_pixels_color_inside_a_ring_of_the_border_with_round
 }
 
 #[test]
-fn the_approximate_color_notice_is_amber_and_stays_inside_its_sign_and_lines_on_the_narrowest_strips()
+fn the_approximate_color_notice_is_amber_and_stays_inside_its_sign_and_lines_on_the_narrowest_readouts()
  {
     let canvas = Canvas::new(640, 640);
     let photo = photo(&canvas);
-    // At 32x the strip is narrowest: at 120 DPI its 5 pixels a side are 160 physical pixels, 128 logical, and its text
-    // 120 of them. 8x is the first magnification.
+    // At 32x the readout is narrowest: at 120 DPI its 5 pixels a side are 160 physical pixels, 128 logical, and its
+    // text 120 of them. 8x is the first magnification.
     for mode in MODES {
         let warn = tokens(mode).warn;
         for dpi in [96, 120, 144, 168] {
@@ -1682,7 +1716,7 @@ fn the_approximate_color_notice_is_amber_and_stays_inside_its_sign_and_lines_on_
                 };
                 let drawn = draw_view(&canvas, &photo, mode, dpi, fixture.view());
                 let context = format!("{mode:?} at {dpi} DPI and {magnification:?}");
-                let strip = drawn.strip();
+                let readout = drawn.readout();
                 let notice = drawn.view.approximate_color.clone().expect("the notice");
                 let sign = ints(notice.sign);
                 let lines = notice.lines.clone().map(|line| ints(line.line));
@@ -1690,7 +1724,7 @@ fn the_approximate_color_notice_is_amber_and_stays_inside_its_sign_and_lines_on_
                 let mut without = drawn.view.clone();
                 without.approximate_color = None;
                 let without = draw_view(&canvas, &photo, mode, dpi, without);
-                let changed: Vec<(i32, i32)> = pixels(strip)
+                let changed: Vec<(i32, i32)> = pixels(readout)
                     .filter(|&(x, y)| at(&drawn.picture, x, y) != at(&without.picture, x, y))
                     .collect();
                 for &(x, y) in &changed {
@@ -1709,7 +1743,7 @@ fn the_approximate_color_notice_is_amber_and_stays_inside_its_sign_and_lines_on_
                     "no amber in the sign {sign:?}, {context}"
                 );
                 // Each line's text is what changes when it alone is blanked: inside its own line, which starts after
-                // the sign and ends before the strip does, and amber.
+                // the sign and ends before the readout does, and amber.
                 for (index, line) in lines.iter().enumerate() {
                     let what = notice.lines[index].text;
                     let mut blanked = drawn.view.clone();
@@ -1717,7 +1751,7 @@ fn the_approximate_color_notice_is_amber_and_stays_inside_its_sign_and_lines_on_
                         notice.lines[index].text = " ";
                     }
                     let without = draw_view(&canvas, &photo, mode, dpi, blanked);
-                    let changed: Vec<(i32, i32)> = pixels(strip)
+                    let changed: Vec<(i32, i32)> = pixels(readout)
                         .filter(|&(x, y)| at(&drawn.picture, x, y) != at(&without.picture, x, y))
                         .collect();
                     assert!(
@@ -1734,8 +1768,8 @@ fn the_approximate_color_notice_is_amber_and_stays_inside_its_sign_and_lines_on_
                     let left = changed.iter().map(|&(x, _)| x).min().expect("ink");
                     let right = changed.iter().map(|&(x, _)| x).max().expect("ink");
                     assert!(
-                        left >= sign.right && right < line.right && line.right <= strip.right,
-                        "{what:?} from column {left} to {right}, sign {sign:?}, line {line:?}, strip {strip:?}, {context}"
+                        left >= sign.right && right < line.right && line.right <= readout.right,
+                        "{what:?} from column {left} to {right}, sign {sign:?}, line {line:?}, readout {readout:?}, {context}"
                     );
                     assert!(amber(line, &changed), "no amber in {what:?}, {context}");
                 }

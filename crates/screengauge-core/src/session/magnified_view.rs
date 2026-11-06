@@ -1,7 +1,7 @@
 //! Where Inspect's magnified view goes and what it holds (v1 spec WPC-296, Inspect; the prototype's variant A, WPC-279:
 //! `drawMag`, `.panel`, `.magframe` and `.info`). Every size is the prototype's, in logical pixels, which
-//! [`scaled`](super::toolbar::scaled) turns into physical pixels for the current monitor's scale. The strip's lines have
-//! a fixed height, as CSS gives them, so the panel's size needs no font and the session core places it.
+//! [`scaled`](super::toolbar::scaled) turns into physical pixels for the current monitor's scale. The readout's lines
+//! have a fixed height, as CSS gives them, so the panel's size needs no font and the session core places it.
 
 use super::frozen_screen::{Colors, Photo, Point, Rect};
 use super::output::{
@@ -16,7 +16,7 @@ use crate::settings::{ColorFormat, Magnification};
 /// About how wide and tall the enlarged pixels are: as many whole pixels as fit, an odd number of them (v1 spec
 /// WPC-296, derived rule 10).
 const SIDE: u32 = 176;
-/// The fewest pixels a side the view ever holds, as in the prototype.
+/// The fewest pixels a side the enlargement ever holds, as in the prototype.
 const FEWEST: u32 = 3;
 /// How far right of and below the cursor the panel starts.
 const REACH: u32 = 22;
@@ -27,11 +27,12 @@ const MARGIN: u32 = 2;
 /// The panel's border (`.panel`'s `border: 1px`) and the room inside it around what it holds (`padding: 6px`).
 const RING: u32 = 1;
 const PAD: u32 = 6;
-/// The strip under the frame (`.info`): its room above, at the sides and below its lines (`padding: 7px 4px 2px`).
-const STRIP_TOP: u32 = 7;
-const STRIP_SIDE: u32 = 4;
-const STRIP_BOTTOM: u32 = 2;
-/// The height of one line of the strip, in hundredths of a logical pixel: CSS's 12px text at a line height of 1.35.
+/// The readout under the enlargement (`.info`): its room above, at the sides and below its lines
+/// (`padding: 7px 4px 2px`).
+const READOUT_TOP: u32 = 7;
+const READOUT_SIDE: u32 = 4;
+const READOUT_BOTTOM: u32 = 2;
+/// The height of one line of the readout, in hundredths of a logical pixel: CSS's 12px text at a line height of 1.35.
 const LINE_HUNDREDTHS: u32 = 1620;
 /// The room between X and Y when they share a line (the grid's `gap: 0 8px`).
 const COLUMN_GAP: u32 = 8;
@@ -42,7 +43,7 @@ const SWATCH: u32 = 22;
 /// The room between the swatch and the color's text (the row's `gap: 8px`).
 const SWATCH_GAP: u32 = 8;
 /// The Approximate color notice under the color's row (the prototype's `.hdr` in a `div` with `margin-top: 4px`): the
-/// room above it, the height of each of its two lines in hundredths of a logical pixel (11px text at the strip's line
+/// room above it, the height of each of its two lines in hundredths of a logical pixel (11px text at the readout's line
 /// height of 1.35), its sign's side, and the room between the sign and the text (`gap: 5px`).
 const NOTICE_GAP: u32 = 4;
 const NOTICE_LINE_HUNDREDTHS: u32 = 1485;
@@ -56,14 +57,15 @@ const NOTICE_SECOND: &str = "(HDR on)";
 const GRID_FROM: Magnification = Magnification::X8;
 
 /// The magnified view around `center`, the pixel under the cursor, on `photo`'s monitor, the frozen screen's monitor
-/// `monitor`: at `magnification`, with its tag while `tag`, the cursor's position with its logical pixels when
-/// `also_show_logical_pixels` and the monitor's scale isn't 100%, and the pixel's color in `color_format`.
+/// `monitor`: at `magnification`, with its magnification indicator while `magnification_indicator`, the cursor's
+/// position with its logical pixels when `also_show_logical_pixels` and the monitor's scale isn't 100%, and the pixel's
+/// color in `color_format`.
 pub(super) fn magnified_view(
     photo: &Photo,
     monitor: usize,
     center: Point,
     magnification: Magnification,
-    tag: bool,
+    magnification_indicator: bool,
     also_show_logical_pixels: bool,
     color_format: ColorFormat,
 ) -> MagnifiedView {
@@ -87,7 +89,7 @@ pub(super) fn magnified_view(
         photo.scale,
         also_show_logical_pixels,
     );
-    // X and Y with their logical pixels don't fit the strip side by side (the owner's choice in WPC-315).
+    // X and Y with their logical pixels don't fit the readout side by side (the owner's choice in WPC-315).
     let stacked = x.logical.is_some();
     let rgb = pixels::color(photo, center);
     let color::Texts {
@@ -115,33 +117,35 @@ pub(super) fn magnified_view(
     } else {
         0
     };
-    let strip = scaled(STRIP_TOP, dpi)
+    let readout = scaled(READOUT_TOP, dpi)
         + lines * line
         + scaled(COLOR_GAP, dpi)
         + row
         + notice_height
-        + scaled(STRIP_BOTTOM, dpi);
+        + scaled(READOUT_BOTTOM, dpi);
     let width = inset + side + inset;
-    let height = inset + side + strip + inset;
+    let height = inset + side + readout + inset;
     let panel = Rect {
         left: place(center.x, width, photo.rect.left, photo.rect.width, dpi),
         top: place(center.y, height, photo.rect.top, photo.rect.height, dpi),
         width,
         height,
     };
-    let frame = Rect {
+    let enlargement = Rect {
         left: panel.left.saturating_add_unsigned(inset),
         top: panel.top.saturating_add_unsigned(inset),
         width: side,
         height: side,
     };
 
-    let text_left = frame.left.saturating_add_unsigned(scaled(STRIP_SIDE, dpi));
-    let text_width = side.saturating_sub(2 * scaled(STRIP_SIDE, dpi));
-    let first_line = frame
+    let text_left = enlargement
+        .left
+        .saturating_add_unsigned(scaled(READOUT_SIDE, dpi));
+    let text_width = side.saturating_sub(2 * scaled(READOUT_SIDE, dpi));
+    let first_line = enlargement
         .top
         .saturating_add_unsigned(side)
-        .saturating_add_unsigned(scaled(STRIP_TOP, dpi));
+        .saturating_add_unsigned(scaled(READOUT_TOP, dpi));
     let (x_line, y_line) = if stacked {
         let x_line = Rect {
             left: text_left,
@@ -239,13 +243,13 @@ pub(super) fn magnified_view(
     MagnifiedView {
         monitor,
         panel,
-        frame,
+        enlargement,
         source,
         shown: source.overlap(photo.rect),
         center,
         magnification,
         grid: magnification >= GRID_FROM,
-        tag,
+        magnification_indicator,
         x: Coordinate {
             label: x,
             line: x_line,
@@ -265,9 +269,9 @@ fn offset_to_center(outer: u32, inner: u32) -> u32 {
     outer.saturating_sub(inner).div_ceil(2)
 }
 
-/// How many of the frozen screen's pixels the view holds a side on a monitor of `dpi` at `magnification`: the most whole
-/// enlarged pixels that fit in `SIDE`, an odd number of them so the cursor's is the middle one, and never fewer than
-/// `FEWEST` (the prototype's `drawMag`).
+/// How many of the frozen screen's pixels the enlargement holds a side on a monitor of `dpi` at `magnification`: the
+/// most whole enlarged pixels that fit in `SIDE`, an odd number of them so the cursor's is the middle one, and never
+/// fewer than `FEWEST` (the prototype's `drawMag`).
 fn pixels_across(dpi: u32, magnification: Magnification) -> u32 {
     let fit = scaled(SIDE, dpi) / magnification.factor();
     let odd = if fit.is_multiple_of(2) {

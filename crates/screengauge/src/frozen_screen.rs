@@ -1322,8 +1322,9 @@ mod tests {
         assert_eq!(monitors_to_draw_again(&before, &after), [1]);
     }
 
-    /// A magnified view on `monitor` around the pixel `(x, 100)`, with its tag showing when `tag`.
-    fn magnified_on(monitor: usize, x: i32, tag: bool) -> Shown {
+    /// A magnified view on `monitor` around the pixel `(x, 100)`, with its magnification indicator showing when
+    /// `magnification_indicator`.
+    fn magnified_on(monitor: usize, x: i32, magnification_indicator: bool) -> Shown {
         let square = |left: i32, top: i32, side: u32| Rect {
             left,
             top,
@@ -1341,13 +1342,13 @@ mod tests {
             magnified_view: Some(MagnifiedView {
                 monitor,
                 panel: square(x + 22, 122, 200),
-                frame: square(x + 29, 129, 168),
+                enlargement: square(x + 29, 129, 168),
                 source: square(x - 10, 90, 21),
                 shown: square(x - 10, 90, 21),
                 center: Point { x, y: 100 },
                 magnification: screengauge_core::settings::Magnification::X8,
                 grid: true,
-                tag,
+                magnification_indicator,
                 x: coordinate(&x.to_string(), square(x + 33, 304, 16)),
                 y: coordinate("100", square(x + 120, 304, 16)),
                 color: screengauge_core::session::PixelColor {
@@ -1387,7 +1388,7 @@ mod tests {
     }
 
     #[test]
-    fn the_magnifications_tag_that_goes_redraws_the_views_monitor() {
+    fn the_magnification_indicator_that_goes_redraws_the_views_monitor() {
         assert_eq!(
             monitors_to_draw_again(&magnified_on(0, 500, true), &magnified_on(0, 500, false)),
             [0]

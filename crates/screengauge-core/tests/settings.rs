@@ -453,7 +453,7 @@ fn steps() -> Vec<u8> {
 
 #[test]
 fn the_tolerance_runs_from_0_to_100_and_starts_at_6() {
-    // Calibrated with the test page's captures and approved by the owner (WPC-332): the number is the difference of
+    // Calibrated with the test page samples and approved by the owner (WPC-332): the number is the difference of
     // red, green or blue that Inspect shows.
     assert_eq!(Tolerance::MIN.get(), 0);
     assert_eq!(Tolerance::MAX.get(), 100);

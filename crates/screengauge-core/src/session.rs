@@ -41,10 +41,11 @@ use crate::settings::{
 const NOTICE_LASTS: Duration = Duration::from_millis(1300);
 
 /// How long the tolerance indicator stays after the mouse wheel's last notch (v1 spec WPC-296, Tolerance).
-const INDICATOR_LASTS: Duration = Duration::from_secs(1);
+const TOLERANCE_INDICATOR_LASTS: Duration = Duration::from_secs(1);
 
-/// How long the magnified view's tag stays after the mouse wheel's last notch (v1 spec WPC-296, Inspect).
-const TAG_LASTS: Duration = Duration::from_secs(1);
+/// How long the magnification indicator stays after the mouse wheel's last notch (v1 spec WPC-296,
+/// Inspect).
+const MAGNIFICATION_INDICATOR_LASTS: Duration = Duration::from_secs(1);
 
 /// How far the mouse wheel turns in a notch, in the units of [`Input::Wheel`]: Windows' WHEEL_DELTA.
 const NOTCH: i32 = 120;
@@ -139,9 +140,9 @@ pub struct Session {
     /// The notice on screen, and when it goes.
     notice: Option<TimedNotice>,
     /// Until when the tolerance indicator shows, when it does.
-    indicator_until: Option<Duration>,
+    tolerance_indicator_until: Option<Duration>,
     /// Until when the magnified view shows the magnification in its corner, when it does.
-    tag_until: Option<Duration>,
+    magnification_indicator_until: Option<Duration>,
     /// How far the mouse wheel has turned towards its next notch, in Windows' units: forward above zero, back below it.
     wheel_turned: i32,
     /// Until when a press is the second click of the double-click that called ScreenGauge.
@@ -274,8 +275,8 @@ impl Session {
             held_after_cancel: false,
             pinned: Vec::new(),
             notice: None,
-            indicator_until: None,
-            tag_until: None,
+            tolerance_indicator_until: None,
+            magnification_indicator_until: None,
             wheel_turned: 0,
             second_click_until,
             toolbar_monitor,
@@ -303,13 +304,16 @@ impl Session {
             self.notice = None;
         }
         if self
-            .indicator_until
+            .tolerance_indicator_until
             .is_some_and(|until| until <= event.uptime)
         {
-            self.indicator_until = None;
+            self.tolerance_indicator_until = None;
         }
-        if self.tag_until.is_some_and(|until| until <= event.uptime) {
-            self.tag_until = None;
+        if self
+            .magnification_indicator_until
+            .is_some_and(|until| until <= event.uptime)
+        {
+            self.magnification_indicator_until = None;
         }
         let alt = match event.input {
             Input::KeyDown(Key::Alt) => true,
@@ -411,7 +415,7 @@ impl Session {
 
     /// Copies the color of the pixel at the magnified view's center, the one under the cursor at the click; the tool stays
     /// as it was, and nothing is pinned (v1 spec WPC-296, Inspect). Once the clipboard answers, "Copied" or "Couldn't
-    /// copy." shows (WPC-352). It copies the format the strip shows first, or with Shift held the other, even when it
+    /// copy." shows (WPC-352). It copies the format the readout shows first, or with Shift held the other, even when it
     /// doesn't show. The second click of the double-click
     /// that called ScreenGauge copies nothing, as it pins nothing in Dimensions (WPC-308).
     fn copy_color(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
@@ -482,8 +486,8 @@ impl Session {
     /// with Shift held as the button comes up, whatever it was held for before (v1 spec WPC-296, Bounds). The drawn
     /// rectangle goes, there are no handles to adjust it, and the tool is ready for the next drag. With nothing but the
     /// reference color in the drawn rectangle, nothing is pinned or copied, the clipboard stays as it was, and the
-    /// notice "No content found" says so. A drag that never went past the click limit was a click or a tremble, and does
-    /// nothing at all, with or without Alt, and without a notice.
+    /// notice "No content found" says so. A drag that never went past the drag distance was a click, and does nothing
+    /// at all, with or without Alt, and without a notice.
     ///
     /// Snip instead takes the image of what its preview showed, at `time`, and sends it where Destination says, pinning
     /// nothing, and Shift changes nothing (v1 spec WPC-296, Snip); with nothing but the reference color there is no image,
@@ -931,7 +935,7 @@ impl Session {
         let notches = turned / NOTCH;
         self.wheel_turned = turned % NOTCH;
         // Can't happen: Windows' uptime is milliseconds since it started, nowhere near Duration's limit. Should it, neither
-        // the tag nor the indicator shows.
+        // the magnification indicator nor the tolerance indicator shows.
         if self.remembered.last_tool == Tool::Inspect {
             self.remembered.magnification = stepped(
                 self.remembered.magnification,
@@ -939,12 +943,12 @@ impl Session {
                 Magnification::up,
                 Magnification::down,
             );
-            self.tag_until = uptime.checked_add(TAG_LASTS);
+            self.magnification_indicator_until = uptime.checked_add(MAGNIFICATION_INDICATOR_LASTS);
         } else {
             if notches != 0 {
                 self.step_tolerance(notches);
             }
-            self.indicator_until = uptime.checked_add(INDICATOR_LASTS);
+            self.tolerance_indicator_until = uptime.checked_add(TOLERANCE_INDICATOR_LASTS);
         }
         self.wake().into_iter().collect()
     }
@@ -957,15 +961,19 @@ impl Session {
     }
 
     /// The wake for the soonest of what is on screen only for a while, the notice, the tolerance indicator and the
-    /// magnified view's tag: the one timer the Windows layer keeps serves them all, so the session always asks for the
-    /// next moment one of them goes.
+    /// magnification indicator: the one timer the Windows layer keeps serves them all, so the session
+    /// always asks for the next moment one of them goes.
     fn wake(&self) -> Option<Effect> {
         let notice = self.notice.as_ref().map(|timed| timed.until);
-        [notice, self.indicator_until, self.tag_until]
-            .into_iter()
-            .flatten()
-            .min()
-            .map(Effect::WakeAt)
+        [
+            notice,
+            self.tolerance_indicator_until,
+            self.magnification_indicator_until,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        .map(Effect::WakeAt)
     }
 
     /// Makes `tool` the active tool, by its key or its button on the toolbar, and the next call starts with it (v1 spec
@@ -1028,8 +1036,8 @@ impl Session {
 
     /// Puts the cursor at `to`, the dragged toolbar following it, notes how far the drag Bounds or Snip is drawing has
     /// gone from its start, and measures there. The arrow keys come here too, so they nudge a held toolbar a pixel at a
-    /// time, or ten with Shift (the owner's choice in WPC-312), and count towards the click limit as the mouse going that
-    /// far would (the owner's choice in WPC-314).
+    /// time, or ten with Shift (the owner's choice in WPC-312), and count towards the drag distance as the mouse going
+    /// that far would (the owner's choice in WPC-314).
     fn move_cursor(&mut self, to: Point) {
         self.cursor = to;
         self.drag_toolbar();
@@ -1121,10 +1129,10 @@ impl Session {
     }
 
     /// Closes the tools, erasing every pinned measurement, the notice, the tolerance indicator and the magnified view's
-    /// tag, and has the remembered state kept when the session changed it, the magnification the wheel left included (v1
-    /// spec WPC-296, Fechar as ferramentas). Closing comes first, so the screen is back before the settings file is
-    /// written. The tolerance the mouse wheel set is never kept: the next call starts at the default tolerance in
-    /// Settings.
+    /// magnification indicator, and has the remembered state kept when the session changed it, the magnification the
+    /// wheel left included (v1 spec WPC-296, Fechar as ferramentas). Closing comes first, so the screen is back before
+    /// the settings file is written. The tolerance the mouse wheel set is never kept: the next call starts at the
+    /// default tolerance in Settings.
     fn close(&mut self) -> Vec<Effect> {
         self.closed = true;
         self.toolbar_grab = None;
@@ -1132,8 +1140,8 @@ impl Session {
         self.held_after_cancel = false;
         self.pinned.clear();
         self.notice = None;
-        self.indicator_until = None;
-        self.tag_until = None;
+        self.tolerance_indicator_until = None;
+        self.magnification_indicator_until = None;
         let mut effects = vec![Effect::Close];
         if self.remembered != self.remembered_at_opening {
             effects.push(Effect::SaveRemembered(self.remembered.clone()));
@@ -1143,7 +1151,7 @@ impl Session {
 
     /// The tolerance indicator where the cursor is, while it shows.
     fn tolerance_indicator(&self) -> Option<ToleranceIndicator> {
-        self.indicator_until?;
+        self.tolerance_indicator_until?;
         let monitor = frozen_screen::monitor_at(&self.frozen_screen, self.cursor)?;
         Some(ToleranceIndicator {
             tolerance: self.tolerance,
@@ -1179,7 +1187,7 @@ impl Session {
             monitor,
             center,
             self.remembered.magnification,
-            self.tag_until.is_some(),
+            self.magnification_indicator_until.is_some(),
             self.also_show_logical_pixels,
             self.color_format,
         ))

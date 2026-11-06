@@ -26,7 +26,7 @@ struct Palette {
     warn: Color,
     /// The 1px highlight inside the notice's top border (the inset part of `--panel-shadow`).
     highlight: Color,
-    /// `--blank`: what the magnified view shows where its frame reaches past the monitor.
+    /// `--blank`: what the magnified view shows where its enlargement reaches past the monitor.
     blank: Color,
     /// The notice's shadow, which the opacities below are laid over.
     shadow: Color,

@@ -1,14 +1,14 @@
-//! The test page's captures (v1 spec WPC-296, test layer 1; ticket WPC-331): `test-page/test-page.html`, drawn by
+//! The test page samples (v1 spec WPC-296, test layer 1; ticket WPC-331): `test-page/test-page.html`, drawn by
 //! Chrome on the owner's monitors and photographed through ScreenGauge's own capture, cropped to the page alone, and
-//! kept in `test-page/captures/` for the tests without a screen. `test-page/README.md` records how they were taken.
+//! kept in `test-page/samples/` for the tests without a screen. `test-page/README.md` records how they were taken.
 //!
-//! The capture program is the ignored test below, so neither CI nor the pre-commit hook runs it: neither has a real
-//! monitor. It opens a Chrome of its own, puts the page on every monitor in turn, and writes each monitor's capture.
-//! Run it on the owner's computer, with the monitors at the scales to capture:
+//! The program that takes them is the ignored test below, so neither CI nor the pre-commit hook runs it: neither has a
+//! real monitor. It opens a Chrome of its own, puts the page on every monitor in turn, and writes each monitor's
+//! sample. Run it on the owner's computer, with the monitors at the scales wanted:
 //!
-//! `cargo test -p screengauge --release --bin ScreenGauge capture_the_test_page -- --ignored --nocapture`
+//! `cargo test -p screengauge --release --bin ScreenGauge take_the_test_page_samples -- --ignored --nocapture`
 //!
-//! The other tests read the captures in the repository and run everywhere.
+//! The other tests read the samples in the repository and run everywhere.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -38,7 +38,7 @@ const MAGENTA: [u8; 3] = [0xFF, 0x00, 0xFF];
 
 /// The page alone, cropped from `image`, the photo of a monitor at `scale` where Chrome shows it at 100% zoom: the one
 /// rectangle of the page's size at that scale with magenta all around it and none inside. Anything else is refused,
-/// with why, so a capture never holds anything but the page.
+/// with why, so a sample never holds anything but the page.
 fn page_in(image: &Image, scale: Scale) -> Result<Image, String> {
     let (width, height) = page_size(scale).ok_or_else(|| {
         format!(
@@ -187,14 +187,14 @@ fn drawn_as_the_page(page: &Image, scale: Scale) -> Result<(), String> {
     Ok(())
 }
 
-/// A capture's file name: the monitor's resolution and its scale, such as `3840x2160-175.png`. `None` at a scale that
+/// A sample's file name: the monitor's resolution and its scale, such as `3840x2160-175.png`. `None` at a scale that
 /// isn't a whole percent.
 fn file_name(width: u32, height: u32, scale: Scale) -> Option<String> {
     let percent = scale.dpi().checked_mul(100)?;
     (percent % 96 == 0).then(|| format!("{width}x{height}-{}.png", percent / 96))
 }
 
-/// The monitor's resolution and scale a capture's file name gives, as [`file_name`] writes it.
+/// The monitor's resolution and scale a sample's file name gives, as [`file_name`] writes it.
 fn parse_file_name(name: &str) -> Option<(u32, u32, Scale)> {
     let (size, percent) = name.strip_suffix(".png")?.split_once('-')?;
     let (width, height) = size.split_once('x')?;
@@ -218,8 +218,8 @@ fn test_page_folder() -> PathBuf {
         .join("test-page")
 }
 
-/// The captures the ticket asks for: the AOC at 175% and the ARZOPA at 100% and 125%, as [`file_name`] names them.
-const CAPTURES: [&str; 3] = [
+/// The samples the ticket asks for: the AOC at 175% and the ARZOPA at 100% and 125%, as [`file_name`] names them.
+const SAMPLES: [&str; 3] = [
     "3840x2160-175.png",
     "1920x1080-100.png",
     "1920x1080-125.png",
@@ -434,13 +434,13 @@ fn with_photo(reason: String, image: &Image, device: &str) -> String {
 }
 
 /// Writes `page` as the PNG at `path`, and says how it compares with the file already there.
-fn write_capture(path: &Path, page: &Image) -> &'static str {
+fn write_sample(path: &Path, page: &Image) -> &'static str {
     crate::com::ensure_started().expect("COM, for WIC");
     let before = std::fs::read(path)
         .ok()
         .map(|bytes| pixels_of(&png::read_back::decode(&bytes)));
     let bytes = png::encode(page).expect("the page as a PNG");
-    std::fs::write(path, bytes).expect("the capture is written");
+    std::fs::write(path, bytes).expect("the sample is written");
     let now: Vec<[u8; 3]> = page.pixels().iter().copied().map(bgr).collect();
     match before {
         None => "new",
@@ -485,13 +485,13 @@ fn chrome_version() -> String {
 
 #[test]
 #[ignore = "opens Chrome and photographs the real screen, so it runs on the owner's computer, never in CI"]
-fn capture_the_test_page() {
+fn take_the_test_page_samples() {
     assert!(
         super::self_check::per_monitor_v2(),
         "the test program isn't Per-Monitor V2, so its pixels wouldn't be physical: the manifest didn't reach it"
     );
-    let captures = test_page_folder().join("captures");
-    std::fs::create_dir_all(&captures).expect("the captures folder");
+    let samples = test_page_folder().join("samples");
+    std::fs::create_dir_all(&samples).expect("the samples folder");
     let mut chrome = Chrome::start();
     let window = chrome.window();
     let monitors = monitors().expect("the monitors");
@@ -517,8 +517,8 @@ fn capture_the_test_page() {
         let name = file_name(width, height, monitor.scale);
         match (name, photograph_page(index, monitor)) {
             (Some(name), Ok((page, how))) => {
-                let path = captures.join(&name);
-                let compared = write_capture(&path, &page);
+                let path = samples.join(&name);
+                let compared = write_sample(&path, &page);
                 report.push_str(&format!(
                     "  {name}: {} × {}, {how}, {compared}\n",
                     page.width(),
@@ -674,7 +674,7 @@ mod tests {
     }
 
     #[test]
-    fn a_capture_is_named_by_its_monitors_resolution_and_scale() {
+    fn a_sample_is_named_by_its_monitors_resolution_and_scale() {
         let at = |dpi| Scale::from_dpi(dpi).expect("a DPI");
         assert_eq!(
             file_name(3840, 2160, at(168)).as_deref(),
@@ -701,31 +701,31 @@ mod tests {
     }
 
     #[test]
-    fn the_repository_holds_the_three_captures_and_nothing_else() {
-        // Only the page's captures may enter the public repository: a stray file could be a capture of anything.
-        let mut names: Vec<String> = std::fs::read_dir(test_page_folder().join("captures"))
-            .expect("test-page/captures")
+    fn the_repository_holds_the_three_samples_and_nothing_else() {
+        // Only the page's samples may enter the public repository: a stray file could be a picture of anything.
+        let mut names: Vec<String> = std::fs::read_dir(test_page_folder().join("samples"))
+            .expect("test-page/samples")
             .map(|entry| {
                 entry
-                    .expect("an entry of test-page/captures")
+                    .expect("an entry of test-page/samples")
                     .file_name()
                     .to_string_lossy()
                     .into_owned()
             })
             .collect();
         names.sort();
-        let mut wanted = CAPTURES.map(String::from).to_vec();
+        let mut wanted = SAMPLES.map(String::from).to_vec();
         wanted.sort();
         assert_eq!(names, wanted);
     }
 
     #[test]
-    fn each_capture_is_the_page_alone_at_its_monitors_scale() {
+    fn each_sample_is_the_page_alone_at_its_monitors_scale() {
         crate::com::ensure_started().expect("COM starts on a test thread");
-        for name in CAPTURES {
-            let (_, _, scale) = parse_file_name(name).expect("a capture's name");
+        for name in SAMPLES {
+            let (_, _, scale) = parse_file_name(name).expect("a sample's name");
             let bytes =
-                std::fs::read(test_page_folder().join("captures").join(name)).expect("the capture");
+                std::fs::read(test_page_folder().join("samples").join(name)).expect("the sample");
             let decoded = png::read_back::decode(&bytes);
             assert_eq!(
                 Some((decoded.width, decoded.height)),
@@ -741,7 +741,7 @@ mod tests {
                 decoded.height,
                 decoded.bgra.iter().flatten().copied().collect(),
             )
-            .expect("the pixels fill the capture");
+            .expect("the pixels fill the sample");
             assert_eq!(drawn_as_the_page(&page, scale), Ok(()), "{name}");
             // Not one pixel of the magenta around the page: the crop kept the page alone.
             assert!(

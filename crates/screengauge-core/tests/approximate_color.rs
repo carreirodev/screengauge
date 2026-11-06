@@ -1,5 +1,5 @@
 //! Layer 1 tests of the Approximate color notice (v1 spec WPC-296, Inspect and Colors and HDR; ticket WPC-328): Inspect
-//! says "Approximate color (HDR on)" in its magnified view's strip, under the color, while the view is on a monitor
+//! says "Approximate color (HDR on)" in its magnified view's readout, under the color, while the view is on a monitor
 //! whose photo didn't come through the exact path, and on that monitor alone. They start from each monitor's exact path
 //! mark, on two monitors side by side, one in each case, and look only at the scene the session would draw and at the
 //! effects it returns, without a screen.
@@ -108,13 +108,13 @@ fn rect(left: i32, top: i32, width: u32, height: u32) -> Rect {
 }
 
 #[test]
-fn on_the_approximate_monitor_the_strip_says_approximate_color_hdr_on_on_two_lines_under_the_color()
-{
-    // At 100% and 8×, the frame of 168 starts 22 + 7 right of and below the cursor, at (2849, 629). The strip's text
-    // starts 4 in, at 2853, 160 wide; X and Y take a line of 16 from 804, and the color's row, HEX above RGB, two lines
-    // of 16 from 825 to 857. The notice follows 4 below, at 861: two lines of 15 (11px text at a line height of 1.35,
-    // 14.85), with the sign of 13 at the strip's left, 9 down (8.5, rounded up) to be centered in their 30, and the
-    // text 13 + 5 after it, at 2871, as wide as the 160 less those 18.
+fn on_the_approximate_monitor_the_readout_says_approximate_color_hdr_on_on_two_lines_under_the_color()
+ {
+    // At 100% and 8×, the enlargement of 168 starts 22 + 7 right of and below the cursor, at (2849, 629). The readout's
+    // text starts 4 in, at 2853, 160 wide; X and Y take a line of 16 from 804, and the color's row, HEX above RGB, two
+    // lines of 16 from 825 to 857. The notice follows 4 below, at 861: two lines of 15 (11px text at a line height of
+    // 1.35, 14.85), with the sign of 13 at the readout's left, 9 down (8.5, rounded up) to be centered in their 30, and
+    // the text 13 + 5 after it, at 2871, as wide as the 160 less those 18.
     let view = view(&open(both(), Tool::Inspect, ON_APPROXIMATE));
     assert_eq!(
         view.approximate_color,
@@ -145,7 +145,7 @@ fn the_notice_goes_when_the_cursor_moves_to_the_exact_monitor_and_comes_back_wit
     // The exact monitor is white, as HDR content is cut to: the nearest standard color, with no mark.
     assert_eq!(exact.color.first.text, "#FFFFFF");
     assert_eq!(exact.approximate_color, None);
-    // The strip ends with the color: 7 + 168 + 7 + 16 + 5 + 2 × 16 + 2 + 7.
+    // The readout ends with the color: 7 + 168 + 7 + 16 + 5 + 2 × 16 + 2 + 7.
     assert_eq!(exact.panel.height, 244);
 
     session.handle(event(1100, ON_APPROXIMATE, Input::Move));
@@ -187,7 +187,8 @@ fn the_click_on_the_approximate_monitor_still_copies_the_color_and_copied_shows_
     // The notice waits for the clipboard's answer (WPC-352).
     assert_eq!(session.scene().notice, None);
     session.handle(event(1060, ON_APPROXIMATE, Input::Copied));
-    // Copied is a notice like any other, at the cursor, which goes by itself; the strip keeps the Approximate color one.
+    // Copied is a notice like any other, at the cursor, which goes by itself; the readout keeps the Approximate color
+    // one.
     let scene = session.scene();
     let notice = scene.notice.copied().expect("a notice");
     assert_eq!(notice.message, Message::Copied);
@@ -229,10 +230,10 @@ fn the_taller_panel_goes_above_the_cursor_where_the_one_without_the_notice_still
 
 #[test]
 fn at_150_percent_every_size_of_the_notice_is_scaled_on_its_own() {
-    // At 150% and 8× the frame of 264 starts 33 + 11 right of and below the cursor, at (2864, 444). X and Y take a line
-    // of 24 each, 11 below it, from 719, and the color's row its two lines of 24 from 775 (8 below them) to 823. The
-    // notice follows 6 below, at 829: two lines of 22 (22.275), the sign of 20 (19.5) 12 down to be centered in their
-    // 44, and the text 20 + 8 (7.5) after the strip's text's left, 2870, as wide as its 252 less those 28.
+    // At 150% and 8× the enlargement of 264 starts 33 + 11 right of and below the cursor, at (2864, 444). X and Y take
+    // a line of 24 each, 11 below it, from 719, and the color's row its two lines of 24 from 775 (8 below them) to 823.
+    // The notice follows 6 below, at 829: two lines of 22 (22.275), the sign of 20 (19.5) 12 down to be centered in
+    // their 44, and the text 20 + 8 (7.5) after the readout's text's left, 2870, as wide as its 252 less those 28.
     let monitors = vec![monitor(APPROXIMATE, 144, Colors::Approximate)];
     let view = view(&open(monitors, Tool::Inspect, Point { x: 2820, y: 400 }));
     let notice = view.approximate_color.expect("the notice");

@@ -5,14 +5,14 @@ use super::pixels::{self, Reference, color, rgb};
 use super::{Label, Measurement, Photo, Point, Rect, units};
 use crate::settings::Tolerance;
 
-/// How many physical pixels the cursor may go from where the drag began, along each axis, with the drag still a click
-/// or a tremble of the mouse, which does nothing (v1 spec WPC-296, Bounds, "o limite se calibra na construção"). It is
-/// Windows' own drag distance, SM_CXDRAG and SM_CYDRAG, the pixels on either side of a press the mouse may move before a
-/// drag begins, which let a click come up without starting one: 4 at every scale from 100% to 200% on the owner's
+/// The drag distance: how many physical pixels the cursor may go from where the drag began, along each axis, with the
+/// press still a click, which does nothing (v1 spec WPC-296, Bounds, "o limite se calibra na construção"). It is
+/// Windows' own drag distance, SM_CXDRAG and SM_CYDRAG, the pixels on either side of a press the mouse may move before
+/// a drag begins, which let a click come up without starting one: 4 at every scale from 100% to 200% on the owner's
 /// computer, measured with GetSystemMetricsForDpi in WPC-314, so the same here whatever the monitor's scale. It is
 /// fixed rather than read from Windows, so a drag distance changed in Windows isn't followed (the owner's choice in
 /// WPC-314).
-const CLICK_LIMIT: u32 = 4;
+const DRAG_DISTANCE: u32 = 4;
 
 /// A drag of Bounds or Snip, from the press until the button comes up.
 #[derive(Debug, Clone, Copy)]
@@ -24,8 +24,8 @@ pub(super) struct Drag {
     /// Whether Alt is held, as the last event had it: Bounds then measures exactly the drawn rectangle, and Snip takes
     /// it, for photos, gradients and empty areas, without shrinking it (v1 spec WPC-296, Bounds and Snip).
     exact: bool,
-    /// Whether the cursor has gone further than [`CLICK_LIMIT`] from the start along either axis since the press.
-    past_click_limit: bool,
+    /// Whether the cursor has gone further than [`DRAG_DISTANCE`] from the start along either axis since the press.
+    past_drag_distance: bool,
 }
 
 impl Drag {
@@ -35,16 +35,16 @@ impl Drag {
             start,
             monitor,
             exact,
-            past_click_limit: false,
+            past_drag_distance: false,
         }
     }
 
     /// Notes that the cursor went to `cursor`, wherever it is, on this monitor or another. Once the cursor has gone
-    /// further than the click limit, the drag counts until the button comes up, even should the cursor come back near
+    /// further than the drag distance, the drag counts until the button comes up, even should the cursor come back near
     /// the start: the mouse went that far (the owner's choice in WPC-314).
     pub(super) fn went_to(&mut self, cursor: Point) {
-        let far = |from: i32, to: i32| from.abs_diff(to) > CLICK_LIMIT;
-        self.past_click_limit |= far(self.start.x, cursor.x) || far(self.start.y, cursor.y);
+        let far = |from: i32, to: i32| from.abs_diff(to) > DRAG_DISTANCE;
+        self.past_drag_distance |= far(self.start.x, cursor.x) || far(self.start.y, cursor.y);
     }
 
     /// Has the drag measure exactly the drawn rectangle while `alt` is held, and shrink it to the content otherwise.
@@ -55,10 +55,10 @@ impl Drag {
         changed
     }
 
-    /// Whether the drag is still a click or a tremble of the mouse: the cursor hasn't gone past the click limit since
-    /// the press. Then nothing shows, and the button coming up does nothing, with or without Alt.
+    /// Whether the drag is still a click: the cursor hasn't gone past the drag distance since the press. Then nothing
+    /// shows, and the button coming up does nothing, with or without Alt.
     pub(super) fn is_click(self) -> bool {
-        !self.past_click_limit
+        !self.past_drag_distance
     }
 
     /// Whether the drawn rectangle shows dashed: once the drag counts, without Alt. With Alt, the drawn rectangle is
