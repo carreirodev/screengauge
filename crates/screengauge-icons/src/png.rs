@@ -1,4 +1,8 @@
 //! PNG files in memory, through WIC.
+//!
+//! `screengauge/src/png.rs` writes the Snip's PNG through WIC the same way. The two stay separate copies on purpose
+//! (owner's decision, 2026-11-05, WPC-359): this crate never goes into the exe, and each takes its own kind of image,
+//! so a crate shared by both would be one more piece for a few lines.
 
 use windows::Win32::Foundation::E_FAIL;
 use windows::Win32::Graphics::Imaging::{

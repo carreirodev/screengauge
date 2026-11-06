@@ -2,6 +2,10 @@
 //! other format to choose (v1 spec WPC-296, Snip). The PNG holds 24-bit color and no alpha channel, so it is opaque
 //! whatever the fourth byte of the frozen screen's pixels says, and each pixel keeps the exact red, green and blue the
 //! frozen screen has.
+//!
+//! `screengauge-icons/src/png.rs` writes PNGs through WIC the same way, for the icon files. The two stay separate
+//! copies on purpose (owner's decision, 2026-11-05, WPC-359): the icons crate never goes into the exe, and each takes
+//! its own kind of image, so a crate shared by both would be one more piece for a few lines.
 
 use screengauge_core::session::Image;
 use windows::Win32::Foundation::E_FAIL;
@@ -111,8 +115,8 @@ pub mod read_back {
 
     use super::{factory, memory_stream};
 
-    /// What a PNG decodes to, read back by WIC as a program pasting it would: its size, the pixel format the file holds,
-    /// and every pixel as blue, green, red and alpha.
+    /// What a PNG decodes to, read back by WIC as a program pasting it would: its size, the pixel format the file
+    /// holds, and every pixel as blue, green, red and alpha.
     pub struct Decoded {
         pub width: u32,
         pub height: u32,
