@@ -270,7 +270,9 @@ impl Message {
             Message::NoContentFound(Tool::Snip) => {
                 "No content found · Hold Alt to snip the rectangle"
             }
-            Message::NoContentFound(_) => "No content found · Hold Alt to measure the rectangle",
+            Message::NoContentFound(Tool::Bounds | Tool::Dimensions | Tool::Inspect) => {
+                "No content found · Hold Alt to measure the rectangle"
+            }
             Message::Saved => "Saved",
             Message::CopiedAndSaved => "Copied and saved",
             Message::CouldntSave => "Couldn't save.",
@@ -316,6 +318,7 @@ pub enum Cursor {
 pub struct Measurement {
     /// The monitor it was measured on, as an index in the frozen screen's order.
     pub monitor: usize,
+    /// Whether it holds Dimensions' spans or Bounds' content.
     pub measured: Measured,
     /// What its label says.
     pub label: Label,

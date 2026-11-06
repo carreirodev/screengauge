@@ -172,7 +172,9 @@ struct Grab {
 /// Snip's image on its way to a file (v1 spec WPC-296, Snip).
 #[derive(Debug)]
 struct Saving {
+    /// Where the image is on its way: Save As open, or the file being written.
     stage: Stage,
+    /// What the end of the way goes by, kept from the release on.
     ending: Ending,
 }
 
@@ -198,6 +200,7 @@ enum ImageCopy {
     /// asked for first, and answered before the file is written or Save As opens. Should it, the notice says nothing
     /// of the copy, as with File, rather than something that may be false.
     Waiting,
+    /// Destination is Both, and the clipboard answered.
     Answered(CopyAnswer),
 }
 
