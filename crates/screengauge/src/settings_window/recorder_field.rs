@@ -1,7 +1,7 @@
 //! The global shortcut's row in Settings (v1 spec WPC-296, Settings; WPC-323): the recorder's field, a sunken well with
 //! the shortcut's keys in relief (`.rec`, `.kc`), and Reset beside it, a button with a word (`.pbtn`,
-//! `controls::Laid::Button`), drawn in the toolbar's style as the other controls are (`controls`). The sizes are the prototype's stylesheet (`prototype/measurement-overlay`,
-//! `#settings`), with `box-sizing: border-box`.
+//! `controls::Laid::Button`), drawn in the toolbar's style as the other controls are (`controls`). The sizes are the
+//! prototype's stylesheet (`prototype/measurement-overlay`, `#settings`), with `box-sizing: border-box`.
 //!
 //! While it records, the field has a cyan border and ring, and shows the modifiers held so far in relief and then a
 //! blinking "…", or, with nothing held, a blinking "Press the keys…" (`.rec.recording`, `.wait`).
@@ -41,10 +41,10 @@ pub fn message(refusal: Refusal) -> &'static str {
 }
 
 /// What the row says under its label, and whether the amber band shows across it, with `refusal` the recorder's,
-/// should it have one, and `busy` the global shortcut Windows refused at startup, while it has no other (WPC-324). While
-/// the shortcut is busy, the field resting shows the band, as the prototype does (`settings.js`, `shortcutBusy && !rec`),
-/// and says so, unless a combination tried was refused: the refusal says the try wasn't taken (the owner's call in
-/// WPC-324; the prototype went back to the busy message). While it records, the band goes, and only the recorder's
+/// should it have one, and `busy` the global shortcut Windows refused at startup, while it has no other (WPC-324).
+/// While the shortcut is busy, the field resting shows the band, as the prototype does (`settings.js`, `shortcutBusy &&
+/// !rec`), and says so, unless a combination tried was refused: the refusal says the try wasn't taken (the owner's call
+/// in WPC-324; the prototype went back to the busy message). While it records, the band goes, and only the recorder's
 /// refusals show.
 pub fn said_under_label(
     refusal: Option<Refusal>,
@@ -71,8 +71,8 @@ const FIELD_RADIUS: u32 = 9;
 const FIELD_BORDER: u32 = 1;
 const FIELD_GAP: u32 = 4;
 
-/// A key in relief (`.kc`): its word's size (`600 11.5px`), the room around it (`padding: 3px 7px`) and its corners. Its
-/// height is its word's normal line and 3 above and below.
+/// A key in relief (`.kc`): its word's size (`600 11.5px`), the room around it (`padding: 3px 7px`) and its corners.
+/// Its height is its word's normal line and 3 above and below.
 pub const KEYCAP_TEXT: f32 = 11.5;
 const KEYCAP_PADDING: u32 = 7;
 const KEYCAP_RADIUS: u32 = 6;
@@ -185,8 +185,8 @@ fn words(view: &View) -> Vec<(LabelKind, String)> {
     words
 }
 
-/// Lays out the field and Reset at the row's `end`, at `dpi`, with `measure` giving a word's width in pixels in the font
-/// of its kind: the field, and where Reset goes.
+/// Lays out the field and Reset at the row's `end`, at `dpi`, with `measure` giving a word's width in pixels in the
+/// font of its kind: the field, and where Reset goes.
 pub fn lay(
     view: &View,
     dpi: u32,
@@ -456,9 +456,9 @@ mod tests {
 
     #[test]
     fn a_combination_tried_while_the_shortcut_is_busy_and_refused_says_so_on_the_band() {
-        // Win + Shift + X is busy; the user tries Ctrl + Shift + S, which another program holds too. Recording stops and
-        // the field shows Win + Shift + X again: the row tells the try wasn't taken, and the band stays (the owner's call
-        // in WPC-324).
+        // Win + Shift + X is busy; the user tries Ctrl + Shift + S, which another program holds too. Recording stops
+        // and the field shows Win + Shift + X again: the row tells the try wasn't taken, and the band stays (the
+        // owner's call in WPC-324).
         let busy = Some(Shortcut::default());
         assert_eq!(
             said_under_label(Some(Refusal::AlreadyUsed), false, busy),

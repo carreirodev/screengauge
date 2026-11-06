@@ -5,7 +5,8 @@ use windows::Win32::Foundation::{POINT, RECT, SIZE};
 
 use crate::relief::scaled;
 
-/// The menu's width, in logical pixels: room for the longest label, "Start with Windows", after the check marks' column.
+/// The menu's width, in logical pixels: room for the longest label, "Start with Windows", after the check marks'
+/// column.
 pub const WIDTH: u32 = 180;
 /// The margin between the menu's edge and its rows, on every side.
 pub const MARGIN: u32 = 4;

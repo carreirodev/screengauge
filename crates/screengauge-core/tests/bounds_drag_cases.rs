@@ -222,8 +222,8 @@ fn a_drag_over_nothing_but_the_reference_color_shows_no_content_found_and_pins_a
             side: NoticeSide::Above,
         })
     );
-    // What the user asked for wasn't done, so the notice has the alert sign, not Copied's check mark, and it tells of Alt,
-    // which measures the drawn rectangle itself (the owner's choice in WPC-314).
+    // What the user asked for wasn't done, so the notice has the alert sign, not Copied's check mark, and it tells of
+    // Alt, which measures the drawn rectangle itself (the owner's choice in WPC-314).
     assert_eq!(
         (
             Message::NoContentFound(Tool::Bounds).text(),
@@ -341,8 +341,8 @@ fn with_alt_an_area_of_nothing_but_the_reference_color_is_measured_like_any_othe
 #[test]
 fn with_alt_a_gradient_is_measured_as_drawn_where_the_shrink_would_stop_on_its_first_step() {
     // A gradient across the monitor's columns from 800 on, a level darker every four pixels. Begun at column 810, level
-    // 253, the first step more than 6 levels off it is level 246, from column 836: without Alt, the rectangle shrinks to
-    // it, 836 to 1100.
+    // 253, the first step more than 6 levels off it is level 246, from column 836: without Alt, the rectangle shrinks
+    // to it, 836 to 1100.
     let steps: Vec<([u8; 3], [i32; 4])> = (0..100u8)
         .map(|step| {
             let level = 255 - step;
@@ -639,8 +639,8 @@ fn esc_held_down_or_pressed_again_with_the_button_still_held_closes_nothing() {
     let mut session = open(vec![button()], at(900, 500));
     drag(&mut session, at(900, 500), at(1200, 700), 1000);
     hold(&mut session, at(900, 500), at(1200, 700), 2000);
-    // The first Esc cancels the drag. Held down, it repeats, as Windows sends it again after a moment and then every few
-    // hundredths of a second, and a second press comes as well, all with the button still down.
+    // The first Esc cancels the drag. Held down, it repeats, as Windows sends it again after a moment and then every
+    // few hundredths of a second, and a second press comes as well, all with the button still down.
     for milliseconds in [2100, 2600, 2633, 3000] {
         assert_eq!(
             session.handle(key(at(1200, 700), milliseconds, Key::Esc)),

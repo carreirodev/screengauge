@@ -76,9 +76,9 @@ pub fn unregister() -> windows::core::Result<()> {
     release_id(hwnd, registered.id)
 }
 
-/// Whether ScreenGauge runs without its global shortcut, since Windows refused the settings file's at startup (WPC-324):
-/// another program holds it, or Windows took it. A change that registers one ends it, as Settings' recorder makes.
-/// Also true once [`unregister`] let it go as ScreenGauge exits.
+/// Whether ScreenGauge runs without its global shortcut, since Windows refused the settings file's at startup
+/// (WPC-324): another program holds it, or Windows took it. A change that registers one ends it, as Settings' recorder
+/// makes. Also true once [`unregister`] let it go as ScreenGauge exits.
 pub fn is_busy() -> bool {
     RESIDENT.get().is_some() && REGISTERED.get().is_none()
 }

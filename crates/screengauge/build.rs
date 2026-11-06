@@ -6,8 +6,8 @@
 //!
 //! The icon and the version resource go in a `.res` file this script writes itself: a resource compiler (rc.exe) or a
 //! new crate (embed-resource, winresource) would have gone back to the owner first (WPC-303's note on WPC-304), and
-//! writing the file needs neither. link.exe takes a `.res` as an input file and converts it on its own. The manifest stays out of the `.res`: the linker embeds it, and a second RT_MANIFEST would
-//! collide with it.
+//! writing the file needs neither. link.exe takes a `.res` as an input file and converts it on its own. The manifest
+//! stays out of the `.res`: the linker embeds it, and a second RT_MANIFEST would collide with it.
 
 use std::env;
 use std::fs;

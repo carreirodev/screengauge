@@ -445,8 +445,8 @@ fn a_folder_that_isnt_a_full_path_goes_back_to_its_default() {
     }
 }
 
-/// Every tolerance a notch of the mouse wheel or Settings' − / + steps through, from the lowest up (WPC-332): one by one
-/// up to 10, then five by five up to 100.
+/// Every tolerance a notch of the mouse wheel or Settings' − / + steps through, from the lowest up (WPC-332): one by
+/// one up to 10, then five by five up to 100.
 fn steps() -> Vec<u8> {
     (0..=10).chain((15..=100).step_by(5)).collect()
 }

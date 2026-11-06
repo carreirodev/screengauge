@@ -12,8 +12,8 @@ use super::*;
 
 pub(super) const MODES: [Mode; 2] = [Mode::Dark, Mode::Light];
 
-/// One palette's colors as the prototype states them (`--panel`, `--panel-ink` and so on), written out here a second time
-/// so that a slip in the palette is caught.
+/// One palette's colors as the prototype states them (`--panel`, `--panel-ink` and so on), written out here a second
+/// time so that a slip in the palette is caught.
 pub(super) struct Tokens {
     pub(super) panel: ([u8; 3], f32),
     pub(super) ink: [u8; 3],
@@ -648,8 +648,8 @@ fn a_notice_is_the_panel_in_a_ring_with_a_highlight_inside_its_top() {
 
 #[test]
 fn a_notice_is_drawn_where_the_rule_puts_it() {
-    // Worked out by hand at 100%: 14 to the right of the cursor and its bottom 14 above it, to the left when it would end
-    // within 4 of the monitor's right side, and 18 below it when it would start within 4 of the monitor's top.
+    // Worked out by hand at 100%: 14 to the right of the cursor and its bottom 14 above it, to the left when it would
+    // end within 4 of the monitor's right side, and 18 below it when it would start within 4 of the monitor's top.
     let canvas = Canvas::new(480, 320);
     let t = tokens(Mode::Dark);
     let ring = t.ring_over_panel();
@@ -802,9 +802,9 @@ fn a_notices_text_is_in_the_panels_ink_inside_its_line() {
                 "strongest green {strongest}, the ink's {}, {context}",
                 t.ink[1]
             );
-            // Every pixel that is clearly ink, in the text's columns of the panel's content rows and the padding above and
-            // below them, is inside its line, but for the tail of the "p", which may hang a pixel or two out of it: CSS
-            // lets a glyph go beyond its line box too, and the padding is there to take it.
+            // Every pixel that is clearly ink, in the text's columns of the panel's content rows and the padding above
+            // and below them, is inside its line, but for the tail of the "p", which may hang a pixel or two out of it:
+            // CSS lets a glyph go beyond its line box too, and the padding is there to take it.
             let line_and_tails = rect(
                 line.left,
                 line.top,

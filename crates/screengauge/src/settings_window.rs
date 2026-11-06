@@ -6,9 +6,9 @@
 //! the version, the link to the project's page and "Check for updates" (`updates`, WPC-335). Its X closes only the
 //! window, and ScreenGauge keeps running.
 //!
-//! A click on a control changes the option at once, in the settings file too, with no Save or Cancel (WPC-320). The Snip's
-//! "Change…", and its switch turned on with no folder kept, open Windows' folder window over this one (WPC-322). Like
-//! the link, a control acts only when the left button comes up on the same one it went down on, as the toolbar's
+//! A click on a control changes the option at once, in the settings file too, with no Save or Cancel (WPC-320). The
+//! Snip's "Change…", and its switch turned on with no folder kept, open Windows' folder window over this one (WPC-322).
+//! Like the link, a control acts only when the left button comes up on the same one it went down on, as the toolbar's
 //! buttons do (WPC-310). The global shortcut's field records a new combination (`recorder`, WPC-323); a press anywhere
 //! else, on the title bar too, or Settings losing the front, stops it.
 //!
@@ -111,8 +111,8 @@ enum Hit {
 
 /// Registered once at startup.
 pub fn register_class(instance: HINSTANCE) -> windows::core::Result<()> {
-    // SAFETY: MAKEINTRESOURCE of the icon group, in this exe's own module. A shared icon: never destroyed. With no small
-    // icon given, Windows takes the title bar's from the same group.
+    // SAFETY: MAKEINTRESOURCE of the icon group, in this exe's own module. A shared icon: never destroyed. With no
+    // small icon given, Windows takes the title bar's from the same group.
     let icon = unsafe {
         LoadIconW(
             Some(instance),
@@ -327,8 +327,8 @@ fn to_front(hwnd: HWND) {
     }
 }
 
-/// The window's whole size at `dpi`, title bar and frame included, for the page's 560 logical pixels wide and its height
-/// inside, taller while a message shows under a row's label, and while "Check for updates" says something.
+/// The window's whole size at `dpi`, title bar and frame included, for the page's 560 logical pixels wide and its
+/// height inside, taller while a message shows under a row's label, and while "Check for updates" says something.
 fn window_size(dpi: u32) -> windows::core::Result<SIZE> {
     window_size_with(dpi, &grown(), updates::status().is_some())
 }
@@ -474,7 +474,8 @@ extern "system" fn window_proc(
             }
         }
         WM_DPICHANGED => {
-            // SAFETY: WM_DPICHANGED's lParam points to the rectangle Windows suggests, which the size given above makes.
+            // SAFETY: WM_DPICHANGED's lParam points to the rectangle Windows suggests, which the size given above
+            // makes.
             let suggested = unsafe { *(lparam.0 as *const RECT) };
             // SAFETY: our own window.
             let moved = unsafe {
@@ -743,9 +744,9 @@ fn save(change: impl FnOnce(&mut Options) -> bool) {
 }
 
 /// "Change…", and the switch turned on with no folder kept: Windows' folder window opens, in the folder kept when there
-/// is one. The folder chosen is kept, and with the switch it turns it on; cancelling changes nothing, so the switch stays
-/// off (v1 spec WPC-296, Settings). Must be called with nothing borrowed that this window's procedure borrows: the folder
-/// window runs its own message loop.
+/// is one. The folder chosen is kept, and with the switch it turns it on; cancelling changes nothing, so the switch
+/// stays off (v1 spec WPC-296, Settings). Must be called with nothing borrowed that this window's procedure borrows:
+/// the folder window runs its own message loop.
 fn choose_folder(hwnd: HWND, control: Control, options: &Options) {
     let chosen = folder_picker::choose(hwnd, options.default_folder.folder());
     // ScreenGauge exited while the folder window was open, as it can from the tray icon: the end of the message loop it

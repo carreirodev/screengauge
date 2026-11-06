@@ -21,16 +21,17 @@ pub struct Scene<'a> {
     /// The rectangle Bounds or Snip is drawing while the button is held, drawn under every measurement on its monitor.
     /// `None` the rest of the time.
     pub drawn_rectangle: Option<DrawnRectangle>,
-    /// The area Snip takes the image of as the button comes up, while it is held, drawn over the drawn rectangle and the
-    /// pinned measurements on its monitor. `None` the rest of the time, and while the drawn rectangle holds no content.
+    /// The area Snip takes the image of as the button comes up, while it is held, drawn over the drawn rectangle and
+    /// the pinned measurements on its monitor. `None` the rest of the time, and while the drawn rectangle holds no
+    /// content.
     pub snip_area: Option<SnipArea>,
     /// The pinned measurements, oldest first, each drawn over the photo of the monitor it was measured on, whichever
     /// monitor the cursor is on. Their labels are in the theme's colors, the live one's in cyan, so the one that still
     /// changes stands out (v1 spec WPC-296, Como as medidas aparecem).
     pub pinned: &'a [Measurement],
     /// Inspect's magnified view, drawn over the measurements on its monitor and under the toolbar, as the prototype
-    /// stacks them (WPC-279). `None` while another tool is active, and while the cursor hasn't been off the toolbar since
-    /// the tools opened.
+    /// stacks them (WPC-279). `None` while another tool is active, and while the cursor hasn't been off the toolbar
+    /// since the tools opened.
     pub magnified_view: Option<MagnifiedView>,
     /// The tolerance indicator, drawn over the measurements on the cursor's monitor and under the notice. `None` once
     /// the mouse wheel hasn't changed the tolerance for a second.
@@ -52,8 +53,8 @@ pub struct DrawnRectangle {
     pub rect: Rect,
 }
 
-/// What Snip shows while the button is held (v1 spec WPC-296, Snip): cyan corners around the area it takes the image of,
-/// with no fill, and a cyan label with a camera and the image's size, in physical pixels alone.
+/// What Snip shows while the button is held (v1 spec WPC-296, Snip): cyan corners around the area it takes the image
+/// of, with no fill, and a cyan label with a camera and the image's size, in physical pixels alone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnipArea {
     /// The monitor the drag began on, as an index in the frozen screen's order. The area never leaves it.
@@ -65,27 +66,28 @@ pub struct SnipArea {
     pub label: Label,
 }
 
-/// The toolbar (v1 spec WPC-296, Toolbar): the tools' buttons with the active tool's lit, then H, V and C in a room kept
-/// for them, then the gear, minimize and close; or, minimized, one small cyan button with the active tool's icon and a
-/// small arrow, in the same place. Its parts are where [`toolbar::layout`](super::toolbar::layout) puts them from its
-/// corner.
+/// The toolbar (v1 spec WPC-296, Toolbar): the tools' buttons with the active tool's lit, then H, V and C in a room
+/// kept for them, then the gear, minimize and close; or, minimized, one small cyan button with the active tool's icon
+/// and a small arrow, in the same place. Its parts are where [`toolbar::layout`](super::toolbar::layout) puts them from
+/// its corner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Toolbar {
-    /// The monitor it is on, as an index in the frozen screen's order: the current monitor as the tools opened. It stays
-    /// there while the cursor goes to another monitor, where the tool then measures, and while it is dragged.
+    /// The monitor it is on, as an index in the frozen screen's order: the current monitor as the tools opened. It
+    /// stays there while the cursor goes to another monitor, where the tool then measures, and while it is dragged.
     pub monitor: usize,
-    /// Its top left corner, in physical pixels of the virtual screen, which the minimized toolbar's button shares: at the
-    /// remembered place on its monitor as the tools open, and wherever a drag takes it inside that monitor (WPC-312).
+    /// Its top left corner, in physical pixels of the virtual screen, which the minimized toolbar's button shares: at
+    /// the remembered place on its monitor as the tools open, and wherever a drag takes it inside that monitor
+    /// (WPC-312).
     pub corner: Point,
     /// The active tool, whose button is lit. There is always one.
     pub active: Tool,
-    /// Dimensions' mode, whose button is lit, while Dimensions is the active tool. `None` with any other tool: then H, V
-    /// and C don't show, and their room stays empty so no other button moves.
+    /// Dimensions' mode, whose button is lit, while Dimensions is the active tool. `None` with any other tool: then H,
+    /// V and C don't show, and their room stays empty so no other button moves.
     pub mode: Option<DimensionsMode>,
     /// Whether it is minimized to its small button. Every call opens it whole.
     pub minimized: bool,
-    /// The button the cursor is on, which reacts to it as the prototype's buttons do to hovering. `None` with the cursor
-    /// off every button.
+    /// The button the cursor is on, which reacts to it as the prototype's buttons do to hovering. `None` with the
+    /// cursor off every button.
     pub hovered: Option<ToolbarButton>,
 }
 

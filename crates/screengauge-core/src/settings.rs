@@ -57,7 +57,8 @@ impl Default for Options {
 /// WPC-296, Settings): the next call opens with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Change {
-    /// "Global shortcut": a combination the recorder took, or Reset's `Win + Shift + X`, once Windows has registered it.
+    /// "Global shortcut": a combination the recorder took, or Reset's `Win + Shift + X`, once Windows has registered
+    /// it.
     GlobalShortcut(Shortcut),
     /// "Start with Windows" turned on or off, once Windows has it.
     StartWithWindows(bool),
@@ -95,8 +96,8 @@ impl Options {
         *self != before
     }
 
-    /// Keeps `folder` as the default folder, which Windows' folder window returned. "Save to default folder" stays as it
-    /// is, on or off, and `turn_on` turns it on too, as choosing the folder is part of turning it on. False when
+    /// Keeps `folder` as the default folder, which Windows' folder window returned. "Save to default folder" stays as
+    /// it is, on or off, and `turn_on` turns it on too, as choosing the folder is part of turning it on. False when
     /// nothing changed.
     pub fn choose_default_folder(&mut self, folder: Folder, turn_on: bool) -> bool {
         let before = self.default_folder.clone();
@@ -245,8 +246,8 @@ impl Default for Tolerance {
 }
 
 /// Where the toolbar sits in its monitor, as a share of the room it has to move inside its margins on each axis: 0 is
-/// against the left (or top) margin, 1 against the right (or bottom) one. Dragging the toolbar sets it, and the next call
-/// puts the toolbar at the same place of the current monitor, whatever its size and scale
+/// against the left (or top) margin, 1 against the right (or bottom) one. Dragging the toolbar sets it, and the next
+/// call puts the toolbar at the same place of the current monitor, whatever its size and scale
 /// ([`session::toolbar::corner`](crate::session::toolbar::corner), WPC-312).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ToolbarPlace {

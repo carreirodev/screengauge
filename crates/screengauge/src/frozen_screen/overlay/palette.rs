@@ -26,7 +26,8 @@ struct Palette {
     highlight: Color,
     /// `--blank`: what the magnified view shows where its enlargement reaches past the monitor.
     blank: Color,
-    /// The floating panels' shadow (the outer part of `--panel-shadow`), which `relief` blurs as it blurs the toolbar's.
+    /// The floating panels' shadow (the outer part of `--panel-shadow`), which `relief` blurs as it blurs the
+    /// toolbar's.
     shadow: Shadow,
 }
 

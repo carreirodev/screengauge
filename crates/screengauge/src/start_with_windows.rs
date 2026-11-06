@@ -1,8 +1,8 @@
-//! "Start with Windows" for the installer copy (WPC-326, ADR 0004): ScreenGauge is listed to start at sign-in by a value
-//! in the current user's `Run` key, which Windows reads at each sign-in, and it starts then with [`SIGN_IN`] on its
-//! command line, hidden, without opening the tools. What the user chose in Task Manager or in Settings > Apps > Startup
-//! is the value of the same name in `StartupApproved\Run`, which only Windows writes: ScreenGauge reads it and never
-//! writes it, so that choice is never overridden. The rule of what the switch shows is the core's
+//! "Start with Windows" for the installer copy (WPC-326, ADR 0004): ScreenGauge is listed to start at sign-in by a
+//! value in the current user's `Run` key, which Windows reads at each sign-in, and it starts then with [`SIGN_IN`] on
+//! its command line, hidden, without opening the tools. What the user chose in Task Manager or in Settings > Apps >
+//! Startup is the value of the same name in `StartupApproved\Run`, which only Windows writes: ScreenGauge reads it and
+//! never writes it, so that choice is never overridden. The rule of what the switch shows is the core's
 //! ([`StartWithWindows`]).
 //!
 //! The Store copy starts with its package's startup task instead (WPC-336), which its manifest declares off: turning
@@ -83,8 +83,8 @@ pub fn turn(on: bool) -> windows::core::Result<()> {
 pub enum Clicked {
     /// Turned on or off, as the user asked.
     Turned,
-    /// Windows has it turned off: the amber message says where to turn it on. Nothing changed, or, from off, ScreenGauge
-    /// is now listed where Windows shows the user's choice, which Windows still has off.
+    /// Windows has it turned off: the amber message says where to turn it on. Nothing changed, or, from off,
+    /// ScreenGauge is now listed where Windows shows the user's choice, which Windows still has off.
     TurnedOffInWindows,
 }
 

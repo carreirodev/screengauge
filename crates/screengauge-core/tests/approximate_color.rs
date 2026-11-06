@@ -247,9 +247,9 @@ fn at_150_percent_every_size_of_the_notice_is_scaled_on_its_own() {
 #[test]
 fn paused_on_the_toolbar_on_the_exact_monitor_the_view_and_its_notice_stay_on_the_approximate_one()
 {
-    // The tools opened on the exact monitor, so the toolbar is there. On it Inspect pauses, and the view stays where the
-    // cursor last was off it (the owner's choice in WPC-311): on the approximate monitor, whose color it still shows, so
-    // the notice stays with it.
+    // The tools opened on the exact monitor, so the toolbar is there. On it Inspect pauses, and the view stays where
+    // the cursor last was off it (the owner's choice in WPC-311): on the approximate monitor, whose color it still
+    // shows, so the notice stays with it.
     let mut session = open(both(), Tool::Inspect, ON_EXACT);
     session.handle(event(1000, ON_APPROXIMATE, Input::Move));
     let before = view(&session);

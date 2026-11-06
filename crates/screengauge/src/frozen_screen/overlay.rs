@@ -1,6 +1,6 @@
 //! The measurements drawn over a window's photo: Dimensions' cyan line with its ticks and outline, Bounds' drawn
-//! rectangle and the content it shrinks to, and the label in a pill, for the pinned measurements and the live one; Snip's
-//! corners and label; the toolbar, the tolerance indicator and the notice. Everything about where they go is in
+//! rectangle and the content it shrinks to, and the label in a pill, for the pinned measurements and the live one;
+//! Snip's corners and label; the toolbar, the tolerance indicator and the notice. Everything about where they go is in
 //! `geometry`, `bounds`, `snip`, `toolbar`, `tolerance` and `notice`, which need no Windows; this draws them onto any
 //! Direct2D render target at 96 DPI, so a test can render them on a bitmap and count pixels.
 
@@ -143,8 +143,8 @@ pub struct Overlay {
     fonts: Fonts,
     /// The palette the toolbar is drawn in; the pinned labels' and the notice's are in `surfaces`.
     mode: Mode,
-    /// The toolbar, drawn on a bitmap that every frame lays over the photo. Lost with the rest of the overlay should the
-    /// render target be.
+    /// The toolbar, drawn on a bitmap that every frame lays over the photo. Lost with the rest of the overlay should
+    /// the render target be.
     toolbar_cache: RefCell<toolbar_cache::ToolbarCache>,
     /// The monitor's scale: everything is laid out at its DPI (`dpi`), and the toolbar's parts at the scale itself,
     /// wherever the scene puts it.
@@ -195,9 +195,9 @@ impl Overlay {
         // SAFETY: no arguments.
         let figures = unsafe { fonts.factory.CreateTypography() }?;
         // Asking DirectWrite for a feature replaces its default ones, kerning among them, which would leave "Couldn't
-        // save." a pixel wider than Chromium draws it. Kerning is the only default that changes these texts' width: with
-        // it back, every label and notice is as wide as with no features asked for, measured at 100 to 175% for WPC-354,
-        // ligatures and contextual alternates asked for too or not.
+        // save." a pixel wider than Chromium draws it. Kerning is the only default that changes these texts' width:
+        // with it back, every label and notice is as wide as with no features asked for, measured at 100 to 175% for
+        // WPC-354, ligatures and contextual alternates asked for too or not.
         for feature in [
             DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES,
             DWRITE_FONT_FEATURE_TAG_KERNING,
@@ -260,8 +260,9 @@ impl Overlay {
     /// Order matters, and it is across the measurements, not within each: the drawn rectangle; every content's fill;
     /// every label's shadow, which is faint and reaches toward the lines; every outline; every cyan pixel, so nothing
     /// darkens one, whichever measurement it belongs to; then the pills with their text. A pill never touches its own
-    /// line, being further from it than a tick reaches, but it covers another measurement's. A label that can't be laid out doesn't stop the others; the
-    /// first failure is returned once everything else is drawn, and any later one is logged.
+    /// line, being further from it than a tick reaches, but it covers another measurement's. A label that can't be laid
+    /// out doesn't stop the others; the first failure is returned once everything else is drawn, and any later one is
+    /// logged.
     pub fn draw(
         &self,
         target: &ID2D1RenderTarget,
@@ -474,8 +475,8 @@ impl Overlay {
         Typeset::of(self.layout_as(text, format, false)?)
     }
 
-    /// The pill's shadow, which the lines are drawn over. A pinned pill is a little see-through, and CSS never paints an
-    /// outer shadow inside the box it belongs to, so there the shadow is cut out where the pill is; the live pill is
+    /// The pill's shadow, which the lines are drawn over. A pinned pill is a little see-through, and CSS never paints
+    /// an outer shadow inside the box it belongs to, so there the shadow is cut out where the pill is; the live pill is
     /// opaque, so under it the shadow is not worth the trouble.
     fn draw_shadow(
         &self,
@@ -527,8 +528,8 @@ impl Overlay {
         }
     }
 
-    /// A label's logical part in `ink`: the bar at `BAR_OPACITY` and the logical text at `LOGICAL_OPACITY`. The brush keeps
-    /// the last opacity, so whatever draws with it next sets its own first.
+    /// A label's logical part in `ink`: the bar at `BAR_OPACITY` and the logical text at `LOGICAL_OPACITY`. The brush
+    /// keeps the last opacity, so whatever draws with it next sets its own first.
     fn draw_logical(
         &self,
         target: &ID2D1RenderTarget,
@@ -578,8 +579,8 @@ impl Overlay {
         }
     }
 
-    /// The palette's panel filling `outer`, and a ring of the palette's border `ring_width` pixels wide inside its edge:
-    /// the background of a pinned label and of the notice.
+    /// The palette's panel filling `outer`, and a ring of the palette's border `ring_width` pixels wide inside its
+    /// edge: the background of a pinned label and of the notice.
     fn fill_panel(&self, target: &ID2D1RenderTarget, outer: &D2D1_ROUNDED_RECT, ring_width: i32) {
         // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
         // Direct2D only fails the frame at EndDraw.

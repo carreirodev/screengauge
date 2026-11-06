@@ -98,9 +98,9 @@ pub struct Session {
     frozen_screen: Vec<Photo>,
     /// Where the cursor is, as far as the session knows: the last event's place, or where the arrow keys put it.
     cursor: Point,
-    /// Where the tool measures: the cursor's place, or, while the cursor is on the toolbar and the tool pauses, the last
-    /// place it had off the toolbar, so the measurement stays as it was (the owner's choice in WPC-311). `None` while
-    /// the cursor hasn't been off the toolbar since the tools opened.
+    /// Where the tool measures: the cursor's place, or, while the cursor is on the toolbar and the tool pauses, the
+    /// last place it had off the toolbar, so the measurement stays as it was (the owner's choice in WPC-311). `None`
+    /// while the cursor hasn't been off the toolbar since the tools opened.
     measured_at: Option<Point>,
     /// The tolerance Dimensions, Bounds and Snip share: the default tolerance from Settings, until the mouse wheel
     /// changes it. It lasts until the tools close and is never kept.
@@ -124,7 +124,8 @@ pub struct Session {
     /// two differ.
     remembered_at_opening: Remembered,
     remembered: Remembered,
-    /// What the active tool measures now: Dimensions around the cursor, Bounds the content of the rectangle being drawn.
+    /// What the active tool measures now: Dimensions around the cursor, Bounds the content of the rectangle being
+    /// drawn.
     live: Option<Measurement>,
     /// The area Snip takes the image of, while it draws a rectangle that holds some.
     snip_area: Option<SnipArea>,
@@ -384,12 +385,12 @@ impl Session {
             // The second click of the double-click that called ScreenGauge does nothing, on the toolbar as on the tool
             // (WPC-308): it would act on a button the user never aimed at.
             Input::Toolbar(_) if self.is_second_click(event.uptime) => Vec::new(),
-            // Esc with the button held while Bounds or Snip draws a rectangle cancels only that drag, and closes nothing
-            // for as long as the button stays down (v1 spec WPC-296, Fechar as ferramentas).
+            // Esc with the button held while Bounds or Snip draws a rectangle cancels only that drag, and closes
+            // nothing for as long as the button stays down (v1 spec WPC-296, Fechar as ferramentas).
             Input::KeyDown(Key::Esc) if self.tool_holds_the_press() => self.cancel_drag(),
             // Esc without a drag closes the tools whatever tool is active (v1 spec WPC-296, derived rule 3), and so do
-            // the toolbar's close button and the global shortcut pressed again. Alt+F4 closes them as a whole, never one
-            // monitor's window alone.
+            // the toolbar's close button and the global shortcut pressed again. Alt+F4 closes them as a whole, never
+            // one monitor's window alone.
             Input::KeyDown(Key::Esc)
             | Input::Toolbar(ToolbarButton::Close)
             | Input::GlobalShortcut
@@ -446,8 +447,8 @@ impl Session {
         }
     }
 
-    /// What a press off the toolbar does with the active tool: Dimensions pins what it measures, Bounds and Snip start a
-    /// drag, and Inspect copies the color.
+    /// What a press off the toolbar does with the active tool: Dimensions pins what it measures, Bounds and Snip start
+    /// a drag, and Inspect copies the color.
     fn press(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
         match self.remembered.last_tool {
             Tool::Dimensions => self.pin(held, uptime),
@@ -459,10 +460,10 @@ impl Session {
         }
     }
 
-    /// Copies the color of the pixel at the magnified view's center, the one under the cursor at the click; the tool stays
-    /// as it was, and nothing is pinned (v1 spec WPC-296, Inspect). Once the clipboard answers, "Copied" or "Couldn't
-    /// copy." shows (WPC-352). It copies the format the readout shows first, or with Shift held the other, even when it
-    /// doesn't show. The second click of the double-click
+    /// Copies the color of the pixel at the magnified view's center, the one under the cursor at the click; the tool
+    /// stays as it was, and nothing is pinned (v1 spec WPC-296, Inspect). Once the clipboard answers, "Copied" or
+    /// "Couldn't copy." shows (WPC-352). It copies the format the readout shows first, or with Shift held the other,
+    /// even when it doesn't show. The second click of the double-click
     /// that called ScreenGauge copies nothing, as it pins nothing in Dimensions (WPC-308).
     fn copy_color(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
         if self.is_second_click(uptime) {
@@ -481,9 +482,9 @@ impl Session {
         self.ask_for_copy(Effect::CopyText(text), monitor)
     }
 
-    /// Starts drawing a rectangle from where the session last put the cursor, on the monitor there, as Dimensions' click
-    /// pins what it measures there, exactly as drawn while `exact`, with Alt held. The second click of the double-click
-    /// that called ScreenGauge starts none (WPC-308).
+    /// Starts drawing a rectangle from where the session last put the cursor, on the monitor there, as Dimensions'
+    /// click pins what it measures there, exactly as drawn while `exact`, with Alt held. The second click of the
+    /// double-click that called ScreenGauge starts none (WPC-308).
     fn start_drag(&mut self, exact: bool, uptime: Duration) {
         if self.is_second_click(uptime) {
             return;
@@ -493,18 +494,18 @@ impl Session {
         self.measure();
     }
 
-    /// Has the drag Bounds or Snip is drawing measure exactly the drawn rectangle while `alt` is held, and shrink it to the
-    /// content otherwise. Alt counts as each event has it, so pressing or letting go of it in the middle of the drag
-    /// changes the preview at once, and the release goes by the key as the button comes up (v1 spec WPC-296, Bounds).
-    /// Only a change measures again: Alt held down repeats, and a shrink may read a whole monitor.
+    /// Has the drag Bounds or Snip is drawing measure exactly the drawn rectangle while `alt` is held, and shrink it to
+    /// the content otherwise. Alt counts as each event has it, so pressing or letting go of it in the middle of the
+    /// drag changes the preview at once, and the release goes by the key as the button comes up (v1 spec WPC-296,
+    /// Bounds). Only a change measures again: Alt held down repeats, and a shrink may read a whole monitor.
     fn follow_alt(&mut self, alt: bool) {
         if self.drag.as_mut().is_some_and(|drag| drag.follow_alt(alt)) {
             self.measure();
         }
     }
 
-    /// Whether the button is held for the tool: Bounds or Snip draws a rectangle, or Esc cancelled the one it drew and the
-    /// button hasn't come up since.
+    /// Whether the button is held for the tool: Bounds or Snip draws a rectangle, or Esc cancelled the one it drew and
+    /// the button hasn't come up since.
     fn tool_holds_the_press(&self) -> bool {
         self.drag.is_some() || self.held_after_cancel
     }
@@ -536,8 +537,8 @@ impl Session {
     /// at all, with or without Alt, and without a notice.
     ///
     /// Snip instead takes the image of what its preview showed, at `time`, and sends it where Destination says, pinning
-    /// nothing, and Shift changes nothing (v1 spec WPC-296, Snip); with nothing but the reference color there is no image,
-    /// and the notice says so in Snip's words.
+    /// nothing, and Shift changes nothing (v1 spec WPC-296, Snip); with nothing but the reference color there is no
+    /// image, and the notice says so in Snip's words.
     fn finish_drag(
         &mut self,
         drag: bounds::Drag,
@@ -564,11 +565,11 @@ impl Session {
         }
     }
 
-    /// Takes the image of `area`, from the frozen screen and never from the screen as it is now, at `time`, and sends it
-    /// where Destination says (v1 spec WPC-296, Snip). The clipboard, with Clipboard or Both, gets it at once, each image
-    /// in the place of the last. The file, with File or Both, goes to the default folder under the automatic name when
-    /// "Save to default folder" is on, with no window, and otherwise wherever Save As, opened in the folder it last saved
-    /// to, says. The notice waits for the clipboard's answer, and for the file too when there is one.
+    /// Takes the image of `area`, from the frozen screen and never from the screen as it is now, at `time`, and sends
+    /// it where Destination says (v1 spec WPC-296, Snip). The clipboard, with Clipboard or Both, gets it at once, each
+    /// image in the place of the last. The file, with File or Both, goes to the default folder under the automatic name
+    /// when "Save to default folder" is on, with no window, and otherwise wherever Save As, opened in the folder it
+    /// last saved to, says. The notice waits for the clipboard's answer, and for the file too when there is one.
     fn take_image(&mut self, area: &SnipArea, time: LocalTime) -> Vec<Effect> {
         let Some(image) = self
             .frozen_screen
@@ -626,10 +627,11 @@ impl Session {
     }
 
     /// What `event` does while Snip's image is on its way to a file (v1 spec WPC-296, Snip). With Save As open, nothing
-    /// the user does over the frozen screen counts, so no other drag starts, and Esc is Save As's alone. Another program
-    /// coming to the front sends the frozen screen and Save As behind it, to wait, and Save As's button brings them back
-    /// (the owner's choice in WPC-318); so does the global shortcut, which never closes the tools while Save As is open,
-    /// as that would lose the image, and so does calling ScreenGauge from its tray icon or the Start menu. A change of monitors closes the tools once the file is done with.
+    /// the user does over the frozen screen counts, so no other drag starts, and Esc is Save As's alone. Another
+    /// program coming to the front sends the frozen screen and Save As behind it, to wait, and Save As's button brings
+    /// them back (the owner's choice in WPC-318); so does the global shortcut, which never closes the tools while Save
+    /// As is open, as that would lose the image, and so does calling ScreenGauge from its tray icon or the Start menu.
+    /// A change of monitors closes the tools once the file is done with.
     fn while_saving(&mut self, event: Event) -> Vec<Effect> {
         match event.input {
             Input::SaveAsClosed(chosen) => self.save_as_closed(chosen, event.cursor, event.uptime),
@@ -740,9 +742,9 @@ impl Session {
     }
 
     /// Ends the Snip's file path, whichever step ends it: `file` says whether the file was written, and is `None` when
-    /// Save As was cancelled. With the monitors changed meanwhile, the tools close without a notice. Otherwise they stay
-    /// open, the options as they were, and the notice says what became of the file and, with Destination at Both, of
-    /// the image's copy to the clipboard; after a cancel, only a copy asked for says what became of it, "Copied" or
+    /// Save As was cancelled. With the monitors changed meanwhile, the tools close without a notice. Otherwise they
+    /// stay open, the options as they were, and the notice says what became of the file and, with Destination at Both,
+    /// of the image's copy to the clipboard; after a cancel, only a copy asked for says what became of it, "Copied" or
     /// "Couldn't copy.", and nothing shows with File.
     fn end_saving(
         &mut self,
@@ -765,8 +767,8 @@ impl Session {
     }
 
     /// Pins what Dimensions measures, as the user sees it at the click, and copies it, its logical pixels with Shift
-    /// held; Dimensions goes on measuring (v1 spec WPC-296, Dimensions). A click with nothing measured does nothing, and
-    /// so does the second click of the double-click that called ScreenGauge (WPC-308).
+    /// held; Dimensions goes on measuring (v1 spec WPC-296, Dimensions). A click with nothing measured does nothing,
+    /// and so does the second click of the double-click that called ScreenGauge (WPC-308).
     fn pin(&mut self, held: Held, uptime: Duration) -> Vec<Effect> {
         if self.is_second_click(uptime) {
             return Vec::new();
@@ -792,9 +794,9 @@ impl Session {
         self.ask_for_copy(Effect::CopyText(text), monitor)
     }
 
-    /// Asks for `copy`, a [`Effect::CopyText`] or a [`Effect::CopyImage`], whose notice waits for the clipboard's answer and then shows where the cursor is now, on its
-    /// monitor, or on `measured_on`, the monitor of what was copied, should it be on none. Nothing says "Copied" before
-    /// the copy was made (WPC-352).
+    /// Asks for `copy`, a [`Effect::CopyText`] or a [`Effect::CopyImage`], whose notice waits for the clipboard's
+    /// answer and then shows where the cursor is now, on its monitor, or on `measured_on`, the monitor of what was
+    /// copied, should it be on none. Nothing says "Copied" before the copy was made (WPC-352).
     fn ask_for_copy(&mut self, copy: Effect, measured_on: usize) -> Vec<Effect> {
         self.copies.push_back(WaitingCopy::Notice {
             at: self.cursor,
@@ -826,9 +828,9 @@ impl Session {
         }
     }
 
-    /// Picks the toolbar up by its background at `at`, to drag it (v1 spec WPC-296, Toolbar; WPC-312). The second click of
-    /// the double-click that called ScreenGauge picks nothing up, as it does nothing anywhere else: a toolbar left at the
-    /// bottom right may sit over the tray icon.
+    /// Picks the toolbar up by its background at `at`, to drag it (v1 spec WPC-296, Toolbar; WPC-312). The second click
+    /// of the double-click that called ScreenGauge picks nothing up, as it does nothing anywhere else: a toolbar left
+    /// at the bottom right may sit over the tray icon.
     fn grab(&mut self, at: Point, uptime: Duration) -> Vec<Effect> {
         if !self.is_second_click(uptime) {
             let corner = self.toolbar_corner();
@@ -865,8 +867,8 @@ impl Session {
         self.toolbar_layout = toolbar::layout_on(photo.rect, photo.scale, place);
     }
 
-    /// Lets the dragged toolbar go where it is, when the button comes up or the Windows layer loses the mouse. Should the
-    /// toolbar have stopped at a margin short of the cursor, the tool measures where the cursor is at once. With
+    /// Lets the dragged toolbar go where it is, when the button comes up or the Windows layer loses the mouse. Should
+    /// the toolbar have stopped at a margin short of the cursor, the tool measures where the cursor is at once. With
     /// nothing held, it does nothing.
     fn let_go(&mut self) -> Vec<Effect> {
         if self.toolbar_grab.take().is_some() {
@@ -899,15 +901,15 @@ impl Session {
         Vec::new()
     }
 
-    /// The monitor a notice where the cursor is goes on: the cursor's. The cursor is always on a monitor, which the drag
-    /// of Bounds may have left for another; should it be on none, the notice goes on `measured_on`, the monitor of what
-    /// the notice is about.
+    /// The monitor a notice where the cursor is goes on: the cursor's. The cursor is always on a monitor, which the
+    /// drag of Bounds may have left for another; should it be on none, the notice goes on `measured_on`, the monitor of
+    /// what the notice is about.
     fn notice_monitor(&self, measured_on: usize) -> usize {
         frozen_screen::monitor_at(&self.frozen_screen, self.cursor).unwrap_or(measured_on)
     }
 
-    /// Shows `message` where the cursor is, on `monitor`, in place of any notice still on screen, until it is due to go,
-    /// and asks for the next wake, which is the tolerance indicator's when that goes first.
+    /// Shows `message` where the cursor is, on `monitor`, in place of any notice still on screen, until it is due to
+    /// go, and asks for the next wake, which is the tolerance indicator's when that goes first.
     fn show(&mut self, message: Message, monitor: usize, uptime: Duration) -> Option<Effect> {
         self.show_at(message, self.cursor, monitor, self.notice_side(), uptime)
     }
@@ -945,14 +947,14 @@ impl Session {
         self.wake()
     }
 
-    /// Turns the mouse wheel by `delta` at `at`. A precision touchpad turns it a part of a notch at a time, so the parts add
-    /// up until they make a notch, and turning the other way starts counting again. Each notch is a step: of the
-    /// magnification with Inspect active, forward for a level higher (v1 spec WPC-296, Inspect), and of the tolerance
-    /// Dimensions, Bounds and Snip share with any other tool, forward for a step up, measured again at once (v1 spec
-    /// WPC-296, Tolerance). Any turn shows what it steps, the magnification in the view's corner or the tolerance
-    /// indicator, until a second after the wheel stops, even a turn past a limit that changes nothing (the owner's choices
-    /// in WPC-309 and WPC-315). Turned at `at` on the toolbar, where the tool pauses, the wheel does nothing (the owner's
-    /// choice in WPC-311).
+    /// Turns the mouse wheel by `delta` at `at`. A precision touchpad turns it a part of a notch at a time, so the
+    /// parts add up until they make a notch, and turning the other way starts counting again. Each notch is a step: of
+    /// the magnification with Inspect active, forward for a level higher (v1 spec WPC-296, Inspect), and of the
+    /// tolerance Dimensions, Bounds and Snip share with any other tool, forward for a step up, measured again at once
+    /// (v1 spec WPC-296, Tolerance). Any turn shows what it steps, the magnification in the view's corner or the
+    /// tolerance indicator, until a second after the wheel stops, even a turn past a limit that changes nothing (the
+    /// owner's choices in WPC-309 and WPC-315). Turned at `at` on the toolbar, where the tool pauses, the wheel does
+    /// nothing (the owner's choice in WPC-311).
     fn turn_wheel(&mut self, delta: i32, at: Point, uptime: Duration) -> Vec<Effect> {
         if self.pauses_at(at) {
             return Vec::new();
@@ -963,8 +965,8 @@ impl Session {
         let turned = self.wheel_turned.saturating_add(delta);
         let notches = turned / NOTCH;
         self.wheel_turned = turned % NOTCH;
-        // Can't happen: Windows' uptime is milliseconds since it started, nowhere near Duration's limit. Should it, neither
-        // the magnification indicator nor the tolerance indicator shows.
+        // Can't happen: Windows' uptime is milliseconds since it started, nowhere near Duration's limit. Should it,
+        // neither the magnification indicator nor the tolerance indicator shows.
         if self.remembered.last_tool == Tool::Inspect {
             self.remembered.magnification = stepped(
                 self.remembered.magnification,
@@ -1010,9 +1012,9 @@ impl Session {
     /// tolerance the wheel set all stay, and the new tool works on them from where the cursor is. Dimensions and Bounds
     /// measure, Inspect shows its magnified view, and Snip waits for a drag.
     fn switch_tool(&mut self, tool: Tool) -> Vec<Effect> {
-        // A drag Bounds or Snip was drawing is dropped when the tool changes, even to the other of the two: the new tool
-        // has no use for it, and the button it holds is the new tool's no more. A Snip drag must never end as a Bounds one
-        // that pins and copies, nor the other way around.
+        // A drag Bounds or Snip was drawing is dropped when the tool changes, even to the other of the two: the new
+        // tool has no use for it, and the button it holds is the new tool's no more. A Snip drag must never end as a
+        // Bounds one that pins and copies, nor the other way around.
         if tool != self.remembered.last_tool {
             self.drag = None;
             self.held_after_cancel = false;
@@ -1034,18 +1036,18 @@ impl Session {
         Vec::new()
     }
 
-    /// Shrinks the toolbar to its small button in the same place, or brings it back whole (v1 spec WPC-296, Toolbar). The
-    /// tool goes on measuring: where the rest of the toolbar was is the tool's again, so with the cursor left there it
-    /// measures at once, and the toolbar coming back over the cursor pauses it.
+    /// Shrinks the toolbar to its small button in the same place, or brings it back whole (v1 spec WPC-296, Toolbar).
+    /// The tool goes on measuring: where the rest of the toolbar was is the tool's again, so with the cursor left there
+    /// it measures at once, and the toolbar coming back over the cursor pauses it.
     fn minimize(&mut self, minimized: bool) -> Vec<Effect> {
         self.toolbar_minimized = minimized;
         self.measure();
         Vec::new()
     }
 
-    /// What `at`, in physical pixels of the virtual screen, is on in the toolbar as it is now: `None` off it. Minimized,
-    /// the toolbar is its small button alone; whole, H, V and C count only while they show. The Windows layer asks this
-    /// which button a click is on, and the tool pauses wherever it isn't `None`.
+    /// What `at`, in physical pixels of the virtual screen, is on in the toolbar as it is now: `None` off it.
+    /// Minimized, the toolbar is its small button alone; whole, H, V and C count only while they show. The Windows
+    /// layer asks this which button a click is on, and the tool pauses wherever it isn't `None`.
     pub fn toolbar_hit(&self, at: Point) -> Option<toolbar::Hit> {
         if self.toolbar_minimized {
             self.toolbar_layout.hit_minimized(at)
@@ -1054,10 +1056,10 @@ impl Session {
         }
     }
 
-    /// Whether the tool pauses with the cursor at `at`: on the toolbar, and anywhere while the toolbar is dragged, as the
-    /// cursor may leave it where it stops at a margin, the other monitor included (the owner's choice in WPC-312). While
-    /// Bounds or Snip draws a rectangle, nowhere: the rectangle may go over the toolbar, which the photo doesn't have.
-    /// Nor while the button that drew a rectangle Esc cancelled is still down: the press is still the tool's.
+    /// Whether the tool pauses with the cursor at `at`: on the toolbar, and anywhere while the toolbar is dragged, as
+    /// the cursor may leave it where it stops at a margin, the other monitor included (the owner's choice in WPC-312).
+    /// While Bounds or Snip draws a rectangle, nowhere: the rectangle may go over the toolbar, which the photo doesn't
+    /// have. Nor while the button that drew a rectangle Esc cancelled is still down: the press is still the tool's.
     fn pauses_at(&self, at: Point) -> bool {
         !self.tool_holds_the_press()
             && (self.toolbar_grab.is_some() || self.toolbar_hit(at).is_some())
@@ -1111,11 +1113,11 @@ impl Session {
         self.remembered.last_tool == Tool::Dimensions
     }
 
-    /// Measures again: Dimensions around the cursor, or, with the cursor on the toolbar, where the tool paused, so a mode
-    /// switched from the toolbar shows at once where the user was measuring (v1 spec WPC-296, Toolbar; the owner's
-    /// choice in WPC-311); Bounds the content of the rectangle being drawn, up to the cursor, and Snip the area it would
-    /// take the image of. The photo has no toolbar and no pinned measurement in it, so the tools measure through both.
-    /// Inspect's magnified view is worked out from where the tool measures whenever the scene is asked for.
+    /// Measures again: Dimensions around the cursor, or, with the cursor on the toolbar, where the tool paused, so a
+    /// mode switched from the toolbar shows at once where the user was measuring (v1 spec WPC-296, Toolbar; the owner's
+    /// choice in WPC-311); Bounds the content of the rectangle being drawn, up to the cursor, and Snip the area it
+    /// would take the image of. The photo has no toolbar and no pinned measurement in it, so the tools measure through
+    /// both. Inspect's magnified view is worked out from where the tool measures whenever the scene is asked for.
     fn measure(&mut self) {
         if !self.pauses_at(self.cursor) {
             self.measured_at = Some(self.cursor);
@@ -1130,8 +1132,8 @@ impl Session {
                     self.also_show_logical_pixels,
                 )
             }),
-            // Until the drag counts, the preview shows nothing, not even the drawn rectangle, as the button coming up then
-            // does nothing (the owner's choice in WPC-314).
+            // Until the drag counts, the preview shows nothing, not even the drawn rectangle, as the button coming up
+            // then does nothing (the owner's choice in WPC-314).
             Tool::Bounds => self.drag.filter(|drag| !drag.is_click()).and_then(|drag| {
                 bounds::measure(
                     &self.frozen_screen,
@@ -1203,8 +1205,8 @@ impl Session {
     }
 
     /// Inspect's magnified view where the tool measures: around the cursor, or, while the cursor pauses on the toolbar,
-    /// around the last place it had off it, as every tool pauses there (the owner's choice in WPC-311; the prototype hid
-    /// the view instead). `None` with another tool active, or before the cursor has been off the toolbar.
+    /// around the last place it had off it, as every tool pauses there (the owner's choice in WPC-311; the prototype
+    /// hid the view instead). `None` with another tool active, or before the cursor has been off the toolbar.
     fn magnified_view(&self) -> Option<MagnifiedView> {
         if self.remembered.last_tool != Tool::Inspect {
             return None;
@@ -1248,8 +1250,8 @@ impl Session {
                     .dimensions_is_active()
                     .then_some(self.remembered.dimensions_mode),
                 minimized: self.toolbar_minimized,
-                // While the toolbar is held, or the button is held for Bounds or Snip, no button reacts, whatever the cursor
-                // slides over.
+                // While the toolbar is held, or the button is held for Bounds or Snip, no button reacts, whatever the
+                // cursor slides over.
                 hovered: match self.toolbar_hit(self.cursor) {
                     Some(toolbar::Hit::Button(button))
                         if self.toolbar_grab.is_none() && !self.tool_holds_the_press() =>
@@ -1276,9 +1278,9 @@ fn file_notice(file: FileAnswer, copy: ImageCopy) -> Message {
     }
 }
 
-/// `value` moved `notches` steps, by `up` when they are above zero and by `down` when below, as the mouse wheel moves the
-/// tolerance and the magnification a step a notch. It stops at the first step that changes nothing: a limit, where the
-/// rest of the notches change nothing either.
+/// `value` moved `notches` steps, by `up` when they are above zero and by `down` when below, as the mouse wheel moves
+/// the tolerance and the magnification a step a notch. It stops at the first step that changes nothing: a limit, where
+/// the rest of the notches change nothing either.
 fn stepped<T: Copy + PartialEq>(value: T, notches: i32, up: fn(T) -> T, down: fn(T) -> T) -> T {
     let step = if notches > 0 { up } else { down };
     let mut value = value;

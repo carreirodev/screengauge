@@ -1,9 +1,10 @@
 //! The measure of WPC-286's speed and consumption goals (v1 spec WPC-296, test layer 3, part 2; ticket WPC-333): from
 //! outside, on the very ScreenGauge.exe that is to be published, with no special build. The routine starts the exe as
-//! another process, presses the global shortcut with real key events, waits for the toolbar to show on screen, and reads
-//! the process's private working set and processor time. It runs a whole pass with HDR off and another with HDR on,
-//! turning HDR on and off itself, each in a fresh process, then shows every goal with its limit and the values
-//! measured, and says what was missed. A missed goal holds the version; an exceeded HDR allowance goes back to the owner.
+//! another process, presses the global shortcut with real key events, waits for the toolbar to show on screen, and
+//! reads the process's private working set and processor time. It runs a whole pass with HDR off and another with HDR
+//! on, turning HDR on and off itself, each in a fresh process, then shows every goal with its limit and the values
+//! measured, and says what was missed. A missed goal holds the version; an exceeded HDR allowance goes back to the
+//! owner.
 //!
 //! It is a test, so it never reaches ScreenGauge.exe, and it is ignored, so neither CI nor the pre-commit hook runs it:
 //! neither has a real monitor or graphics card. Run it on the owner's computer, with no ScreenGauge running, nothing

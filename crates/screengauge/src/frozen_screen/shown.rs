@@ -20,7 +20,8 @@ pub(super) struct Shown {
     pub(super) notice: Option<Notice>,
     /// `None` only when the scene couldn't be read.
     pub(super) toolbar: Option<Toolbar>,
-    /// The cursor the scene names, which no window draws: Windows shows it. `None` only when the scene couldn't be read.
+    /// The cursor the scene names, which no window draws: Windows shows it. `None` only when the scene couldn't be
+    /// read.
     pub(super) cursor: Option<Cursor>,
 }
 

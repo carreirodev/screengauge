@@ -1,7 +1,7 @@
 //! Layer 1 tests of the global shortcut recorder's rules in Settings (v1 spec WPC-296, Settings; WPC-323): the
-//! modifiers alone record nothing, an incomplete combination and Ctrl + Alt without Win are refused and the field goes on
-//! recording, and Esc, a click outside or Windows refusing the combination keep the shortcut there was. Esc takes the
-//! message with it, a click outside leaves it.
+//! modifiers alone record nothing, an incomplete combination and Ctrl + Alt without Win are refused and the field goes
+//! on recording, and Esc, a click outside or Windows refusing the combination keep the shortcut there was. Esc takes
+//! the message with it, a click outside leaves it.
 
 use screengauge_core::settings::{
     Key, Modifiers, Pressed, Recorder, Refusal, Shortcut, Step, Tried, is_common,

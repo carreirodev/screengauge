@@ -53,11 +53,11 @@ pub fn bounds(monitor: Rect) -> windows::core::Result<RECT> {
 #[derive(Debug, PartialEq)]
 pub struct Parts {
     /// The translucent outline: the pixels beside the line along its whole length and beside each tick, or the ring
-    /// just outside Bounds' cyan ring, with no two rectangles overlapping, so no pixel is darkened twice where an outline
-    /// meets another.
+    /// just outside Bounds' cyan ring, with no two rectangles overlapping, so no pixel is darkened twice where an
+    /// outline meets another.
     pub outline: Vec<RECT>,
-    /// The opaque cyan pixels: each span and the tick through its first and last pixel, or the ring just outside Bounds'
-    /// content. These may overlap.
+    /// The opaque cyan pixels: each span and the tick through its first and last pixel, or the ring just outside
+    /// Bounds' content. These may overlap.
     pub line: Vec<RECT>,
 }
 
@@ -202,8 +202,8 @@ pub fn pill_size(text_width: i32, dpi: u32) -> Size {
 /// The widths of a pinned label's border, in physical pixels. Each is scaled on its own, as every other size is, so the
 /// ring is the same width on its three sides whatever the scale, and the pinned pill is `strip + ring` wider and
 /// `2 * ring` taller than the live pill around the same text. Scaling the sum in one go would give `scaled(4)` and
-/// `scaled(2)`, which differ by a pixel at some scales (the width at 150%, 7 against 6; the height at 125%, 2 against 3,
-/// and at 150%, 4 against 3) and would make the ring uneven.
+/// `scaled(2)`, which differ by a pixel at some scales (the width at 150%, 7 against 6; the height at 125%, 2 against
+/// 3, and at 150%, 4 against 3) and would make the ring uneven.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Border {
     /// The cyan strip on the label's left side.

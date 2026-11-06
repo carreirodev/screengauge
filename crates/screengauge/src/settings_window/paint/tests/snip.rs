@@ -1,5 +1,5 @@
-//! The Snip's card drawn on a bitmap (WPC-322): where its controls are, what each state of the options shows, the path cut
-//! to fit its box, and the note.
+//! The Snip's card drawn on a bitmap (WPC-322): where its controls are, what each state of the options shows, the path
+//! cut to fit its box, and the note.
 
 use std::path::Path;
 
@@ -81,8 +81,8 @@ fn text_columns(page: &Picture, place: RECT, dpi: u32) -> Option<(i32, i32)> {
 
 #[test]
 fn the_snip_s_controls_are_right_of_their_rows_where_the_prototype_puts_them() {
-    // Measured from the prototype's stylesheet at 100%: every control ends at 531, the card's right side less its border
-    // and the row's padding; the switch is 42 × 24, "Change…" 30 tall and the folder's line starts at 29.
+    // Measured from the prototype's stylesheet at 100%: every control ends at 531, the card's right side less its
+    // border and the row's padding; the switch is 42 × 24, "Change…" 30 tall and the folder's line starts at 29.
     for mode in [Mode::Dark, Mode::Light] {
         let options = Options::default();
         let page = drawn_with(mode, 96, &options, Pointer::default());

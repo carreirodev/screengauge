@@ -1,7 +1,8 @@
-//! Layer 1 tests of Snip saving its image to a file (v1 spec WPC-296, Snip; ticket WPC-318): the automatic name from the
-//! time the test gives, the numbers a taken name gets, the `.png` a name chosen in Save As always ends with, what each
-//! Destination and "Save to default folder" do as the button comes up, Save As, and the notices, on frozen screens drawn
-//! here, without a screen or a disk. They look only at the scene the session would draw and at the effects it returns.
+//! Layer 1 tests of Snip saving its image to a file (v1 spec WPC-296, Snip; ticket WPC-318): the automatic name from
+//! the time the test gives, the numbers a taken name gets, the `.png` a name chosen in Save As always ends with, what
+//! each Destination and "Save to default folder" do as the button comes up, Save As, and the notices, on frozen screens
+//! drawn here, without a screen or a disk. They look only at the scene the session would draw and at the effects it
+//! returns.
 
 use std::path::{Path, PathBuf};
 

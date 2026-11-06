@@ -56,9 +56,9 @@ const CLASS_NAME: PCWSTR = w!("ScreenGauge.FrozenScreen");
 
 /// The first window's hot key while the tools are open: Alt+Esc. Windows acts on Alt+Esc itself, before any window gets
 /// the key, and brings another program to the front, which closes the tools; held by the first window, it reaches the
-/// session core as Esc instead, so Esc pressed with Alt held, as to cancel a drag Bounds draws exactly with Alt, cancels
-/// it (seen in WPC-314; the owner's choice there). A hot key's ID belongs to its window, so this one can't clash with the
-/// global shortcut's, which the resident window holds.
+/// session core as Esc instead, so Esc pressed with Alt held, as to cancel a drag Bounds draws exactly with Alt,
+/// cancels it (seen in WPC-314; the owner's choice there). A hot key's ID belongs to its window, so this one can't
+/// clash with the global shortcut's, which the resident window holds.
 const ALT_ESC: i32 = 1;
 
 /// The first window's timer that wakes the session core at the moment it asked for (`Effect::WakeAt`). Each window has
@@ -175,7 +175,8 @@ impl FrozenScreen {
             return;
         };
         let wait = uptime.saturating_sub(event::uptime());
-        // Windows waits at least USER_TIMER_MINIMUM, and a wait past USER_TIMER_MAXIMUM, about 25 days, is clamped to it.
+        // Windows waits at least USER_TIMER_MINIMUM, and a wait past USER_TIMER_MAXIMUM, about 25 days, is clamped to
+        // it.
         let milliseconds = u32::try_from(wait.as_millis())
             .unwrap_or(USER_TIMER_MAXIMUM)
             .clamp(USER_TIMER_MINIMUM, USER_TIMER_MAXIMUM);
@@ -241,8 +242,8 @@ impl FrozenScreen {
         }
     }
 
-    /// Has the first window hold Alt+Esc while the tools are open ([`ALT_ESC`]). Should another program hold it already,
-    /// Alt+Esc does what Windows does with it and closes the tools, as Alt+Tab does, and the call goes on.
+    /// Has the first window hold Alt+Esc while the tools are open ([`ALT_ESC`]). Should another program hold it
+    /// already, Alt+Esc does what Windows does with it and closes the tools, as Alt+Tab does, and the call goes on.
     fn hold_alt_esc(&self) {
         // Can't happen: the session core refuses a frozen screen without monitors.
         let Some(&window) = self.windows.first() else {
@@ -299,9 +300,9 @@ impl FrozenScreen {
         self.windows.get(monitor).copied()
     }
 
-    /// Draws ScreenGauge's own surfaces over the photo in `mode`'s palette from now on: the toolbar, the notices and the
-    /// pinned measurements' labels. A window in the other palette makes what it draws with again at its next paint, which
-    /// only the paint itself does, as it holds the drawing.
+    /// Draws ScreenGauge's own surfaces over the photo in `mode`'s palette from now on: the toolbar, the notices and
+    /// the pinned measurements' labels. A window in the other palette makes what it draws with again at its next paint,
+    /// which only the paint itself does, as it holds the drawing.
     pub fn follow(&self, mode: Mode) {
         for &window in &self.windows {
             let changed = with_state(window, |state| state.mode.replace(mode) != mode);
@@ -440,8 +441,8 @@ impl SharedSession {
         }
     }
 
-    /// What `at` is on in the toolbar as it is now, as the core says: `None` off it. Minimized, the toolbar is its small
-    /// button alone; whole, H, V and C count only while they show.
+    /// What `at` is on in the toolbar as it is now, as the core says: `None` off it. Minimized, the toolbar is its
+    /// small button alone; whole, H, V and C count only while they show.
     fn toolbar_hit(&self, at: Point) -> Option<Hit> {
         match self.core.try_borrow() {
             Ok(session) => session.toolbar_hit(at),

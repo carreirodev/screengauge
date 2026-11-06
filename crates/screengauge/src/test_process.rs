@@ -1,5 +1,5 @@
-//! For tests: one test run alone, in a process of its own, for what the tests sharing the test exe's process would hide.
-//! COM is one: a test that holds it open covers for another that needs it held (WPC-387).
+//! For tests: one test run alone, in a process of its own, for what the tests sharing the test exe's process would
+//! hide. COM is one: a test that holds it open covers for another that needs it held (WPC-387).
 
 use std::process::Command;
 

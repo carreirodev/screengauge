@@ -1,8 +1,9 @@
 //! Bounds drawn over a window's photo (v1 spec WPC-296, Como as medidas aparecem; the approved prototype's variant A,
 //! WPC-279): the rectangle the user is drawing, dashed in white over black along its own outer pixels, and the content
-//! it shrinks to, filled with a light cyan, ringed in cyan just outside it and with the translucent dark outline beyond,
-//! like a Dimensions line. The label sits above the ring's top left corner. Where each of them goes is worked out here
-//! in whole pixels of the virtual screen, with no Windows call, and drawn with aliased fills, so each is crisp.
+//! it shrinks to, filled with a light cyan, ringed in cyan just outside it and with the translucent dark outline
+//! beyond, like a Dimensions line. The label sits above the ring's top left corner. Where each of them goes is worked
+//! out here in whole pixels of the virtual screen, with no Windows call, and drawn with aliased fills, so each is
+//! crisp.
 
 use screengauge_core::session::{DrawnRectangle, Rect};
 use windows::Win32::Foundation::RECT;
@@ -65,8 +66,8 @@ fn outer_pixels(left: i32, top: i32, right: i32, bottom: i32) -> Vec<RECT> {
     pixels
 }
 
-/// What to fill around Bounds' content, as Dimensions' line has its [`geometry::parts`]: a cyan ring one pixel wide just
-/// outside the content, whatever the scale, and the outline as the ring outside that.
+/// What to fill around Bounds' content, as Dimensions' line has its [`geometry::parts`]: a cyan ring one pixel wide
+/// just outside the content, whatever the scale, and the outline as the ring outside that.
 pub fn parts(content: Rect) -> Parts {
     Parts {
         outline: ring(content, 2),
@@ -181,7 +182,8 @@ pub fn place_at_corner(
 }
 
 impl Overlay {
-    /// Draws the outer pixels of the rectangle Bounds is drawing: black, a little see-through, and white dashes over it.
+    /// Draws the outer pixels of the rectangle Bounds is drawing: black, a little see-through, and white dashes over
+    /// it.
     pub(super) fn draw_drawn_rectangle(&self, target: &ID2D1RenderTarget, drawn: &DrawnRectangle) {
         let rect = drawn.rect;
         // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
@@ -200,8 +202,8 @@ impl Overlay {
         }
     }
 
-    /// Fills each content with see-through cyan, lighter for a pinned one than for the live one. Should a content be too
-    /// large to draw, none is.
+    /// Fills each content with see-through cyan, lighter for a pinned one than for the live one. Should a content be
+    /// too large to draw, none is.
     pub(super) fn draw_fills(
         &self,
         target: &ID2D1RenderTarget,

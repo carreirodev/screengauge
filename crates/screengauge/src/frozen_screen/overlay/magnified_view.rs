@@ -87,8 +87,8 @@ fn places(view: &MagnifiedView) -> windows::core::Result<Places> {
     let whole = |value: i64| i32::try_from(value).map_err(|_| too_large());
     let factor = whole(i64::from(view.magnification.factor()))?;
     let enlargement = geometry::bounds(view.enlargement)?;
-    // Where the enlarged pixel of the frozen screen's pixel at `at` starts along an axis: its distance from the source's
-    // first pixel, enlarged, from the enlargement's first pixel.
+    // Where the enlarged pixel of the frozen screen's pixel at `at` starts along an axis: its distance from the
+    // source's first pixel, enlarged, from the enlargement's first pixel.
     let start = |enlargement: i32, source: i32, at: i32| {
         whole(i64::from(enlargement) + (i64::from(at) - i64::from(source)) * i64::from(factor))
     };
@@ -327,8 +327,8 @@ impl Overlay {
     /// scale, for it is the screen's pixels that are being told apart.
     fn draw_center_outline(&self, target: &ID2D1RenderTarget, cell: &RECT) {
         // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
-        // Direct2D only fails the frame at EndDraw. Aliased fills of whole pixels, as in `draw_grid`. Each brush's opacity
-        // is set before it is used, because the brushes keep the last one.
+        // Direct2D only fails the frame at EndDraw. Aliased fills of whole pixels, as in `draw_grid`. Each brush's
+        // opacity is set before it is used, because the brushes keep the last one.
         unsafe {
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
             self.shade.SetOpacity(1.0);

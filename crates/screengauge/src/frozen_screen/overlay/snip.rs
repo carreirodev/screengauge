@@ -1,8 +1,8 @@
-//! Snip drawn over a window's photo while the button is held (v1 spec WPC-296, Snip; the approved prototype's variant A,
-//! WPC-279, `drawResult` for `snip`): cyan corners just outside the area the image is taken of, with no fill, so what
-//! the image will hold shows untouched, and above their top left corner a cyan pill with a camera and the image's size.
-//! Where each goes is worked out here in whole pixels of the virtual screen, with no Windows call, and the corners are
-//! drawn with aliased fills, so each is crisp.
+//! Snip drawn over a window's photo while the button is held (v1 spec WPC-296, Snip; the approved prototype's variant
+//! A, WPC-279, `drawResult` for `snip`): cyan corners just outside the area the image is taken of, with no fill, so
+//! what the image will hold shows untouched, and above their top left corner a cyan pill with a camera and the image's
+//! size. Where each goes is worked out here in whole pixels of the virtual screen, with no Windows call, and the
+//! corners are drawn with aliased fills, so each is crisp.
 
 use screengauge_core::session::{Rect, SnipArea};
 use windows::Win32::Foundation::RECT;

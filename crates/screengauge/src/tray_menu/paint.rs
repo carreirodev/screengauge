@@ -1,5 +1,5 @@
-//! The tray icon's menu drawn onto any Direct2D render target at 96 DPI, so a test can render it on a bitmap and look at
-//! its pixels. Its looks are the ones it shares with Settings (`look`, WPC-279's `#settings` tokens): the window's
+//! The tray icon's menu drawn onto any Direct2D render target at 96 DPI, so a test can render it on a bitmap and look
+//! at its pixels. Its looks are the ones it shares with Settings (`look`, WPC-279's `#settings` tokens): the window's
 //! background, the rows' labels, and the cards' edge for the border Windows draws and for the row under the mouse or
 //! the arrow keys.
 
@@ -20,8 +20,8 @@ use crate::relief::{dot, px, scaled};
 use crate::theme::Mode;
 use crate::typeset::Typeset;
 
-/// Draws the menu at `dpi` in `mode`'s palette, with `lit`'s row tinted, and the check mark of "Start with Windows" when
-/// it is `checked`.
+/// Draws the menu at `dpi` in `mode`'s palette, with `lit`'s row tinted, and the check mark of "Start with Windows"
+/// when it is `checked`.
 pub fn draw(
     target: &ID2D1RenderTarget,
     fonts: &Fonts,
@@ -67,8 +67,8 @@ pub fn draw(
                 .factory
                 .CreateTextLayout(&text, &format, 4096.0, 4096.0)
         }?;
-        // Centered in its row, with the baseline on a whole pixel so the letters stay crisp, as Settings' labels. A label
-        // that would need a second line fails to be measured.
+        // Centered in its row, with the baseline on a whole pixel so the letters stay crisp, as Settings' labels. A
+        // label that would need a second line fails to be measured.
         let left = px(row.left + scaled(layout::LABEL_INSET, dpi));
         let placed = Typeset::of(label)?.in_line(left, px(row.top), px(row.bottom - row.top));
         write(target, &placed.layout, placed.left, placed.top, &ink);
@@ -107,8 +107,8 @@ fn check_mark(
     let path = unsafe { factory.CreatePathGeometry() }?;
     // SAFETY: no arguments.
     let sink = unsafe { path.Open() }?;
-    // SAFETY: the points are plain values, and the figure is begun, extended and ended in order on the sink opened above
-    // and closed below.
+    // SAFETY: the points are plain values, and the figure is begun, extended and ended in order on the sink opened
+    // above and closed below.
     unsafe {
         sink.BeginFigure(point(-1.0, 0.1), D2D1_FIGURE_BEGIN_HOLLOW);
         sink.AddLine(point(-0.3, 1.0));

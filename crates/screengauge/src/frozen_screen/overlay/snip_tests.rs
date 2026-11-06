@@ -137,7 +137,8 @@ fn the_label_sits_above_the_corners_top_left_and_the_image_stays_unfilled() {
         check_live_pill(&picture, pill, &format!("{dpi} DPI"));
         // No fill: no pixel of the image shows lighter than the photo has it, as cyan over it would make it. The pill's
         // faint shadow falls on its first rows, as the prototype's CSS shadow does, and only darkens them; past its
-        // reach, 12 logical pixels down, every pixel is exactly the photo's. The image itself comes from the frozen screen.
+        // reach, 12 logical pixels down, every pixel is exactly the photo's. The image itself comes from the frozen
+        // screen.
         for y in area.top..=area.bottom() {
             for x in area.left..=area.right() {
                 let shown = pixel(&picture, x, y);

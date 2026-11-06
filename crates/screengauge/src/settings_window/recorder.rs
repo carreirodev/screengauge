@@ -1,13 +1,13 @@
 //! What Settings' global shortcut recorder does (v1 spec WPC-296, Settings; WPC-323). A click on the field holds the
-//! keyboard (`keyboard_hook`) and records; the recorder's rules (`screengauge_core::settings::Recorder`) decide each key;
-//! a combination they accept is registered with Windows before the one there was is let go (`global_shortcut`), and then
-//! saved. Esc, a click outside the field, Settings losing the front or closing, and ScreenGauge exiting stop recording,
-//! and the keyboard goes back to Windows. While it records, the global shortcut doesn't call ScreenGauge
+//! keyboard (`keyboard_hook`) and records; the recorder's rules (`screengauge_core::settings::Recorder`) decide each
+//! key; a combination they accept is registered with Windows before the one there was is let go (`global_shortcut`),
+//! and then saved. Esc, a click outside the field, Settings losing the front or closing, and ScreenGauge exiting stop
+//! recording, and the keyboard goes back to Windows. While it records, the global shortcut doesn't call ScreenGauge
 //! (`is_recording`).
 //!
 //! A refusal shows as a message under the row's label (`row_message`), and the window grows to hold it while it shows.
-//! So does the global shortcut Windows refused at startup, on the amber band, from the moment Settings opens and until a
-//! combination is taken (WPC-324).
+//! So does the global shortcut Windows refused at startup, on the amber band, from the moment Settings opens and until
+//! a combination is taken (WPC-324).
 //!
 //! Only the resident thread touches it, from Settings' window procedure.
 
@@ -202,7 +202,8 @@ pub fn close() {
     GROWN.set(None);
 }
 
-/// Has the hook keep the keyboard: the one there is when the keys of the last recording aren't all up yet, or a new one.
+/// Has the hook keep the keyboard: the one there is when the keys of the last recording aren't all up yet, or a new
+/// one.
 fn hold_keyboard(hwnd: HWND) -> windows::core::Result<()> {
     let resumed = HOOK.with_borrow(|hook| hook.as_ref().map(KeyboardHook::record));
     match resumed {

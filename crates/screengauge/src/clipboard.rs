@@ -125,7 +125,8 @@ fn fill(memory: HGLOBAL, bytes: &[u8]) -> windows::core::Result<()> {
 /// Frees memory Windows didn't take.
 fn free(memory: HGLOBAL) {
     // SAFETY: `memory` came from GlobalAlloc and nothing else holds it; GlobalFree frees it even should `fill` have
-    // failed to unlock it. GlobalFree returns the handle on failure; there is nothing more to do with it then than log it.
+    // failed to unlock it. GlobalFree returns the handle on failure; there is nothing more to do with it then than log
+    // it.
     if let Err(e) = unsafe { GlobalFree(Some(memory)) } {
         crate::log::failure("clipboard: freeing what Windows didn't take", &e);
     }
@@ -140,8 +141,9 @@ fn wide_with_nul(text: &str) -> Vec<u16> {
 const BITMAP_INFO_HEADER_SIZE: u32 = 40;
 
 /// `image` as a CF_DIB: a BITMAPINFOHEADER and then the pixels, 32 bits each, blue, green, red and an alpha of 255, so
-/// no program takes a pixel for see-through whatever the fourth byte said, in rows from the bottom up, as a bitmap whose
-/// height is above zero lays them out. 32-bit rows are always a whole number of 4-byte words, so they need no padding.
+/// no program takes a pixel for see-through whatever the fourth byte said, in rows from the bottom up, as a bitmap
+/// whose height is above zero lays them out. 32-bit rows are always a whole number of 4-byte words, so they need no
+/// padding.
 fn dib(image: &Image) -> windows::core::Result<Vec<u8>> {
     let too_large = || Error::new(E_FAIL, "the image is too large for a bitmap");
     let (width, height) = (image.width(), image.height());

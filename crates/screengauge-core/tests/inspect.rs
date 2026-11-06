@@ -335,8 +335,8 @@ fn the_panel_never_leaves_the_current_monitor() {
 
 #[test]
 fn in_the_monitors_corner_only_the_pixels_on_it_are_shown() {
-    // The cursor on the top left pixel: of the 21 × 21 around it, the 11 × 11 from it right and down are on the monitor,
-    // and the rest of the enlargement stays empty.
+    // The cursor on the top left pixel: of the 21 × 21 around it, the 11 × 11 from it right and down are on the
+    // monitor, and the rest of the enlargement stays empty.
     let view = view(&open_at(at(0, 0)));
     assert_eq!(view.source, square(-10, -10, 21));
     assert_eq!(view.shown, square(0, 0, 11));
@@ -419,7 +419,8 @@ fn the_position_counts_from_the_current_monitors_top_left_corner_and_is_never_be
         (reads(&view.x), reads(&view.y)),
         (("900", None), ("600", None))
     );
-    // The 4K monitor's top left pixel is (0, 0), and its last one (3839, 2159), 2559.3 and 1439.3 logical pixels at 150%.
+    // The 4K monitor's top left pixel is (0, 0), and its last one (3839, 2159), 2559.3 and 1439.3 logical pixels at
+    // 150%.
     session.handle(move_to(at(-3840, -500), 1000));
     let view = self::view(&session);
     assert_eq!(

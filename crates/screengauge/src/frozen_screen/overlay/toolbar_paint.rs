@@ -1,6 +1,7 @@
-//! Paints the toolbar (v1 spec WPC-296, Toolbar; WPC-310) onto a Direct2D render target the way the prototype's CSS does
-//! (variant A of WPC-279: `.grp`, `.tbtn`, `.mbtn`, `.sbtn`), at the monitor's scale. Where each part goes is `toolbar`'s
-//! layout; its colors are `toolbar_palette`'s; a blurred shadow is layers of rounded rectangles, `shadow`'s.
+//! Paints the toolbar (v1 spec WPC-296, Toolbar; WPC-310) onto a Direct2D render target the way the prototype's CSS
+//! does (variant A of WPC-279: `.grp`, `.tbtn`, `.mbtn`, `.sbtn`), at the monitor's scale. Where each part goes is
+//! `toolbar`'s layout; its colors are `toolbar_palette`'s; a blurred shadow is layers of rounded rectangles,
+//! `shadow`'s.
 //!
 //! CSS paints a box's outer shadows, its background, its border and then its inset shadows, and a button after another
 //! one in order, so each button is painted whole and a later one covers an earlier one's glow. A group is painted whole
@@ -8,9 +9,9 @@
 //! never painted inside its own box: where the box is see-through, as the groups' panels are, it is cut out.
 //!
 //! The buttons react to the mouse as the prototype's do (WPC-311): a tool's button rises on `:hover` and sinks and
-//! shrinks on `:active`; the gear's and minimize's icon brightens on `:hover`, the close button turns red, and the three
-//! shrink on `:active`; H, V and C don't react. The minimized toolbar is `#tbMini`: a lit button with the active tool's
-//! icon and a small arrow in its corner.
+//! shrinks on `:active`; the gear's and minimize's icon brightens on `:hover`, the close button turns red, and the
+//! three shrink on `:active`; H, V and C don't react. The minimized toolbar is `#tbMini`: a lit button with the active
+//! tool's icon and a small arrow in its corner.
 //!
 //! Left out on purpose: `backdrop-filter: blur(14px)` of the panels, which the owner agreed to do without, and the
 //! 0.12 s the prototype takes to move and shrink a button, which here happens at once (the owner's choice in WPC-311).
@@ -41,7 +42,8 @@ use crate::relief::palette::{
 };
 use crate::relief::{Canvas, Motion, OuterShadow, signed};
 
-// Every size below is in logical pixels, which the canvas's `scaled` turns into physical pixels for the monitor's scale.
+// Every size below is in logical pixels, which the canvas's `scaled` turns into physical pixels for the monitor's
+// scale.
 
 /// The corners of a group's panel (`.grp`), of a tool's button (`.tbtn`) and of the small buttons (`.mbtn`, `.sbtn`).
 const GROUP_RADIUS: u32 = 20;
@@ -127,8 +129,8 @@ pub(super) fn reach(palette: &Palette, layout: &Layout, dpi: u32) -> Margins {
     for (button, place) in &layout.buttons {
         let (surface, _) = style(palette, kind(*button));
         take(&[surface, &palette.lit, &CLOSE_HOVER], place);
-        // A tool's button risen with the cursor on it casts its shadows from higher up. Held down, it shrinks, and sinks
-        // by less than it shrinks, so its shadows stay inside those it casts at rest.
+        // A tool's button risen with the cursor on it casts its shadows from higher up. Held down, it shrinks, and
+        // sinks by less than it shrinks, so its shadows stay inside those it casts at rest.
         if kind(*button) == ButtonKind::Tool {
             let lift = signed(LIFT, dpi);
             let risen = RECT {
@@ -175,8 +177,8 @@ impl Placement {
 }
 
 impl Overlay {
-    /// `icon` in `ink`, centered in `place` in the virtual screen, on the window's render target `target`, as the toolbar
-    /// paints its icons: for the camera on Snip's label. Between BeginDraw and EndDraw.
+    /// `icon` in `ink`, centered in `place` in the virtual screen, on the window's render target `target`, as the
+    /// toolbar paints its icons: for the camera on Snip's label. Between BeginDraw and EndDraw.
     pub(super) fn draw_icon(
         &self,
         target: &ID2D1RenderTarget,
@@ -287,8 +289,8 @@ impl Painter<'_> {
         }
     }
 
-    /// The minimized toolbar's button at `place`, with `active` the active tool: lit, with the tool's icon in the middle
-    /// and, in its bottom right corner, a small dark box with a white arrow pointing right.
+    /// The minimized toolbar's button at `place`, with `active` the active tool: lit, with the tool's icon in the
+    /// middle and, in its bottom right corner, a small dark box with a white arrow pointing right.
     fn minimized(&self, place: &RECT, active: Tool) -> windows::core::Result<()> {
         let (surface, radius) = style(self.palette, ButtonKind::Minimized);
         self.surface(surface, place, radius, 0, false)?;

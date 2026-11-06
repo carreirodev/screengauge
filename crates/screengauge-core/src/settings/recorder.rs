@@ -2,8 +2,8 @@
 //! WPC-323): a click on the field starts recording, the modifiers held show as they go down and up, and the first other
 //! key decides. A combination the rules accept is tried with Windows, which may say another program holds it; one they
 //! refuse shows why and the field goes on recording; Esc, a click outside the field or Settings losing the front stop
-//! recording and keep the shortcut there was. Esc takes the message with it; a click outside leaves it, as the prototype
-//! does, so what the user clicks doesn't move from under the cursor.
+//! recording and keep the shortcut there was. Esc takes the message with it; a click outside leaves it, as the
+//! prototype does, so what the user clicks doesn't move from under the cursor.
 //!
 //! The Windows layer says which key went down, as [`Pressed`], with the modifiers held, and does what [`Step`] asks:
 //! try a combination, or let the keyboard go.
@@ -161,8 +161,8 @@ impl Recorder {
     }
 }
 
-/// The letters that, with Ctrl alone, Windows and most programs use: copy, paste, cut, undo, redo, select all, save, find,
-/// print, new, open, close and new tab (the owner's list, WPC-323).
+/// The letters that, with Ctrl alone, Windows and most programs use: copy, paste, cut, undo, redo, select all, save,
+/// find, print, new, open, close and new tab (the owner's list, WPC-323).
 const WITH_CTRL: [char; 13] = [
     'C', 'V', 'X', 'Z', 'Y', 'A', 'S', 'F', 'P', 'N', 'O', 'W', 'T',
 ];

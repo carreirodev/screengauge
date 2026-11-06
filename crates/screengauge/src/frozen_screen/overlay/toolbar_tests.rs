@@ -1,7 +1,7 @@
 //! Render tests of the toolbar on a WIC bitmap, like the notice's in `panel_tests`. The sizes and colors here are the
 //! prototype's (variant A of WPC-279: `.grp`, `.tbtn`, `.mbtn`, `.sbtn` and the palettes' tokens), written out a second
-//! time and scaled in the tests, not read back from the code that is being tested. The shadows are judged by the owner's
-//! eye; these check where things are, what is lit, and what is not drawn.
+//! time and scaled in the tests, not read back from the code that is being tested. The shadows are judged by the
+//! owner's eye; these check where things are, what is lit, and what is not drawn.
 
 use screengauge_core::settings::{DimensionsMode, Tool, ToolbarPlace};
 
@@ -16,8 +16,8 @@ use crate::relief::palette as toolbar_palette;
 use screengauge_core::session::toolbar::{self as core_toolbar, Hit};
 use screengauge_core::session::{Point, Toolbar, ToolbarButton};
 
-/// A window wide enough for the toolbar at 175% and tall enough for its shadow, over a monitor left of and below the main
-/// one, so coordinates in the virtual screen and in the window are different numbers.
+/// A window wide enough for the toolbar at 175% and tall enough for its shadow, over a monitor left of and below the
+/// main one, so coordinates in the virtual screen and in the window are different numbers.
 pub(super) const TOOLBAR_MONITOR: Rect = Rect {
     left: -1280,
     top: 120,
@@ -424,8 +424,8 @@ fn the_modes_panel_is_drawn_while_there_is_a_mode() {
     }
 }
 
-/// How far the shadows reach past the toolbar in the prototype's numbers, in logical pixels, to the left and right, above
-/// and below: three deviations of the blur less the spread, and the drop below.
+/// How far the shadows reach past the toolbar in the prototype's numbers, in logical pixels, to the left and right,
+/// above and below: three deviations of the blur less the spread, and the drop below.
 fn shadow_reach(mode: Mode) -> (u32, u32, u32) {
     match mode {
         // 0 18px 40px -12px: 3 * 20 - 12 to the sides, 18 less above and more below.
@@ -620,10 +620,10 @@ fn drawing_the_same_scene_twice_gives_the_same_pixels() {
     }
 }
 
-/// Each icon's CSS size and what it covers of its 24 by 24 view box, stroke included (left, top, right, bottom), worked out
-/// by hand from the prototype's SVGs: the extent of the points the strokes pass through, and half a stroke width more
-/// all round, as the ends and corners are round. Inspect's magnifying glass is not centered on (12, 12), nor the gear's
-/// outline quite inside its box.
+/// Each icon's CSS size and what it covers of its 24 by 24 view box, stroke included (left, top, right, bottom), worked
+/// out by hand from the prototype's SVGs: the extent of the points the strokes pass through, and half a stroke width
+/// more all round, as the ends and corners are round. Inspect's magnifying glass is not centered on (12, 12), nor the
+/// gear's outline quite inside its box.
 pub(super) const ICONS: [(ToolbarButton, u32, [f64; 4]); 10] = [
     (
         ToolbarButton::Tool(Tool::Dimensions),
@@ -686,8 +686,8 @@ fn ceil(value: f64) -> i32 {
     value.ceil() as i32
 }
 
-/// The ink of color `ink` over the gradient `stops` in the pixels of `drawn` within `wanted`, the box the prototype puts
-/// the icon in, and two pixels around it, in `button`'s place.
+/// The ink of color `ink` over the gradient `stops` in the pixels of `drawn` within `wanted`, the box the prototype
+/// puts the icon in, and two pixels around it, in `button`'s place.
 pub(super) fn ink_in(
     drawn: &Drawn,
     place: &RECT,
@@ -809,8 +809,8 @@ fn clear_to_photo(target: &ID2D1RenderTarget) {
     unsafe { target.Clear(Some(&photo)) };
 }
 
-/// The scenes drawn in order, each over a cleared target as in a window's frames, with the pixels of the last and how many
-/// times the toolbar was drawn on its bitmap after each.
+/// The scenes drawn in order, each over a cleared target as in a window's frames, with the pixels of the last and how
+/// many times the toolbar was drawn on its bitmap after each.
 fn frames(canvas: &Canvas, mode: Mode, dpi: u32, scenes: &[Toolbar]) -> (Picture, Vec<u32>) {
     let held: Vec<_> = scenes.iter().map(|toolbar| (*toolbar, None)).collect();
     frames_held(canvas, mode, dpi, &held)
@@ -979,9 +979,9 @@ fn the_cached_toolbar_is_where_and_what_it_is_when_every_layer_is_drawn_straight
             // Not the same pixels, and not meant to be: drawn straight over the photo, a faint layer rounds against the
             // photo's 8 bits, and one that would change a channel by less than half a level leaves it as it was, so a
             // shadow comes out too light in the channels that are small, and tinted (the photo's green and blue stay
-            // put while its red darkens). On the transparent bitmap the layers add up in the alpha channel first, so the
-            // shadows keep their proportions. Hence the tolerance, which a bitmap a pixel out of place would still break
-            // at every edge: a panel or an icon is tens of levels from what is beside it.
+            // put while its red darkens). On the transparent bitmap the layers add up in the alpha channel first, so
+            // the shadows keep their proportions. Hence the tolerance, which a bitmap a pixel out of place would still
+            // break at every edge: a panel or an icon is tens of levels from what is beside it.
             let mean = f64::from(u32::try_from(total).expect("a sum of levels"))
                 / f64::from(u32::try_from(count).expect("a count of pixels"));
             assert!(
@@ -1023,9 +1023,9 @@ fn the_bitmap_has_room_for_the_shadows_and_not_much_more() {
 }
 
 /// Times whole frames (BeginDraw to EndDraw, which is where Direct2D rasterizes) on the WIC bitmap: an empty one, one
-/// that draws the toolbar straight over the photo as every frame would without the cache, the first with the cache, which
-/// makes the bitmap, one after another tool is lit, which draws it again, and one that only lays it. Run alone and in
-/// release, where the numbers mean something:
+/// that draws the toolbar straight over the photo as every frame would without the cache, the first with the cache,
+/// which makes the bitmap, one after another tool is lit, which draws it again, and one that only lays it. Run alone
+/// and in release, where the numbers mean something:
 /// `cargo test --release -p screengauge toolbar_draw_times -- --ignored --nocapture --test-threads=1`.
 #[test]
 #[ignore = "a timing, for reading"]
@@ -1208,9 +1208,9 @@ fn ink_share(drawn: &Drawn, place: &RECT, stops: Stops, ink: [u8; 3], x: i32, y:
 type Probe = (f64, f64, bool);
 
 /// Points of each icon, in its view box, that a stroke passes through (`true`) and points well clear of every stroke
-/// (`false`), taken from the prototype's SVGs by hand: the middle of a side, the tip of a tooth, the middle of a slanted
-/// line. Where a path is closed, one of its points is on the side only the closepath draws; where an arc bulges, one is
-/// at the top of the bulge.
+/// (`false`), taken from the prototype's SVGs by hand: the middle of a side, the tip of a tooth, the middle of a
+/// slanted line. Where a path is closed, one of its points is on the side only the closepath draws; where an arc
+/// bulges, one is at the top of the bulge.
 const PROBES: [(ToolbarButton, &[Probe]); 10] = [
     (
         ToolbarButton::Tool(Tool::Dimensions),
@@ -1370,8 +1370,8 @@ fn each_icons_strokes_are_where_its_svg_draws_them() {
                             "{button:?} at view box ({vx}, {vy}), pixel ({x}, {y}): {mode:?} at {dpi} DPI"
                         );
                         if stroked {
-                            // The pixel, or one beside it: the icon's corner is laid on a whole pixel, half a pixel from
-                            // where this puts it.
+                            // The pixel, or one beside it: the icon's corner is laid on a whole pixel, half a pixel
+                            // from where this puts it.
                             let share = (-1..=1)
                                 .flat_map(|dy| (-1..=1).map(move |dx| (x + dx, y + dy)))
                                 .map(|(x, y)| ink_share(&drawn, &place, stops, ink, x, y))

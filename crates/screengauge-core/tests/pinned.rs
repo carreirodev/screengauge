@@ -1,5 +1,5 @@
-//! Layer 1 tests of pinned measurements and the copy in Dimensions (v1 spec WPC-296, Dimensions; ticket WPC-308): what a
-//! click pins and copies, the notice it shows and when the notice goes, the stack that Backspace and Delete undo, the
+//! Layer 1 tests of pinned measurements and the copy in Dimensions (v1 spec WPC-296, Dimensions; ticket WPC-308): what
+//! a click pins and copies, the notice it shows and when the notice goes, the stack that Backspace and Delete undo, the
 //! guard against a double-click's second click, and closing, on frozen screens drawn here, without a screen. They look
 //! only at the scene the session would draw and at the effects it returns.
 

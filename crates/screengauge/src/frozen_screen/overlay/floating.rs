@@ -35,8 +35,8 @@ pub fn inside_monitor(left: i32, top: i32, size: Size, monitor: RECT, dpi: u32) 
 
 impl Overlay {
     /// Draws a floating panel in `panel`, a rectangle in the virtual screen, with corners of `radius` logical pixels:
-    /// the shadow, the panel with its border and the highlight inside its top. The shadow is blurred for the panel's own
-    /// size, so a lower panel casts a fainter one, as in a browser.
+    /// the shadow, the panel with its border and the highlight inside its top. The shadow is blurred for the panel's
+    /// own size, so a lower panel casts a fainter one, as in a browser.
     pub(super) fn draw_floating_panel(
         &self,
         target: &ID2D1RenderTarget,
@@ -47,8 +47,8 @@ impl Overlay {
         let radius = scaled(radius, self.dpi());
         let outer = self.shaped(panel, radius, 0, 0);
 
-        // SAFETY: a drawing call on a live render target. Out of BeginDraw and EndDraw, Direct2D only fails the frame at
-        // EndDraw.
+        // SAFETY: a drawing call on a live render target. Out of BeginDraw and EndDraw, Direct2D only fails the frame
+        // at EndDraw.
         unsafe { target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };
         // The shadow is cut out where the panel is: the panel is a little see-through, and CSS never paints an outer
         // shadow inside the box it belongs to.

@@ -5,10 +5,11 @@ use std::path::{Path, PathBuf};
 
 use super::LocalTime;
 
-/// The automatic names of a Snip's file taken at one moment, in the order they are tried: `screengauge-20261026-204112.png`
-/// first, then `-2`, `-3` and so on before `.png`, for when a file in the folder already has the name. The date and time
-/// are local, to the second, and written as digits alone, so they never change with the language of Windows. Which names
-/// are taken only the folder knows, so the Windows layer, which writes there, goes down the list.
+/// The automatic names of a Snip's file taken at one moment, in the order they are tried:
+/// `screengauge-20261026-204112.png` first, then `-2`, `-3` and so on before `.png`, for when a file in the folder
+/// already has the name. The date and time are local, to the second, and written as digits alone, so they never change
+/// with the language of Windows. Which names are taken only the folder knows, so the Windows layer, which writes there,
+/// goes down the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileNames {
     time: LocalTime,

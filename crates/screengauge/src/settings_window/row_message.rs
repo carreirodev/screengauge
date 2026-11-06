@@ -4,10 +4,11 @@
 //! (WPC-326) use the same piece.
 //!
 //! The message wraps in the room between the label's left and the row's control. While it shows, its row is as tall as
-//! the label and the message's lines need (`.srow`'s `min-height: 42px` and `padding: 5px 12px`), and the card, the page
-//! and the window grow as much ([`Grown`]); the window is its usual height again once the message goes.
+//! the label and the message's lines need (`.srow`'s `min-height: 42px` and `padding: 5px 12px`), and the card, the
+//! page and the window grow as much ([`Grown`]); the window is its usual height again once the message goes.
 //!
-//! The colors are the prototype's `--warn` (WPC-279), the same the tools' notices use (`frozen_screen::overlay::palette`).
+//! The colors are the prototype's `--warn` (WPC-279), the same the tools' notices use
+//! (`frozen_screen::overlay::palette`).
 
 use std::fmt;
 
@@ -42,7 +43,8 @@ pub const GAP: f32 = 2.0;
 /// A row's room above and below its label (`.srow`'s padding), and its least height (`min-height`).
 const ROW_PADDING: f32 = 5.0;
 
-/// The message's size (`.msg`: `font-size: 11.5px`, `font-weight: 600`, on `#settings`' line-height of 1.3): the note's.
+/// The message's size (`.msg`: `font-size: 11.5px`, `font-weight: 600`, on `#settings`' line-height of 1.3): the
+/// note's.
 const TEXT: f32 = layout::NOTE_TEXT;
 const LINE: f32 = layout::NOTE_LINE;
 

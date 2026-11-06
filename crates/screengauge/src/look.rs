@@ -1,6 +1,6 @@
-//! What Settings and the tray icon's menu look like alike: the prototype's theme tokens for `#settings` (WPC-279), where
-//! the `oklch` ones are converted to sRGB, the window's background, and the helpers both draw with at the monitor's
-//! scale. Neither window owns it, so a change to one's looks shows here, where it changes the other too.
+//! What Settings and the tray icon's menu look like alike: the prototype's theme tokens for `#settings` (WPC-279),
+//! where the `oklch` ones are converted to sRGB, the window's background, and the helpers both draw with at the
+//! monitor's scale. Neither window owns it, so a change to one's looks shows here, where it changes the other too.
 
 use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
 use windows::Win32::Graphics::Direct2D::{

@@ -1,7 +1,7 @@
 //! Windows' own window for choosing a folder, which Settings opens from "Change…" and from turning "Save to default
 //! folder" on with no folder kept (v1 spec WPC-296, Settings; WPC-322). It belongs to the Settings window, so it opens
-//! over it and Settings waits. It counts as Settings for the frozen screen (`foreground`): with Save As waiting aside, it
-//! brings nothing back over itself, and the tools called over it close as they do for Settings.
+//! over it and Settings waits. It counts as Settings for the frozen screen (`foreground`): with Save As waiting aside,
+//! it brings nothing back over itself, and the tools called over it close as they do for Settings.
 //!
 //! [`choose`] runs Windows' own message loop until the window closes, so the windows' messages go on meanwhile: it
 //! must be called with nothing borrowed that their procedures borrow.

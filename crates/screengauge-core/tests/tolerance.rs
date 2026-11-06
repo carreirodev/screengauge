@@ -1,8 +1,8 @@
 //! Layer 1 tests of the tolerance adjusted with the mouse wheel (v1 spec WPC-296, Tolerance; ticket WPC-309): turning
-//! the wheel forward raises it and back lowers it, one step a notch, within its limits; what Dimensions measures follows
-//! at once, the pinned measurements don't; the tolerance indicator shows the new value and goes a second after the
-//! wheel stops; and closing the tools, by any way out, keeps nothing, so the next call starts at the default tolerance.
-//! They look only at the scene the session would draw and at the effects it returns.
+//! the wheel forward raises it and back lowers it, one step a notch, within its limits; what Dimensions measures
+//! follows at once, the pinned measurements don't; the tolerance indicator shows the new value and goes a second after
+//! the wheel stops; and closing the tools, by any way out, keeps nothing, so the next call starts at the default
+//! tolerance. They look only at the scene the session would draw and at the effects it returns.
 
 use std::time::Duration;
 
@@ -26,9 +26,9 @@ const ROW: i32 = 500;
 /// One notch of the mouse wheel, in Windows' units, turned forward: away from the user.
 const NOTCH: i32 = 120;
 
-/// A white monitor at `rect` with a gray ramp on row `ROW`: column `rect.left + 100 + n` has the gray 100 + n, for n from
-/// 0 to 99. Each pixel differs from its neighbor by 1, so how far a span runs along the ramp depends on the tolerance
-/// alone.
+/// A white monitor at `rect` with a gray ramp on row `ROW`: column `rect.left + 100 + n` has the gray 100 + n, for n
+/// from 0 to 99. Each pixel differs from its neighbor by 1, so how far a span runs along the ramp depends on the
+/// tolerance alone.
 fn ramp_on(rect: Rect) -> Photo {
     let width = usize::try_from(rect.width).expect("a small monitor");
     let height = usize::try_from(rect.height).expect("a small monitor");
@@ -111,8 +111,8 @@ fn live_span(session: &Session) -> Option<Span> {
     session.scene().live.and_then(|live| live.horizontal())
 }
 
-// Spans from gray 150, by the rule the calibration kept (WPC-332): a pixel counts as the same area while none of its red,
-// green or blue differs from the reference color's by more than the tolerance.
+// Spans from gray 150, by the rule the calibration kept (WPC-332): a pixel counts as the same area while none of its
+// red, green or blue differs from the reference color's by more than the tolerance.
 
 /// At the default tolerance, 6: gray 144 to gray 156.
 fn at_six() -> Span {
@@ -448,8 +448,8 @@ fn the_next_call_starts_at_the_default_tolerance_in_settings() {
 
 #[test]
 fn while_a_precision_touchpad_keeps_turning_the_indicator_stays_though_no_notch_is_complete() {
-    // The indicator goes a second after the wheel stops, not after its last full notch: small turns 700 ms apart keep it
-    // up, showing the tolerance as it is until they make a notch.
+    // The indicator goes a second after the wheel stops, not after its last full notch: small turns 700 ms apart keep
+    // it up, showing the tolerance as it is until they make a notch.
     let mut session = open(options());
     assert_eq!(
         wakes(&session.handle(wheel(30, 1000))),

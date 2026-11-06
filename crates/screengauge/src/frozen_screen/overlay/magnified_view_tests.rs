@@ -1,7 +1,7 @@
 //! Render tests of the magnified view on a WIC bitmap, like the notice's in `panel_tests`. The sizes here are the
 //! prototype's (WPC-279), in logical pixels, scaled in the tests, and not read back from the code that is being tested;
-//! the view the session core hands over is built by the rules the core states (`MagnifiedView`), with a photo whose every
-//! pixel has a color of its own, so a pixel in the wrong place is a wrong color.
+//! the view the session core hands over is built by the rules the core states (`MagnifiedView`), with a photo whose
+//! every pixel has a color of its own, so a pixel in the wrong place is a wrong color.
 
 use screengauge_core::session::{
     ApproximateColor, ColorText, Coordinate, Label, MagnifiedView, NoticeLine, PixelColor, Point,
@@ -848,7 +848,8 @@ fn the_magnification_indicator_is_black_at_60_percent_in_a_rounded_rectangle_wit
                     darkened(x, y)
                 );
             }
-            // The rectangle is exactly this tall and as wide as its text and padding: the pixels beside it are the photo.
+            // The rectangle is exactly this tall and as wide as its text and padding: the pixels beside it are the
+            // photo.
             let middle = (indicator.top + indicator.bottom) / 2;
             for (x, y) in [
                 (x, indicator.top - 1),
@@ -1047,8 +1048,8 @@ fn the_panel_has_its_border_and_a_shadow_that_falls_below_it_and_reaches_no_furt
                 "the ring, {context}: {:?}",
                 at(&picture, across, panel.top)
             );
-            // The shadow falls below the panel, darker than it falls above it, and nothing is drawn beyond its reach: the
-            // blur's reach around the panel, 10 further down.
+            // The shadow falls below the panel, darker than it falls above it, and nothing is drawn beyond its reach:
+            // the blur's reach around the panel, 10 further down.
             let below = at(&picture, across, panel.bottom + scaled(4, dpi));
             let above = at(&picture, across, panel.top - scaled(4, dpi));
             assert!(
@@ -1059,8 +1060,8 @@ fn the_panel_has_its_border_and_a_shadow_that_falls_below_it_and_reaches_no_furt
                 below[0] < BACKGROUND[0],
                 "{below:?} is not darkened, {context}"
             );
-            // The shadow's reach reaches a few pixels further than the fixed layers did before WPC-393, which the owner approved
-            // on 2026-11-06 (WPC-393).
+            // The shadow's reach reaches a few pixels further than the fixed layers did before WPC-393, which the owner
+            // approved on 2026-11-06 (WPC-393).
             let reach = panel_shadow_reach(dpi);
             let drop = scaled(10, dpi);
             let reached = rect(
@@ -1087,9 +1088,9 @@ fn the_shadow_is_within_4_hundredths_of_opacity_of_the_prototypes_below_and_besi
     // CSS `0 10px 28px -8px` at .75 in the dark palette and `0 10px 26px -8px` at .45 in the light one: a gaussian blur
     // of sigma half the blur radius, of the panel's box shrunk by 8 on every side and moved 10 down. The panel is much
     // taller than the blur, so down its middle the box is an edge: below the panel the edge is 2 further down than the
-    // panel's bottom, and beside it 8 further in. The notice's layers made stronger, before WPC-393, were up to 0.06 lighter
-    // right under the panel; `relief`'s blur of the panel's own box is within 0.04 of it, in the pixels the owner approved
-    // on 2026-11-06 (WPC-393).
+    // panel's bottom, and beside it 8 further in. The notice's layers made stronger, before WPC-393, were up to 0.06
+    // lighter right under the panel; `relief`'s blur of the panel's own box is within 0.04 of it, in the pixels the
+    // owner approved on 2026-11-06 (WPC-393).
     let canvas = Canvas::new(640, 640);
     let photo = photo(&canvas);
     for (mode, alpha, sigma, shadow) in [

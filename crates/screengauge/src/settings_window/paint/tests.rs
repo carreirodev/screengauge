@@ -1,5 +1,6 @@
 //! Settings drawn on a bitmap: what the pixel tests of each block (`general`, `measurements`, `inspect`, `snip`) and
-//! of the footer (`footer`) share, and the page's own: where the controls are, the labels, the background and the cards.
+//! of the footer (`footer`) share, and the page's own: where the controls are, the labels, the background and the
+//! cards.
 
 use screengauge_core::settings::{ColorFormat, Theme};
 

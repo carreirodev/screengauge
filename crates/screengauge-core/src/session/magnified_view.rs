@@ -293,17 +293,17 @@ fn pixels_across(dpi: u32, magnification: Magnification) -> u32 {
     odd.max(FEWEST)
 }
 
-/// The height of a line `hundredths` hundredths of a logical pixel tall on a monitor of `dpi`, in whole physical pixels,
-/// halves up.
+/// The height of a line `hundredths` hundredths of a logical pixel tall on a monitor of `dpi`, in whole physical
+/// pixels, halves up.
 fn line_height(hundredths: u32, dpi: u32) -> u32 {
     hundredths.saturating_mul(dpi).saturating_add(4800) / 9600
 }
 
-/// Where the panel, `size` physical pixels along one axis, starts on that axis, with the cursor at `cursor` on a monitor
-/// that starts at `start` and is `length` long there (the prototype's `drawMag`): `REACH` after the cursor, or, should
-/// that bring it within `FLIP` of the monitor's end, `REACH` before it; then kept `MARGIN` inside the monitor, which may
-/// put it over the cursor on a monitor too small for either side. Should the monitor be smaller than the panel, it
-/// starts `MARGIN` inside the monitor's start.
+/// Where the panel, `size` physical pixels along one axis, starts on that axis, with the cursor at `cursor` on a
+/// monitor that starts at `start` and is `length` long there (the prototype's `drawMag`): `REACH` after the cursor, or,
+/// should that bring it within `FLIP` of the monitor's end, `REACH` before it; then kept `MARGIN` inside the monitor,
+/// which may put it over the cursor on a monitor too small for either side. Should the monitor be smaller than the
+/// panel, it starts `MARGIN` inside the monitor's start.
 fn place(cursor: i32, size: u32, start: i32, length: u32, dpi: u32) -> i32 {
     let end = start.saturating_add_unsigned(length);
     let reach = scaled(REACH, dpi);

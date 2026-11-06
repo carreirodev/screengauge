@@ -1,8 +1,8 @@
-//! The raised surfaces' colors and shadows in the light and the dark palette, the toolbar's and Settings' controls': the
-//! prototype's theme tokens (WPC-279, variant A: `--grp-*`, `--btn-*`, `--on-*`, `--sbtn-*` and `--ink*`, and the colors
-//! `.sbtn:hover`, `.sbtn.close:hover` and `#tbMini .chev` write out), where the `oklch` colors are converted to sRGB.
-//! Written as the CSS lists them, so a shadow list reads top to bottom as the stylesheet does: the first is painted on
-//! top. Sizes are in logical pixels, which `relief` scales for the monitor.
+//! The raised surfaces' colors and shadows in the light and the dark palette, the toolbar's and Settings' controls':
+//! the prototype's theme tokens (WPC-279, variant A: `--grp-*`, `--btn-*`, `--on-*`, `--sbtn-*` and `--ink*`, and the
+//! colors `.sbtn:hover`, `.sbtn.close:hover` and `#tbMini .chev` write out), where the `oklch` colors are converted to
+//! sRGB. Written as the CSS lists them, so a shadow list reads top to bottom as the stylesheet does: the first is
+//! painted on top. Sizes are in logical pixels, which `relief` scales for the monitor.
 
 use crate::graphics::{Color, color};
 use crate::theme::Mode;
@@ -74,8 +74,8 @@ pub struct Palette {
     pub small_ink_hover: Color,
 }
 
-/// `.sbtn.close:hover`: the close button with the cursor on it, red with a white cross in both palettes. Its shadows are
-/// `.sbtn`'s.
+/// `.sbtn.close:hover`: the close button with the cursor on it, red with a white cross in both palettes. Its shadows
+/// are `.sbtn`'s.
 pub const CLOSE_HOVER: Surface = Surface {
     base: None,
     gradient: &[

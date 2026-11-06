@@ -60,8 +60,8 @@ fn icon_box(place: &RECT, css_size: u32, extent: [f64; 4], dpi: u32) -> [f64; 4]
     ]
 }
 
-/// The icon of `button` (one of `ICONS`) in `drawn`, in `place`, over `stops` in `ink`: inked, in that ink alone, and where
-/// the prototype puts it, within a pixel and a half.
+/// The icon of `button` (one of `ICONS`) in `drawn`, in `place`, over `stops` in `ink`: inked, in that ink alone, and
+/// where the prototype puts it, within a pixel and a half.
 fn assert_icon(
     drawn: &Drawn,
     button: ToolbarButton,
@@ -287,7 +287,8 @@ fn the_minimized_toolbar_is_its_lit_button_alone_with_the_tools_icon_and_a_small
                     t.ink_on,
                     &context,
                 );
-                // The arrow's box, 14 pixels 3 in from the right and bottom sides: the cyan darkened, a white arrow in it.
+                // The arrow's box, 14 pixels 3 in from the right and bottom sides: the cyan darkened, a white arrow in
+                // it.
                 let side = scaled(14, dpi);
                 let inset = scaled(3, dpi);
                 let (right, bottom) = (place.right - inset, place.bottom - inset);
@@ -423,8 +424,8 @@ fn a_held_small_button_shrinks_around_its_middle_where_it_is() {
                 );
                 let context = format!("{button:?}: {mode:?} at {dpi} DPI");
                 let place = hovered.place(button);
-                // Shrunk to 0.92 around its middle, it neither rises nor sinks: its middle row, left of the icon, is the
-                // same color, and its top edge is no longer the button's.
+                // Shrunk to 0.92 around its middle, it neither rises nor sinks: its middle row, left of the icon, is
+                // the same color, and its top edge is no longer the button's.
                 let (x, y) = (
                     (place.left + place.right) / 2,
                     (place.top + place.bottom) / 2,

@@ -99,8 +99,8 @@ impl Drawn {
             .collect()
     }
 
-    /// How far the strongest pixel of `area` is from the panel, in levels of green: the ink at full strength is as far as
-    /// the palette's ink is from the panel, and fainter ink is nearer.
+    /// How far the strongest pixel of `area` is from the panel, in levels of green: the ink at full strength is as far
+    /// as the palette's ink is from the panel, and fainter ink is nearer.
     fn contrast(&self, area: RECT) -> u8 {
         let panel = self.panel_color()[1];
         pixels(area)
@@ -118,9 +118,9 @@ impl Drawn {
         }
     }
 
-    /// Where the parts of a coordinate's line start, as the prototype's flex row lays them out: the key's box, at least 14
-    /// wide, a gap, the physical number, a gap and a margin, the bar, a margin and a gap, the logical number. Each size
-    /// is scaled on its own.
+    /// Where the parts of a coordinate's line start, as the prototype's flex row lays them out: the key's box, at least
+    /// 14 wide, a gap, the physical number, a gap and a margin, the bar, a margin and a gap, the logical number. Each
+    /// size is scaled on its own.
     fn columns(&self, y: bool) -> (i32, i32, i32) {
         let (line, widths) = self.of(y);
         let physical = line.left + widths.key.max(self.sized(14)) + self.sized(8);

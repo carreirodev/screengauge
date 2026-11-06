@@ -37,8 +37,8 @@ fn listed_and_turned_off_in_windows_it_shows_off_and_says_so() {
 
 #[test]
 fn not_listed_a_choice_left_in_windows_is_off_so_turning_it_on_lists_it_where_windows_shows_it() {
-    // Windows lists ScreenGauge in Settings > Apps > Startup only while it is listed to start: with its entry gone, as an
-    // uninstall leaves it, the user could never turn it on again there, so ScreenGauge lists it first.
+    // Windows lists ScreenGauge in Settings > Apps > Startup only while it is listed to start: with its entry gone, as
+    // an uninstall leaves it, the user could never turn it on again there, so ScreenGauge lists it first.
     assert_eq!(
         StartWithWindows::of(false, Some(&TURNED_OFF)),
         StartWithWindows::Off

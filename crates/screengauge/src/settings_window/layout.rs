@@ -1,7 +1,7 @@
 //! Where each part of Settings goes, top to bottom, in logical pixels: the four blocks' headings and cards, in the
 //! spec's order, and the footer at the bottom (v1 spec WPC-296, Settings). The sizes are the prototype's stylesheet
-//! (`prototype/measurement-overlay`, `#settings`), measured in a browser for WPC-319 without the language row, which the
-//! v1 has no more, and with the Snip's folder note shown, as it is with Destination at its default, Clipboard:
+//! (`prototype/measurement-overlay`, `#settings`), measured in a browser for WPC-319 without the language row, which
+//! the v1 has no more, and with the Snip's folder note shown, as it is with Destination at its default, Clipboard:
 //!
 //! | part | measured | here |
 //! | -- | -- | -- |
@@ -225,8 +225,8 @@ impl Block {
     }
 }
 
-/// A row grown by `by` logical pixels to hold a message under its label: its card, everything below it and the page grow
-/// as much.
+/// A row grown by `by` logical pixels to hold a message under its label: its card, everything below it and the page
+/// grow as much.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Grown {
     pub row: Row,

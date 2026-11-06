@@ -1,21 +1,21 @@
 //! The toolbar, kept as a bitmap between frames (WPC-310). The frozen screen's window repaints on every mouse move that
 //! changes a measurement, and the toolbar underneath it only changes when another tool or mode is lit, the cursor goes
 //! onto another of its buttons or off them, a button is held down or let go, or it is minimized or brought back, so it
-//! is drawn once, with all its shadows, on a bitmap of its own, and each frame lays that bitmap over the photo one pixel
-//! for one pixel. Drawing it afresh each time would tessellate a hundred or so shadow layers for nothing.
+//! is drawn once, with all its shadows, on a bitmap of its own, and each frame lays that bitmap over the photo one
+//! pixel for one pixel. Drawing it afresh each time would tessellate a hundred or so shadow layers for nothing.
 //!
 //! The bitmap holds the toolbar at the origin with room all round for the reach of its shadows, whichever buttons are
 //! lit, hovered or held down, and for the minimized toolbar's button, so it is the same size for every state, never
-//! moves with the toolbar's place (dragging it, WPC-312, only moves where it is laid), and a state that changes is drawn
-//! over the same bitmap. The part of it past the monitor's edges, on any side the toolbar sits against where its margin
-//! is narrower than its shadows reach, is cut off by the window as the bitmap is laid.
+//! moves with the toolbar's place (dragging it, WPC-312, only moves where it is laid), and a state that changes is
+//! drawn over the same bitmap. The part of it past the monitor's edges, on any side the toolbar sits against where its
+//! margin is narrower than its shadows reach, is cut off by the window as the bitmap is laid.
 //!
-//! Compositing the layers on a transparent bitmap and then that bitmap over the photo is not the same as compositing every
-//! layer straight over the photo: a faint layer drawn over the photo's 8-bit pixels rounds away, as it changes a channel
-//! by less than half a level, so a shadow comes out too light in the small channels and the glow off its hue. On the
-//! bitmap the layers add up in the alpha channel first and keep their proportions, so the bitmap is the more faithful.
-//! The two differ by up to 27 levels at a pixel, and by 2 to 4 on average over the toolbar (`toolbar_tests` measures
-//! it). A toolbar is always drawn through the bitmap, so what is drawn does not depend on the cache's state.
+//! Compositing the layers on a transparent bitmap and then that bitmap over the photo is not the same as compositing
+//! every layer straight over the photo: a faint layer drawn over the photo's 8-bit pixels rounds away, as it changes a
+//! channel by less than half a level, so a shadow comes out too light in the small channels and the glow off its hue.
+//! On the bitmap the layers add up in the alpha channel first and keep their proportions, so the bitmap is the more
+//! faithful. The two differ by up to 27 levels at a pixel, and by 2 to 4 on average over the toolbar (`toolbar_tests`
+//! measures it). A toolbar is always drawn through the bitmap, so what is drawn does not depend on the cache's state.
 
 use screengauge_core::session::toolbar::Hit;
 use screengauge_core::session::{Point, Toolbar};
@@ -51,8 +51,8 @@ struct Kept {
     bitmap: ID2D1Bitmap,
     /// What the bitmap shows: the lit tool, the lit mode while there is one, the button under the cursor, whether it is
     /// minimized, and what the left button is held down on. The groups and the buttons are always the same, and so are
-    /// the monitor, the scale and the palette, which an `Overlay` is made for; the toolbar's own monitor never changes for
-    /// a window, so the scene's toolbar is the key, with what is held, all but its corner (`cache_key`).
+    /// the monitor, the scale and the palette, which an `Overlay` is made for; the toolbar's own monitor never changes
+    /// for a window, so the scene's toolbar is the key, with what is held, all but its corner (`cache_key`).
     shows: (Toolbar, Option<Hit>),
     /// How much of the bitmap is left, above and to the left of the toolbar, for the shadows.
     margins: Margins,

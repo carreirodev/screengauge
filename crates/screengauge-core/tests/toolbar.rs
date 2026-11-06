@@ -23,8 +23,8 @@ const AOC: Rect = Rect {
     height: 2160,
 };
 
-/// Where the top center puts the toolbar's corner on the 4K monitor: 930 × 117 at 175%, 25 inside the top side, and half
-/// of the 3840 - 930 - 50 = 2860 across past the margin.
+/// Where the top center puts the toolbar's corner on the 4K monitor: 930 × 117 at 175%, 25 inside the top side, and
+/// half of the 3840 - 930 - 50 = 2860 across past the margin.
 const AOC_TOP_CENTER: Point = Point {
     x: 25 + 1430,
     y: 25,

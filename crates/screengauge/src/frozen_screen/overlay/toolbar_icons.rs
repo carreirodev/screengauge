@@ -27,8 +27,8 @@ pub enum Shape {
     },
 }
 
-/// An icon: the CSS pixels its view box is shown at (the `width` and `height` of the `<svg>`), the width of its stroke in
-/// view box units (its `stroke-width`), and what it is made of, painted in order.
+/// An icon: the CSS pixels its view box is shown at (the `width` and `height` of the `<svg>`), the width of its stroke
+/// in view box units (its `stroke-width`), and what it is made of, painted in order.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Icon {
     pub size: u32,

@@ -1,6 +1,6 @@
-//! Render tests of Bounds on a WIC bitmap: the drawn rectangle's dashes, the content's fill, ring and outline, and where
-//! the label goes. The sizes, colors and opacities are the approved prototype's (WPC-279, variant A: `dashedRect` and
-//! `drawResult`), worked out here from the rectangles alone, not read back from the code that is being tested.
+//! Render tests of Bounds on a WIC bitmap: the drawn rectangle's dashes, the content's fill, ring and outline, and
+//! where the label goes. The sizes, colors and opacities are the approved prototype's (WPC-279, variant A: `dashedRect`
+//! and `drawResult`), worked out here from the rectangles alone, not read back from the code that is being tested.
 
 use screengauge_core::session::{DrawnRectangle, Label, Measured, Measurement, Rect};
 
@@ -151,8 +151,8 @@ fn on_ring(content: Rect, by: i32, x: i32, y: i32) -> bool {
 }
 
 /// What a pixel of the window is for the content of a Bounds measurement drawn without its label: the content filled
-/// with cyan at 16% while live and 10% once pinned, the ring of pixels just outside it in cyan, the ring outside that in
-/// black at 28% over the background, and the background everywhere else.
+/// with cyan at 16% while live and 10% once pinned, the ring of pixels just outside it in cyan, the ring outside that
+/// in black at 28% over the background, and the background everywhere else.
 fn around_content(content: Rect, look: Look, x: i32, y: i32) -> [u8; 3] {
     let inside = (content.left..=content.right()).contains(&x)
         && (content.top..=content.bottom()).contains(&y);
@@ -236,8 +236,8 @@ fn where_the_content_touches_the_drawn_rectangle_the_ring_is_drawn_over_the_dash
 }
 
 /// Where the label of `measurement` is, by the prototype: its pill's left side on the ring's left column, and its
-/// bottom 6 logical pixels above the ring's top row; or, where the monitor has no room above, inside the ring, 4 logical
-/// pixels right and 5 down of its top left corner. The pill is the live one's size for `text`.
+/// bottom 6 logical pixels above the ring's top row; or, where the monitor has no room above, inside the ring, 4
+/// logical pixels right and 5 down of its top left corner. The pill is the live one's size for `text`.
 fn wanted_pill(overlay: &Overlay, content: Rect, text: &str, dpi: u32, above: bool) -> RECT {
     let width = text_width(overlay, text, &overlay.format) + 2 * scaled(8, dpi);
     let height = scaled(12, dpi) + 2 * scaled(5, dpi);

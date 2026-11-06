@@ -28,8 +28,8 @@ pub const RING: u32 = 1;
 const TOOLS_PAD: u32 = 9;
 const TOOLS_GAP: u32 = 10;
 const TOOL: u32 = 46;
-/// The modes' group (`.grp.modes`) and the gear's (`.grp.small`): their padding, the room between their buttons, and the
-/// buttons' size (`.mbtn` and `.sbtn`).
+/// The modes' group (`.grp.modes`) and the gear's (`.grp.small`): their padding, the room between their buttons, and
+/// the buttons' size (`.mbtn` and `.sbtn`).
 const SMALL_PAD: u32 = 8;
 const MODES_GAP: u32 = 6;
 const CONTROLS_GAP: u32 = 8;
@@ -218,9 +218,9 @@ impl Axis {
         )
     }
 
-    /// The share of the room that starts the toolbar along the axis as near `wanted` as it can go: a start wanted before
-    /// the margin goes to the margin, and one past the room to its end. `share` itself when the toolbar has no room to
-    /// move, or would start on the pixel `share` already puts it at.
+    /// The share of the room that starts the toolbar along the axis as near `wanted` as it can go: a start wanted
+    /// before the margin goes to the margin, and one past the room to its end. `share` itself when the toolbar has no
+    /// room to move, or would start on the pixel `share` already puts it at.
     fn share_nearest(&self, wanted: i32, share: f64) -> f64 {
         let room = self.room();
         if room == 0 {
@@ -254,7 +254,8 @@ pub fn layout(corner: Point, scale: Scale) -> Layout {
     let ring = s(RING);
     let sizes = Sizes::at(scale);
     let Point { x: left, y: top } = corner;
-    // The smaller groups are centered in the toolbar's height (CSS `align-items: center`), an odd pixel left below them.
+    // The smaller groups are centered in the toolbar's height (CSS `align-items: center`), an odd pixel left below
+    // them.
     let small_top =
         top.saturating_add_unsigned(sizes.height.saturating_sub(sizes.small_height).div_ceil(2));
 
@@ -310,8 +311,8 @@ pub fn layout(corner: Point, scale: Scale) -> Layout {
 }
 
 impl Layout {
-    /// What `at`, in physical pixels of the virtual screen, is on, on the whole toolbar: `None` off it. H, V and C count
-    /// only when `modes_shown`; otherwise their room is the toolbar's background.
+    /// What `at`, in physical pixels of the virtual screen, is on, on the whole toolbar: `None` off it. H, V and C
+    /// count only when `modes_shown`; otherwise their room is the toolbar's background.
     pub fn hit(&self, at: Point, modes_shown: bool) -> Option<Hit> {
         if !self.toolbar.contains(at) {
             return None;

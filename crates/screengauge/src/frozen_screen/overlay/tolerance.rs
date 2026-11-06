@@ -1,8 +1,8 @@
 //! The tolerance indicator: "Tolerance", the tolerance as a number and a bar of ten segments on a small panel above and
-//! to the left of the cursor, which follows the cursor (the prototype's variant A, WPC-279), or below and to the left of
-//! it in Dimensions' horizontal mode and wherever above it would cover the live label (the owner's choices in WPC-309).
-//! Where it goes needs no Windows, so [`size`], [`place_for`] and [`lit_segments`] are tested without a monitor; the
-//! rest draws it onto the overlay's render target.
+//! to the left of the cursor, which follows the cursor (the prototype's variant A, WPC-279), or below and to the left
+//! of it in Dimensions' horizontal mode and wherever above it would cover the live label (the owner's choices in
+//! WPC-309). Where it goes needs no Windows, so [`size`], [`place_for`] and [`lit_segments`] are tested without a
+//! monitor; the rest draws it onto the overlay's render target.
 //!
 //! The prototype's markup is `Tolerance <b>N</b> <span class="meter">...</span>` in a flex row with an 8px gap. The
 //! word, the number and the bar are separate flex items, so the spaces between them collapse and the room between them
@@ -39,12 +39,12 @@ const LINE: u32 = 11;
 /// The room between the word, the number and the bar.
 const GAP: u32 = 8;
 
-/// The number's weight. The prototype's `<b>` sits in a parent of weight 600, and CSS `bolder` from 600 is 900. Measured
-/// in Chromium on Windows 11 for WPC-309: the `<b>` computes to 900, and a "0" in it is 6.594px wide at 11px, the same
-/// as at 800 and 900 and unlike Bold's 6.333 at 700, so Chromium draws it in Segoe UI Black. DirectWrite also has a
-/// Black face for 900 (a test checks it is a real face, not a simulated bolding). Black has no tabular figures: its "1"
-/// is narrower than its "0" with or without the feature, so the number's width, and so the panel's, follows its digits
-/// in the prototype too.
+/// The number's weight. The prototype's `<b>` sits in a parent of weight 600, and CSS `bolder` from 600 is 900.
+/// Measured in Chromium on Windows 11 for WPC-309: the `<b>` computes to 900, and a "0" in it is 6.594px wide at 11px,
+/// the same as at 800 and 900 and unlike Bold's 6.333 at 700, so Chromium draws it in Segoe UI Black. DirectWrite also
+/// has a Black face for 900 (a test checks it is a real face, not a simulated bolding). Black has no tabular figures:
+/// its "1" is narrower than its "0" with or without the feature, so the number's width, and so the panel's, follows its
+/// digits in the prototype too.
 pub const NUMBER_WEIGHT: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT_BLACK;
 
 /// The bar: this many segments, each this wide and tall with rounded corners of this radius, this far apart. The
@@ -91,10 +91,10 @@ pub fn size(word_width: i32, number_width: i32, dpi: u32) -> Size {
     }
 }
 
-/// Where the panel goes above the cursor, as in the prototype: its rectangle in the virtual screen, right and bottom one
-/// past its last pixel. Its right side is `REACH` left of `at` and its bottom `REACH` above it, and it never goes to the
-/// other side of the cursor: where it would stick out it slides inside, `floating::MARGIN` from the monitor's sides;
-/// should the monitor be smaller than the panel, it starts that far inside the monitor's left and top sides.
+/// Where the panel goes above the cursor, as in the prototype: its rectangle in the virtual screen, right and bottom
+/// one past its last pixel. Its right side is `REACH` left of `at` and its bottom `REACH` above it, and it never goes
+/// to the other side of the cursor: where it would stick out it slides inside, `floating::MARGIN` from the monitor's
+/// sides; should the monitor be smaller than the panel, it starts that far inside the monitor's left and top sides.
 pub fn place(at: Point, size: Size, monitor: RECT, dpi: u32) -> RECT {
     let reach = scaled(REACH, dpi);
     floating::inside_monitor(

@@ -1,9 +1,10 @@
 //! The toolbar on screen (v1 spec WPC-296, Toolbar; WPC-310, WPC-311 and WPC-312): where the session core's layout puts
-//! each of its parts from the corner the scene gives, as the rectangles Windows and the painting use, how each button is
-//! styled, and drawing it.
+//! each of its parts from the corner the scene gives, as the rectangles Windows and the painting use, how each button
+//! is styled, and drawing it.
 //!
 //! Where the toolbar and each button are is the core's ([`screengauge_core::session::toolbar`]), which also says what a
-//! point is on, so the window's clicks, the cursor's arrow, the pause of the tool and what is drawn here never disagree.
+//! point is on, so the window's clicks, the cursor's arrow, the pause of the tool and what is drawn here never
+//! disagree.
 
 use screengauge_core::session::toolbar::{self as core_toolbar, BUTTONS, Hit};
 use screengauge_core::session::{Point, Scale, Toolbar, ToolbarButton};
@@ -62,8 +63,8 @@ pub(super) enum Reaction {
     Pressed,
 }
 
-/// How `button` reacts when the cursor is on `toolbar.hovered` and `held` is what the left button went down on, while it
-/// is held. While a button is held, the others don't react to the cursor.
+/// How `button` reacts when the cursor is on `toolbar.hovered` and `held` is what the left button went down on, while
+/// it is held. While a button is held, the others don't react to the cursor.
 pub(super) fn reaction(toolbar: &Toolbar, held: Option<Hit>, button: ToolbarButton) -> Reaction {
     if toolbar.hovered != Some(button) {
         return Reaction::Rest;

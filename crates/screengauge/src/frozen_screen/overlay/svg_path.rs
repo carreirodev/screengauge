@@ -125,8 +125,8 @@ impl Reader<'_> {
         self.at - from
     }
 
-    /// A number: an optional sign, and digits with an optional point. A second point, or a sign, ends it, so `1.5-1` and
-    /// `.1.1` are two numbers each.
+    /// A number: an optional sign, and digits with an optional point. A second point, or a sign, ends it, so `1.5-1`
+    /// and `.1.1` are two numbers each.
     fn number(&mut self) -> Result<f32, ParseError> {
         self.skip_separators();
         let from = self.at;

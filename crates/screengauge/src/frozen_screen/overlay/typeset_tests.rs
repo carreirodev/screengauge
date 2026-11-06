@@ -71,8 +71,8 @@ fn digits_stay_tabular() {
 }
 
 /// Texts that differ only in their 7s, which Segoe UI semibold draws a third of a pixel narrower than its other digits
-/// even with tabular figures (WPC-386; Chromium draws it as narrow). Rounded up to whole pixels, that third could take a
-/// pixel off the box around the number.
+/// even with tabular figures (WPC-386; Chromium draws it as narrow). Rounded up to whole pixels, that third could take
+/// a pixel off the box around the number.
 const SEVENS: [(&str, &str); 3] = [
     ("10", "17"),
     ("1000", "1777"),

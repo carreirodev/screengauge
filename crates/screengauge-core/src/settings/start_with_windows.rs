@@ -25,9 +25,9 @@ pub enum Click {
 
 impl StartWithWindows {
     /// The state from whether ScreenGauge is `listed` to start, and what Windows keeps of the user's choice for it
-    /// (`approved`), should it keep anything. Windows writes 02 for an entry left on and 03 with the time for one turned
-    /// off; an odd first byte is read as off. Not listed, it is off whatever Windows kept: Windows shows the user's
-    /// choice only for an entry that is listed, so turning it on lists it, where the user can then turn it on.
+    /// (`approved`), should it keep anything. Windows writes 02 for an entry left on and 03 with the time for one
+    /// turned off; an odd first byte is read as off. Not listed, it is off whatever Windows kept: Windows shows the
+    /// user's choice only for an entry that is listed, so turning it on lists it, where the user can then turn it on.
     pub fn of(listed: bool, approved: Option<&[u8]>) -> StartWithWindows {
         let turned_off = approved
             .and_then(|bytes| bytes.first())

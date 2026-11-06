@@ -247,7 +247,8 @@ impl Stage {
 
 impl Drop for Stage {
     fn drop(&mut self) {
-        // SAFETY: our window and class, each released once, the window first; unregistering the class deletes its brush.
+        // SAFETY: our window and class, each released once, the window first; unregistering the class deletes its
+        // brush.
         unsafe {
             if let Err(e) = DestroyWindow(self.hwnd) {
                 eprintln!("warning: DestroyWindow(stage): {e}");

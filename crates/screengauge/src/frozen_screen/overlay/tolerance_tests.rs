@@ -487,9 +487,9 @@ fn the_word_and_the_number_are_in_the_panels_ink_on_one_baseline_inside_the_line
                 bottom(&word),
                 bottom(&number)
             );
-            // At 100% the baseline is 10 below the top of the line: in Chromium the text's content area starts 2 above the
-            // line and its ascent is 12 (a "Tolerance" at 11px is 14.67 tall at 1.5 with the line at 16.5). The digits sit
-            // on it, so the last row of the number's ink is the line's tenth.
+            // At 100% the baseline is 10 below the top of the line: in Chromium the text's content area starts 2 above
+            // the line and its ascent is 12 (a "Tolerance" at 11px is 14.67 tall at 1.5 with the line at 16.5). The
+            // digits sit on it, so the last row of the number's ink is the line's tenth.
             if dpi == 96 {
                 assert_eq!(bottom(&number), line.top + 9, "{context}");
             }
@@ -526,10 +526,10 @@ fn an_indicators_shadow_falls_below_it_and_nothing_is_drawn_beyond_it() {
             let below = at(&d.picture, across, d.panel.bottom + scaled(4, dpi));
             assert!(below[0] < BACKGROUND[0], "{below:?} is darkened, {context}");
             assert!(below[0] > 120, "{below:?} is only a shadow, {context}");
-            // The shadow's reach beyond the panel on the sides and above it, and 10 further below. Beyond it the photo is as
-            // it was, to the last pixel.
-            // The shadow's reach reaches a few pixels further than the fixed layers did before WPC-393, which the owner approved
-            // on 2026-11-06 (WPC-393).
+            // The shadow's reach beyond the panel on the sides and above it, and 10 further below. Beyond it the photo
+            // is as it was, to the last pixel.
+            // The shadow's reach reaches a few pixels further than the fixed layers did before WPC-393, which the owner
+            // approved on 2026-11-06 (WPC-393).
             let reach = panel_shadow_reach(dpi);
             let drop = scaled(10, dpi);
             let reached = rect(

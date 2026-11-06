@@ -241,8 +241,8 @@ impl Host {
             host: window,
             dialog: dialog.clone(),
         }));
-        // Windows puts Save As at its owner's top left corner, which here is the monitor's: it is moved to the middle as
-        // soon as it shows. Should the timer be refused, it stays in the corner.
+        // Windows puts Save As at its owner's top left corner, which here is the monitor's: it is moved to the middle
+        // as soon as it shows. Should the timer be refused, it stays in the corner.
         // SAFETY: our own window, on its thread; the timer goes with it.
         if unsafe { SetTimer(Some(window), CENTER_TIMER, USER_TIMER_MINIMUM, None) } == 0 {
             log::failure("Save As: centering it", &Error::from_thread());
@@ -312,8 +312,8 @@ pub fn step_aside() {
     });
 }
 
-/// Brings Save As back over every program and over the frozen screen, which comes back first, and gives it the keyboard.
-/// Nothing while Save As is closed.
+/// Brings Save As back over every program and over the frozen screen, which comes back first, and gives it the
+/// keyboard. Nothing while Save As is closed.
 pub fn come_back() {
     with_open("Save As: coming back", |open| {
         // SAFETY: our own window, on its thread. Save As, which it owns, becomes topmost with it.

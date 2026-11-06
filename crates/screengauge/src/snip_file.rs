@@ -1,5 +1,5 @@
-//! The Snip's PNG file on disk (v1 spec WPC-296, Snip): a new file in the default folder, under the first automatic name
-//! no file there has, or the path Save As chose. A file is written whole or not at all: whatever fails, a deleted
+//! The Snip's PNG file on disk (v1 spec WPC-296, Snip): a new file in the default folder, under the first automatic
+//! name no file there has, or the path Save As chose. A file is written whole or not at all: whatever fails, a deleted
 //! folder, a full disk, no permission or a network folder gone, no file is left behind, and no folder is ever made.
 
 use std::fs::{self, File, OpenOptions};

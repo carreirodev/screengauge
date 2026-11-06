@@ -1,7 +1,7 @@
 //! Layer 1 tests of Snip taking an image to the clipboard (v1 spec WPC-296, Snip; ticket WPC-317): the area it takes,
 //! which is Bounds' gesture, Alt, an empty area, a tiny drag, Esc in the middle of a drag, the wheel, the monitor's
-//! limit, what the image holds, and what the scene shows while the button is held, on frozen screens drawn here, without
-//! a screen. They look only at the scene the session would draw and at the effects it returns.
+//! limit, what the image holds, and what the scene shows while the button is held, on frozen screens drawn here,
+//! without a screen. They look only at the scene the session would draw and at the effects it returns.
 
 use std::time::Duration;
 

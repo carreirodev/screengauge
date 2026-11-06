@@ -134,9 +134,9 @@ pub fn fitted(mut page: Page, note: bool) -> Page {
     page
 }
 
-/// Where `path` may be cut without splitting a letter: the offsets, in characters, at which a cluster of the text begins
-/// (a base letter with its accents, or an emoji with its joiners, is one), and its end. `cluster_lengths` are the
-/// clusters' lengths in UTF-16 units, as DirectWrite's layout of `path` gives them.
+/// Where `path` may be cut without splitting a letter: the offsets, in characters, at which a cluster of the text
+/// begins (a base letter with its accents, or an emoji with its joiners, is one), and its end. `cluster_lengths` are
+/// the clusters' lengths in UTF-16 units, as DirectWrite's layout of `path` gives them.
 pub fn cut_points(path: &str, cluster_lengths: &[u16]) -> Vec<usize> {
     let mut starts = Vec::with_capacity(cluster_lengths.len());
     let mut unit = 0usize;
@@ -291,8 +291,8 @@ mod tests {
         assert!(cut.ends_with("fotos"), "{cut}");
     }
 
-    /// The clusters of `path` as DirectWrite gives them for a font with these accents: a letter and the combining accent
-    /// after it are one, every other character is its own.
+    /// The clusters of `path` as DirectWrite gives them for a font with these accents: a letter and the combining
+    /// accent after it are one, every other character is its own.
     fn clusters(path: &str) -> Vec<u16> {
         let mut lengths: Vec<u16> = Vec::new();
         for character in path.chars() {

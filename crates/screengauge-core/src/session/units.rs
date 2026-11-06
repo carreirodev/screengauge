@@ -1,6 +1,6 @@
 //! Units (v1 spec WPC-296, Unidades e vários monitores): every measurement is in physical pixels, with the logical
-//! pixels beside it, the physical pixels divided by the scale of the monitor they were measured on. The rule is the same
-//! for every tool.
+//! pixels beside it, the physical pixels divided by the scale of the monitor they were measured on. The rule is the
+//! same for every tool.
 
 use std::fmt;
 
@@ -36,10 +36,10 @@ impl fmt::Display for LogicalPixels {
     }
 }
 
-/// What a copy of `lengths`, measured on a monitor at `scale`, puts on the clipboard: the physical pixels, or the logical
-/// ones when `logical`, whatever "Also show logical pixels" says. Only the numbers, without "px", width then height with
-/// the letter x between them, so they paste into a numeric field: `24`, `24 x 180`, `114.3` (v1 spec WPC-296,
-/// Dimensions). At 100% both are the same whole numbers.
+/// What a copy of `lengths`, measured on a monitor at `scale`, puts on the clipboard: the physical pixels, or the
+/// logical ones when `logical`, whatever "Also show logical pixels" says. Only the numbers, without "px", width then
+/// height with the letter x between them, so they paste into a numeric field: `24`, `24 x 180`, `114.3` (v1 spec
+/// WPC-296, Dimensions). At 100% both are the same whole numbers.
 pub(super) fn clipboard_text(lengths: &[u32], scale: Scale, logical: bool) -> String {
     lengths
         .iter()

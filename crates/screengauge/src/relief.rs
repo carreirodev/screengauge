@@ -41,7 +41,8 @@ pub fn scaled(logical: u32, dpi: u32) -> i32 {
     toolbar::scaled(logical, dpi).cast_signed()
 }
 
-/// `logical` pixels of the monitor's scale, whole, for a length that may be negative, as a shadow's spread and drop may.
+/// `logical` pixels of the monitor's scale, whole, for a length that may be negative, as a shadow's spread and drop
+/// may.
 pub fn signed(logical: i32, dpi: u32) -> i32 {
     logical.signum() * scaled(logical.unsigned_abs(), dpi)
 }
@@ -59,8 +60,8 @@ pub fn px(pixels: i32) -> f32 {
     pixels as f32
 }
 
-/// An ellipse of no size at (`x`, `y`), for its `point`: the Vector2 Direct2D's calls take, which windows 0.62 takes from
-/// the windows-numerics crate without re-exporting it, so this program can't name it, and may not add the crate.
+/// An ellipse of no size at (`x`, `y`), for its `point`: the Vector2 Direct2D's calls take, which windows 0.62 takes
+/// from the windows-numerics crate without re-exporting it, so this program can't name it, and may not add the crate.
 pub fn dot(x: f32, y: f32) -> D2D1_ELLIPSE {
     let mut dot = D2D1_ELLIPSE::default();
     dot.point.X = x;
@@ -68,8 +69,8 @@ pub fn dot(x: f32, y: f32) -> D2D1_ELLIPSE {
     dot
 }
 
-/// The rounded rectangle to stroke with a line `width` pixels wide so the stroke covers the ring between `outer` and the
-/// same shape `width` smaller on every side: the line's middle runs half its width inside the outer edge.
+/// The rounded rectangle to stroke with a line `width` pixels wide so the stroke covers the ring between `outer` and
+/// the same shape `width` smaller on every side: the line's middle runs half its width inside the outer edge.
 pub fn ring(outer: &D2D1_ROUNDED_RECT, width: f32) -> D2D1_ROUNDED_RECT {
     let half = width / 2.0;
     D2D1_ROUNDED_RECT {
@@ -96,8 +97,8 @@ pub fn in_surface(origin: Point, rect: &RECT) -> D2D_RECT_F {
 }
 
 /// `rect` as a rounded rectangle in the pixels of the surface at `origin`, with corners of `radius` pixels, grown by
-/// `grow` pixels on every side (or smaller, should it be negative) and moved `down` pixels. The corners grow with it, as
-/// a CSS shadow's do.
+/// `grow` pixels on every side (or smaller, should it be negative) and moved `down` pixels. The corners grow with it,
+/// as a CSS shadow's do.
 ///
 /// `clamp` is for a shape that may be shrunk past nothing: the toolbar's shadow layers and inset holes shrink a group's
 /// box by up to three deviations of the blur, which can pass half its height. Then a side that would cross the other
@@ -191,8 +192,8 @@ pub fn in_layer<T>(
     mask: Option<ID2D1Geometry>,
     paint: impl FnOnce() -> T,
 ) -> T {
-    // `D2D1_LAYER_PARAMETERS::default()` is all zeros: no content, no opacity and a transform that squashes the mask to a
-    // point, so everything the layer is meant to carry is set.
+    // `D2D1_LAYER_PARAMETERS::default()` is all zeros: no content, no opacity and a transform that squashes the mask to
+    // a point, so everything the layer is meant to carry is set.
     let mut parameters = D2D1_LAYER_PARAMETERS {
         contentBounds: bounds,
         geometricMask: ManuallyDrop::new(mask),
@@ -328,9 +329,9 @@ impl<'a> Canvas<'a> {
         signed(logical, self.dpi)
     }
 
-    /// `rect`, grown by `grow` pixels on every side and moved `down`, as a rounded rectangle in the target's own pixels.
-    /// Shadow layers and holes shrink a box by up to three deviations of the blur, which may pass half its height, so
-    /// what shrinks past nothing is clamped.
+    /// `rect`, grown by `grow` pixels on every side and moved `down`, as a rounded rectangle in the target's own
+    /// pixels. Shadow layers and holes shrink a box by up to three deviations of the blur, which may pass half its
+    /// height, so what shrinks past nothing is clamped.
     pub fn shape(&self, rect: &RECT, radius: i32, grow: i32, down: i32) -> D2D1_ROUNDED_RECT {
         rounded_at(self.origin, rect, radius, grow, down, true)
     }
@@ -349,7 +350,8 @@ impl<'a> Canvas<'a> {
     }
 
     /// Runs `paint` with the target moved and shrunk as `motion` says, around the middle of `place`, as CSS transforms
-    /// a box and all it draws, shadows included. The target's own transform is put back afterwards, whatever `paint` did.
+    /// a box and all it draws, shadows included. The target's own transform is put back afterwards, whatever `paint`
+    /// did.
     pub fn in_motion(
         &self,
         place: &RECT,
@@ -385,9 +387,10 @@ impl<'a> Canvas<'a> {
         painted
     }
 
-    /// A box painted as CSS does: the outer shadows, the background, the border and the inset shadows, the last listed of
-    /// each kind first. `ring_width` is the border's width and `radius` the corners', in logical pixels, and `see_through`
-    /// is whether the shadow is cut out under the box, as it is for a background that lets what is under it show.
+    /// A box painted as CSS does: the outer shadows, the background, the border and the inset shadows, the last listed
+    /// of each kind first. `ring_width` is the border's width and `radius` the corners', in logical pixels, and
+    /// `see_through` is whether the shadow is cut out under the box, as it is for a background that lets what is under
+    /// it show.
     pub fn surface(
         &self,
         surface: &Surface,
@@ -445,10 +448,11 @@ impl<'a> Canvas<'a> {
         Ok(())
     }
 
-    /// The outer shadow `shadow` of the box `rect`, with corners of `radius` physical pixels, for a box painted straight
-    /// over an opaque surface, as the frozen screen's labels and panels are: its layers, in `shadow::COARSE` bands, are
-    /// painted on a transparent layer of their own, which is then laid over what the target holds, so faint layers don't
-    /// round away (see the module's notes). `see_through` cuts the shadow out under the box, once, as the layer is laid.
+    /// The outer shadow `shadow` of the box `rect`, with corners of `radius` physical pixels, for a box painted
+    /// straight over an opaque surface, as the frozen screen's labels and panels are: its layers, in `shadow::COARSE`
+    /// bands, are painted on a transparent layer of their own, which is then laid over what the target holds, so faint
+    /// layers don't round away (see the module's notes). `see_through` cuts the shadow out under the box, once, as the
+    /// layer is laid.
     pub fn shadow_over(
         &self,
         shadow: &Shadow,

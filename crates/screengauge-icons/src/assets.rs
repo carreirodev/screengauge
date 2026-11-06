@@ -5,9 +5,9 @@
 //!   Windows app's icon", read 2026-10-31): `AppList` for Square44x44Logo, with a picture at each target size in three
 //!   variants (plain, `altform-unplated` for the dark theme, `altform-lightunplated` for the light theme), all three
 //!   required even when, as here, they are the same; `MedTile` for Square150x150Logo; `StoreLogo` for the package logo.
-//! - `notification/`: the app icon in the header of ScreenGauge's Windows notifications, which ScreenGauge.exe embeds and
-//!   registers with Windows at each start. Windows draws it at the small icon size and scales a PNG of any other size,
-//!   so there is one per size, the hand-drawn tray sizes included (WPC-347).
+//! - `notification/`: the app icon in the header of ScreenGauge's Windows notifications, which ScreenGauge.exe embeds
+//!   and registers with Windows at each start. Windows draws it at the small icon size and scales a PNG of any other
+//!   size, so there is one per size, the hand-drawn tray sizes included (WPC-347).
 //! - `store/StoreIcon.png`: the Store icon, 300 × 300, uploaded in Partner Center for the Store page.
 
 use std::collections::BTreeMap;

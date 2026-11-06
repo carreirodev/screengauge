@@ -7,8 +7,8 @@
 //! What is approximated, honestly: the blur is taken as along a straight edge, or across the short side of a box, and
 //! applied by distance from the shape's outline, so a corner comes out a little too dark and the end of a long box a
 //! little too light, against what a true blur gives. Each layer's outline is on whole pixels, so its edge is crisp and
-//! the fall-off steps down in bands, `Layers::step` pixels wide, rather than smoothly: with the bands a twentieth of the
-//! blur wide, each step is a few levels of an 8-bit channel. The frozen screen's labels and panels have wider bands
+//! the fall-off steps down in bands, `Layers::step` pixels wide, rather than smoothly: with the bands a twentieth of
+//! the blur wide, each step is a few levels of an 8-bit channel. The frozen screen's labels and panels have wider bands
 //! (`COARSE`), as their layers are few enough not to round away.
 
 use std::f64::consts::SQRT_2;

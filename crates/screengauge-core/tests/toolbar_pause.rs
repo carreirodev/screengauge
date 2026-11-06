@@ -1,6 +1,6 @@
 //! Layer 1 tests of the cursor over the toolbar, the measure through it and minimizing it (v1 spec WPC-296, Toolbar;
-//! ticket WPC-311): the arrow on the toolbar and the thin cross off it, the tool pausing there with its measurement as it
-//! was (the owner's choice in WPC-311), the wheel and the press doing nothing there, the button under the cursor,
+//! ticket WPC-311): the arrow on the toolbar and the thin cross off it, the tool pausing there with its measurement as
+//! it was (the owner's choice in WPC-311), the wheel and the press doing nothing there, the button under the cursor,
 //! Dimensions measuring through the toolbar and the pinned measurements, and the small button the minimized toolbar
 //! becomes, on frozen screens drawn here, without a screen. They look only at the scene the session would draw, the
 //! effects it returns, and where the core says the toolbar is.

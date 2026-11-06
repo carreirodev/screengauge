@@ -138,7 +138,8 @@ impl App {
         Ok(cycles)
     }
 
-    /// The process's kernel and user time as Windows counts it, in steps of the clock tick: a check on the cycle counts.
+    /// The process's kernel and user time as Windows counts it, in steps of the clock tick: a check on the cycle
+    /// counts.
     pub fn times(&self) -> Result<Duration, String> {
         self.running()?;
         let (mut created, mut exited, mut kernel, mut user) = (
@@ -172,8 +173,8 @@ impl App {
             .collect()
     }
 
-    /// Closes the tools as Esc does, posted to a frozen screen window so no key goes to another program, and waits until
-    /// every frozen screen window is gone.
+    /// Closes the tools as Esc does, posted to a frozen screen window so no key goes to another program, and waits
+    /// until every frozen screen window is gone.
     pub fn close_tools(&self, within: Duration) -> Result<(), String> {
         let shown = self.frozen_screens();
         let Some(&first) = shown.first() else {
@@ -193,7 +194,8 @@ impl App {
         Ok(())
     }
 
-    /// Exits ScreenGauge as its tray menu's Exit does, by closing the resident window, and waits for the process to end.
+    /// Exits ScreenGauge as its tray menu's Exit does, by closing the resident window, and waits for the process to
+    /// end.
     pub fn exit(mut self) -> Result<(), String> {
         self.close_and_wait()
     }

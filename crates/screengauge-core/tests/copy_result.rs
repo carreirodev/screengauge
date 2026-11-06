@@ -83,8 +83,8 @@ fn event(cursor: Point, milliseconds: u64, input: Input) -> Event {
     }
 }
 
-/// Clicks inside the button at (1050, 620): Dimensions pins the span there, and Inspect copies the blue. What the press,
-/// which pins and copies, returns.
+/// Clicks inside the button at (1050, 620): Dimensions pins the span there, and Inspect copies the blue. What the
+/// press, which pins and copies, returns.
 fn click(session: &mut Session) -> Vec<Effect> {
     session.handle(event(at(1050, 620), 1000, Input::Move));
     let pressed = session.handle(event(at(1050, 620), 1010, Input::Press));

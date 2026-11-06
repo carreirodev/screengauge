@@ -109,7 +109,8 @@ mod tests {
         };
         use windows::core::w;
 
-        // SAFETY: "STATIC" is a window class of Windows' own; a message-only window is never shown, and destroyed below.
+        // SAFETY: "STATIC" is a window class of Windows' own; a message-only window is never shown, and destroyed
+        // below.
         let window = unsafe {
             CreateWindowExW(
                 WINDOW_EX_STYLE(0),

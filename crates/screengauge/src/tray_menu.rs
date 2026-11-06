@@ -1,7 +1,7 @@
 //! The tray icon's menu, which a right click on the icon opens: "Settings", "Start with Windows", with a check mark
-//! while it is on, and "Exit" (v1 spec WPC-296, the tray icon's right-click menu; WPC-326). ScreenGauge draws it itself, in its theme and at the scale of the monitor it opens on (the spec's
-//! derived rule 1, which follows from ADR 0001); Windows only rounds its corners, draws its 1-pixel border and its
-//! shadow.
+//! while it is on, and "Exit" (v1 spec WPC-296, the tray icon's right-click menu; WPC-326). ScreenGauge draws it
+//! itself, in its theme and at the scale of the monitor it opens on (the spec's derived rule 1, which follows from ADR
+//! 0001); Windows only rounds its corners, draws its 1-pixel border and its shadow.
 //!
 //! It closes with Esc, with a click anywhere else, which takes the front from it, and once an item is chosen. Like
 //! Settings' controls, an item acts only when the left button comes up on the one it went down on; the arrow keys light
