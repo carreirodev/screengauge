@@ -193,7 +193,7 @@ impl Overlay {
             for pixels in outer_pixels(rect.left, rect.top, rect.right(), rect.bottom()) {
                 target.FillRectangle(&self.in_window(&pixels), &self.shade);
             }
-            for dash in dashes(rect, self.dpi) {
+            for dash in dashes(rect, self.dpi()) {
                 target.FillRectangle(&self.in_window(&dash), &self.white);
             }
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);

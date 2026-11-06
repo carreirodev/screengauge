@@ -49,21 +49,21 @@ impl Overlay {
         radius: u32,
         shadow_strength: f32,
     ) -> windows::core::Result<()> {
-        let ring_width = scaled(geometry::RING, self.dpi);
-        let radius = scaled(radius, self.dpi);
+        let ring_width = scaled(geometry::RING, self.dpi());
+        let radius = scaled(radius, self.dpi());
         let outer = self.shaped(panel, radius, 0, 0);
 
         // The shadow is cut out where the panel is: the panel is a little see-through, and CSS never paints an outer
         // shadow inside the box it belongs to.
         let hole = self.geometry_of(&outer)?;
-        let drop = scaled(SHADOW_DROP, self.dpi);
+        let drop = scaled(SHADOW_DROP, self.dpi());
         // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
         // Direct2D only fails the frame at EndDraw.
         unsafe { target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };
         let layers = (0u32..).step_by(SHADOW_STEP);
         for (step, &opacity) in layers.zip(&self.surfaces.shadow_opacities) {
             // The layers start smaller than the panel by the spread and grow from there; their corners grow with them.
-            let grow = scaled(step, self.dpi) - scaled(SHADOW_SPREAD, self.dpi);
+            let grow = scaled(step, self.dpi()) - scaled(SHADOW_SPREAD, self.dpi());
             // SAFETY: as above.
             unsafe { self.surfaces.shadow.SetOpacity(opacity * shadow_strength) };
             let layer = self.shaped(panel, radius, grow, drop);
@@ -73,7 +73,7 @@ impl Overlay {
         // The panel, its border over it, and the highlight along the inside of the border's top: the padding box less
         // itself moved down a pixel.
         let inside = self.shaped(panel, radius, -ring_width, 0);
-        let lower = self.shaped(panel, radius, -ring_width, scaled(1, self.dpi));
+        let lower = self.shaped(panel, radius, -ring_width, scaled(1, self.dpi()));
         let lower = self.geometry_of(&lower)?;
         self.fill_panel(target, &outer, ring_width);
         self.fill_except(target, &inside, &lower, &self.surfaces.highlight)

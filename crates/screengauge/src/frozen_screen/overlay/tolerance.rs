@@ -185,25 +185,25 @@ impl Overlay {
         };
         let panel = place_for(
             at,
-            size(word.width, number.width, self.dpi),
+            size(word.width, number.width, self.dpi()),
             live,
             label,
             self.monitor,
-            self.dpi,
+            self.dpi(),
         );
         self.draw_floating_panel(target, &panel, RADIUS, SHADOW_STRENGTH)?;
 
-        let ring = scaled(geometry::RING, self.dpi);
+        let ring = scaled(geometry::RING, self.dpi());
         let window = self.in_window(&panel);
-        let content_left = window.left + px(ring + scaled(PAD_X, self.dpi));
-        let content_top = window.top + px(ring + scaled(PAD_Y, self.dpi));
+        let content_left = window.left + px(ring + scaled(PAD_X, self.dpi()));
+        let content_top = window.top + px(ring + scaled(PAD_Y, self.dpi()));
 
         // Both texts sit in their line the way CSS does it, as the notice's text does: the line's extra room is shared
         // equally above and below. They share one baseline, on a whole pixel so the letters are crisp: the word's own
         // places it, and the number is drawn at its own distance from it, should its face have another ascent.
-        let line = px(scaled(LINE, self.dpi));
+        let line = px(scaled(LINE, self.dpi()));
         let baseline = word.baseline_in(content_top, line);
-        let number_left = content_left + px(word.width + scaled(GAP, self.dpi));
+        let number_left = content_left + px(word.width + scaled(GAP, self.dpi()));
         // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
         // Direct2D only fails the frame at EndDraw.
         unsafe {
@@ -221,8 +221,8 @@ impl Overlay {
             }
         }
 
-        let bar_left = number_left + px(number.width + scaled(GAP, self.dpi));
-        let bar_top = content_top + px(bar_offset(self.dpi));
+        let bar_left = number_left + px(number.width + scaled(GAP, self.dpi()));
+        let bar_top = content_top + px(bar_offset(self.dpi()));
         self.draw_bar(target, bar_left, bar_top, lit_segments(tolerance));
         Ok(())
     }
@@ -232,11 +232,11 @@ impl Overlay {
     /// corners are antialiased.
     fn draw_bar(&self, target: &ID2D1RenderTarget, left: f32, top: f32, lit: i32) {
         let (width, height) = (
-            scaled(SEGMENT_WIDTH, self.dpi),
-            scaled(SEGMENT_HEIGHT, self.dpi),
+            scaled(SEGMENT_WIDTH, self.dpi()),
+            scaled(SEGMENT_HEIGHT, self.dpi()),
         );
-        let step = width + scaled(SEGMENT_GAP, self.dpi);
-        let radius = px(scaled(SEGMENT_RADIUS, self.dpi));
+        let step = width + scaled(SEGMENT_GAP, self.dpi());
+        let radius = px(scaled(SEGMENT_RADIUS, self.dpi()));
         // SAFETY: drawing calls on a live render target with arguments that outlive them. Out of BeginDraw and EndDraw,
         // Direct2D only fails the frame at EndDraw.
         unsafe {

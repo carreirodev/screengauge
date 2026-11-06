@@ -98,7 +98,7 @@ impl Overlay {
         // pixels, and the target is at 96 DPI, so one unit is one physical pixel.
         unsafe {
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-            for corner in corners(area, self.dpi) {
+            for corner in corners(area, self.dpi()) {
                 target.FillRectangle(&self.in_window(&corner), &self.cyan);
             }
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
@@ -109,16 +109,16 @@ impl Overlay {
     /// label's, as wide as its padding, the camera, the gap and the size.
     fn snip_label(&self, area: &SnipArea) -> windows::core::Result<SnipLabel> {
         let text = self.typeset(&area.label.physical, &self.format)?;
-        let camera = scaled(CAMERA.size, self.dpi);
-        let before_text = camera + scaled(CAMERA_GAP, self.dpi);
-        let size = geometry::pill_size(before_text + text.width, self.dpi);
-        let pill = place_label(area.rect, size, self.monitor, self.dpi);
+        let camera = scaled(CAMERA.size, self.dpi());
+        let before_text = camera + scaled(CAMERA_GAP, self.dpi());
+        let size = geometry::pill_size(before_text + text.width, self.dpi());
+        let pill = place_label(area.rect, size, self.monitor, self.dpi());
         // The text sits as on every label: the middle of its digits on the middle of the pill, on a whole pixel.
-        let font = px(scaled(geometry::TEXT, self.dpi));
+        let font = px(scaled(geometry::TEXT, self.dpi()));
         let window = self.in_window(&pill);
         let middle = (window.top + window.bottom) / 2.0;
         let baseline = whole((middle + self.fonts.cap_height * font / 2.0).round());
-        let pad = scaled(geometry::PAD_X, self.dpi);
+        let pad = scaled(geometry::PAD_X, self.dpi());
         let camera_left = pill.left + pad;
         Ok(SnipLabel {
             label: PlacedLabel {

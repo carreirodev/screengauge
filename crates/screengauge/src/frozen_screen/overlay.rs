@@ -145,11 +145,11 @@ pub struct Overlay {
     /// The toolbar, drawn on a bitmap that every frame lays over the photo. Lost with the rest of the overlay should the
     /// render target be.
     toolbar_cache: RefCell<toolbar_cache::ToolbarCache>,
-    /// The monitor's scale, which the toolbar's parts are laid out at, wherever the scene puts it.
+    /// The monitor's scale: everything is laid out at its DPI (`dpi`), and the toolbar's parts at the scale itself,
+    /// wherever the scene puts it.
     scale: Scale,
     /// The window's monitor in the virtual screen, which is where the window's pixel (0, 0) is.
     monitor: RECT,
-    dpi: u32,
 }
 
 /// Which of the two looks a label has.
@@ -290,8 +290,12 @@ impl Overlay {
             toolbar_cache: RefCell::default(),
             scale,
             monitor: geometry::bounds(monitor)?,
-            dpi,
         })
+    }
+
+    /// The DPI of the monitor's scale, which every size here is scaled to.
+    fn dpi(&self) -> u32 {
+        self.scale.dpi()
     }
 
     /// Draws the pinned measurements, oldest first, and then the live one over what `target` holds, between its
@@ -327,7 +331,7 @@ impl Overlay {
         for (measurement, look) in pinned.chain(live.map(|m| (m, Look::Live))) {
             parts.push(match measurement.content() {
                 Some(content) => bounds::parts(content),
-                None => geometry::parts(measurement, self.dpi),
+                None => geometry::parts(measurement, self.dpi()),
             });
             fills.extend(measurement.content().map(|content| (content, look)));
             match self.label(measurement, look) {
@@ -427,7 +431,7 @@ impl Overlay {
             .transpose()?
             .map(|typeset| {
                 (
-                    geometry::columns(physical.width, typeset.width, self.dpi),
+                    geometry::columns(physical.width, typeset.width, self.dpi()),
                     typeset,
                 )
             });
@@ -436,15 +440,15 @@ impl Overlay {
             .as_ref()
             .map_or(physical.width, |(columns, _)| columns.width);
         let (size, inset) = match look {
-            Look::Live => (geometry::pill_size(text_width, self.dpi), 0),
+            Look::Live => (geometry::pill_size(text_width, self.dpi()), 0),
             Look::Pinned => (
-                geometry::pinned_size(text_width, self.dpi),
-                geometry::border(self.dpi).strip,
+                geometry::pinned_size(text_width, self.dpi()),
+                geometry::border(self.dpi()).strip,
             ),
         };
         let placed = match measurement.content() {
-            Some(content) => Some(bounds::place_label(content, size, self.monitor, self.dpi)),
-            None => geometry::place_label(measurement, size, self.monitor, self.dpi),
+            Some(content) => Some(bounds::place_label(content, size, self.monitor, self.dpi())),
+            None => geometry::place_label(measurement, size, self.monitor, self.dpi()),
         };
         let Some(pill) = placed else {
             return Ok(None);
@@ -452,16 +456,16 @@ impl Overlay {
 
         // The text sits so the middle of its digits is the middle of the pill, on a whole pixel: the layout's own
         // height counts room for letters that drop below the line, which a number never has.
-        let font = px(scaled(geometry::TEXT, self.dpi));
+        let font = px(scaled(geometry::TEXT, self.dpi()));
         let window = self.in_window(&pill);
         let middle = (window.top + window.bottom) / 2.0;
         let baseline = whole((middle + self.fonts.cap_height * font / 2.0).round());
-        let text_left = window.left + px(inset + scaled(geometry::PAD_X, self.dpi));
+        let text_left = window.left + px(inset + scaled(geometry::PAD_X, self.dpi()));
         let logical = after.map(|(columns, text)| {
             // The bar is placed in the virtual screen like the pill and then moved into the window. Its bottom side is
             // measured from the baseline, which is the same one for both parts.
-            let left = pill.left + inset + scaled(geometry::PAD_X, self.dpi) + columns.bar;
-            let bar = geometry::bar(left, baseline + self.monitor.top, self.dpi);
+            let left = pill.left + inset + scaled(geometry::PAD_X, self.dpi()) + columns.bar;
+            let bar = geometry::bar(left, baseline + self.monitor.top, self.dpi());
             PlacedLogical {
                 bar: self.in_window(&bar),
                 text: PlacedText {
@@ -523,7 +527,7 @@ impl Overlay {
         target: &ID2D1RenderTarget,
         label: &PlacedLabel,
     ) -> windows::core::Result<()> {
-        let drop = scaled(geometry::SHADOW_DROP, self.dpi);
+        let drop = scaled(geometry::SHADOW_DROP, self.dpi());
         let pill = &label.pill;
         // SAFETY: a drawing call on a live render target. Out of BeginDraw and EndDraw, Direct2D only fails the frame
         // at EndDraw. The shapes are on whole pixels, so their straight sides are crisp; the corners are antialiased.
@@ -535,7 +539,7 @@ impl Overlay {
         for (grow, opacity) in SHADOW {
             // SAFETY: as above.
             unsafe { self.shade.SetOpacity(opacity) };
-            let shape = self.rounded(pill, scaled(grow, self.dpi), drop);
+            let shape = self.rounded(pill, scaled(grow, self.dpi()), drop);
             match &cut_out {
                 None => {
                     // SAFETY: as above.
@@ -615,7 +619,7 @@ impl Overlay {
     /// a cyan strip. The strip is the pill's own rounded rectangle cut to its first columns, so its outer side follows
     /// the pill's corners.
     fn draw_panel(&self, target: &ID2D1RenderTarget, pill: &RECT) {
-        let border = geometry::border(self.dpi);
+        let border = geometry::border(self.dpi());
         let outer = self.rounded(pill, 0, 0);
         let window = self.in_window(pill);
         let strip = D2D_RECT_F {
@@ -729,7 +733,7 @@ impl Overlay {
 
     /// The pill's rounded rectangle, grown by `grow` pixels on every side and moved `down` pixels.
     fn rounded(&self, pill: &RECT, grow: i32, down: i32) -> D2D1_ROUNDED_RECT {
-        self.shaped(pill, scaled(geometry::RADIUS, self.dpi), grow, down)
+        self.shaped(pill, scaled(geometry::RADIUS, self.dpi()), grow, down)
     }
 
     /// `rect` with corners of `radius` pixels, grown by `grow` pixels on every side (or smaller, should it be negative)

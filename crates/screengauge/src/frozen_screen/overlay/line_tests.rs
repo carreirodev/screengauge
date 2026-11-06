@@ -7,7 +7,7 @@ use super::*;
 
 /// The lines of `m` alone: its outline, then its cyan pixels.
 fn draw_lines(overlay: &Overlay, target: &ID2D1RenderTarget, m: &Measurement) {
-    let parts = [geometry::parts(m, overlay.dpi)];
+    let parts = [geometry::parts(m, overlay.dpi())];
     overlay.draw_outlines(target, &parts);
     overlay.draw_cyan(target, &parts);
 }

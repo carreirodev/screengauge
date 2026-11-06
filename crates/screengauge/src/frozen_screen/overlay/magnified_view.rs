@@ -256,7 +256,7 @@ impl Overlay {
             .as_ref()
             .map(|notice| self.approximate(notice))
             .transpose()?;
-        let radius = scaled(ENLARGEMENT_RADIUS, self.dpi);
+        let radius = scaled(ENLARGEMENT_RADIUS, self.dpi());
         let mask: ID2D1Geometry = self
             .geometry_of(&self.shaped(&places.enlargement, radius, 0, 0))?
             .cast()?;
@@ -407,13 +407,13 @@ impl Overlay {
             &self.magnification_indicator_format,
         )?;
         let (pad_x, pad_y) = (
-            scaled(MAGNIFICATION_INDICATOR_PAD_X, self.dpi),
-            scaled(MAGNIFICATION_INDICATOR_PAD_Y, self.dpi),
+            scaled(MAGNIFICATION_INDICATOR_PAD_X, self.dpi()),
+            scaled(MAGNIFICATION_INDICATOR_PAD_Y, self.dpi()),
         );
-        let line = scaled(MAGNIFICATION_INDICATOR_TEXT, self.dpi);
+        let line = scaled(MAGNIFICATION_INDICATOR_TEXT, self.dpi());
         let corner = RECT {
-            left: enlargement.left + scaled(MAGNIFICATION_INDICATOR_INSET, self.dpi),
-            top: enlargement.top + scaled(MAGNIFICATION_INDICATOR_INSET, self.dpi),
+            left: enlargement.left + scaled(MAGNIFICATION_INDICATOR_INSET, self.dpi()),
+            top: enlargement.top + scaled(MAGNIFICATION_INDICATOR_INSET, self.dpi()),
             right: 0,
             bottom: 0,
         };
@@ -431,7 +431,7 @@ impl Overlay {
             background: rounded_at(
                 self.window_origin(),
                 &area,
-                scaled(MAGNIFICATION_INDICATOR_RADIUS, self.dpi),
+                scaled(MAGNIFICATION_INDICATOR_RADIUS, self.dpi()),
                 0,
                 0,
                 false,
@@ -487,7 +487,7 @@ impl Overlay {
             .as_deref()
             .map(|text| self.typeset(text, &self.logical_format))
             .transpose()?;
-        let columns = line_columns(key.width, physical.width, self.dpi);
+        let columns = line_columns(key.width, physical.width, self.dpi());
 
         let line = geometry::bounds(coordinate.line)?;
         let window = self.in_window(&line);
@@ -498,14 +498,14 @@ impl Overlay {
             layout: text.layout,
         };
         let logical = logical.map(|text| {
-            let height = scaled(geometry::BAR_HEIGHT, self.dpi);
+            let height = scaled(geometry::BAR_HEIGHT, self.dpi());
             // Half the line's spare room above the bar, rounded up as Chromium puts a box on the pixel grid.
             let top = line.top + (line.bottom - line.top - height + 1) / 2;
             let left = line.left + columns.bar;
             let bar = RECT {
                 left,
                 top,
-                right: left + scaled(geometry::BAR_WIDTH, self.dpi),
+                right: left + scaled(geometry::BAR_WIDTH, self.dpi()),
                 bottom: top + height,
             };
             PlacedLogical {
@@ -562,11 +562,11 @@ impl Overlay {
         Ok(PlacedColor {
             swatch: self.shaped(
                 &geometry::bounds(color.swatch)?,
-                scaled(SWATCH_RADIUS, self.dpi),
+                scaled(SWATCH_RADIUS, self.dpi()),
                 0,
                 0,
             ),
-            ring: scaled(SWATCH_RING, self.dpi),
+            ring: scaled(SWATCH_RING, self.dpi()),
             rgb: color.rgb,
             first: place(&color.first, &self.format)?,
             second: color

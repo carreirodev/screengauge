@@ -186,7 +186,7 @@ impl Overlay {
     ) -> windows::core::Result<()> {
         let painter = Painter {
             overlay: self,
-            canvas: Canvas::new(target, &self.factory, self.dpi, self.window_origin())?,
+            canvas: Canvas::new(target, &self.factory, self.dpi(), self.window_origin())?,
             palette: toolbar_palette::palette(self.mode),
         };
         // SAFETY: a drawing call on a live render target. Out of BeginDraw and EndDraw, Direct2D only fails the frame
@@ -209,7 +209,7 @@ impl Overlay {
     ) -> windows::core::Result<()> {
         let painter = Painter {
             overlay: self,
-            canvas: Canvas::new(target, &self.factory, self.dpi, origin)?,
+            canvas: Canvas::new(target, &self.factory, self.dpi(), origin)?,
             palette: toolbar_palette::palette(self.mode),
         };
         // SAFETY: a drawing call on a live render target. Out of BeginDraw and EndDraw, Direct2D only fails the frame

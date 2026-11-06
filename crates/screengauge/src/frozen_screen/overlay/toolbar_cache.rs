@@ -134,7 +134,7 @@ impl Overlay {
             Some(old) => (old.target, old.margins, old.width, old.height),
             None => {
                 let palette = toolbar_palette::palette(self.mode);
-                let margins = toolbar_paint::reach(palette, layout, self.dpi);
+                let margins = toolbar_paint::reach(palette, layout, self.dpi());
                 let width =
                     layout.toolbar.right - layout.toolbar.left + margins.left + margins.right;
                 let height =

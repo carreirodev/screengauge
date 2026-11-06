@@ -84,25 +84,25 @@ impl Overlay {
         let panel = place(
             at,
             side,
-            size(typeset.width, self.dpi),
+            size(typeset.width, self.dpi()),
             self.monitor,
-            self.dpi,
+            self.dpi(),
         );
         self.draw_floating_panel(target, &panel, RADIUS, 1.0)?;
 
-        let ring_width = scaled(geometry::RING, self.dpi);
+        let ring_width = scaled(geometry::RING, self.dpi());
         let window = self.in_window(&panel);
-        let content_left = window.left + px(ring_width + scaled(PAD_LEFT, self.dpi));
-        let content_top = window.top + px(ring_width + scaled(PAD_TOP, self.dpi));
+        let content_left = window.left + px(ring_width + scaled(PAD_LEFT, self.dpi()));
+        let content_top = window.top + px(ring_width + scaled(PAD_TOP, self.dpi()));
         self.draw_sign(target, sign, content_left, content_top)?;
 
         // The text sits in its line the way CSS does it: the line's extra room, above and below the text's own height,
         // is shared equally. Its baseline is on a whole pixel, so the letters are crisp; "Copied" has a letter that
         // drops below the line, so the middle of its digits is no guide here, as it is for a measurement's label.
-        let line = px(scaled(LINE, self.dpi));
+        let line = px(scaled(LINE, self.dpi()));
         let baseline = typeset.baseline_in(content_top, line);
         let origin = dot(
-            content_left + px(scaled(SIGN, self.dpi) + scaled(GAP, self.dpi)),
+            content_left + px(scaled(SIGN, self.dpi()) + scaled(GAP, self.dpi())),
             baseline - typeset.baseline,
         )
         .point;
@@ -141,7 +141,7 @@ impl Overlay {
             factory: &self.factory,
             stroke: &self.stroke,
         };
-        crate::sign::draw(&pen, brush, sign, left, top, px(scaled(SIGN, self.dpi)))
+        crate::sign::draw(&pen, brush, sign, left, top, px(scaled(SIGN, self.dpi())))
     }
 }
 
