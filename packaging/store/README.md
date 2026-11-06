@@ -47,18 +47,22 @@ notification or personal file, because the repository is public and so is the St
 
 1. The AOC 4K monitor at 175%, made the main display in Settings > System > Display, so Chrome opens on it, HDR off, Windows in the light theme, and ScreenGauge's Theme on Automatic. Close every
    other window on that monitor, and turn on Do not disturb, so no notification comes in.
-2. Open the test page in a separate Chrome, full screen, with an empty profile, so none of the owner's tabs,
-   extensions or account can show, and no address bar or taskbar does. In PowerShell 7, from the repository's root:
+2. Open the test page in a separate Chrome window with an empty profile, so none of the owner's tabs, extensions or
+   account can show, placed so the stage sits near the monitor's right edge. Inspect's panel opens below and to the
+   right of the cursor and turns to the left only near the monitor's edge: in a full-screen page, the panel of shot 3
+   would fall off the stage. In PowerShell 7, from the repository's root:
 
    ```
-   & "C:\Program Files\Google\Chrome\Application\chrome.exe" --user-data-dir="$env:TEMP\screengauge-store-shots" --no-first-run --no-default-browser-check --force-color-profile=srgb --kiosk ([Uri](Resolve-Path test-page\test-page.html).Path).AbsoluteUri
+   & "C:\Program Files\Google\Chrome\Application\chrome.exe" --user-data-dir="$env:TEMP\screengauge-store-shots" --no-first-run --no-default-browser-check --force-color-profile=srgb --window-position=880,20 --window-size=1250,800 --app=$(([Uri](Resolve-Path test-page\test-page.html).Path).AbsoluteUri)
    ```
 
-3. Each shot is the page's white stage alone: **2100 × 1260** physical pixels, 28 pixels from the monitor's top and
-   left edges (the stage is 1200 × 720 CSS px, 16 CSS px from the corner, at 175%). The magenta around the stage never
-   shows. Microsoft takes PNG files of 1366 × 768 or larger, up to 10 for the desktop, and recommends at least four.
-4. Drag ScreenGauge's toolbar onto the stage, where it shows in the shot. Keep what each shot is about in the top two
-   thirds: the Store may lay text over the bottom third.
+3. Each shot is the page's white stage alone: **2100 × 1260** physical pixels (the stage is 1200 × 720 CSS px at 175%),
+   found as the white rectangle inside the magenta. In WPC-342 it sat at (1580, 114) on the AOC. The magenta around
+   the stage never shows. Microsoft takes PNG files of 1366 × 768 or larger, up to 10 for the desktop, and recommends at
+   least four.
+4. Put ScreenGauge's toolbar on the stage, where it shows in the shot: in WPC-342, `toolbar_x = 0.93` and
+   `toolbar_y = 0.074` in settings.ini put it over the top row's right cards. Keep what each shot is about in the top
+   two thirds: the Store may lay text over the bottom third.
 5. Take the shot with a delayed grab that doesn't come to the front, such as a script that waits, then copies the screen
    with GDI. The Snipping Tool and Win + Shift + S come to the front, and ScreenGauge closes its tools when another
    program does. Save it as PNG, with no logo or text added on it.
@@ -66,10 +70,10 @@ notification or personal file, because the repository is public and so is the St
 | # | Tool | What is on the stage |
 | --- | --- | --- |
 | 1 | Dimensions, both directions (C) | The cursor inside `card-200x120`, with the measurement on screen: 350 × 210 physical pixels, 200 × 120 logical. One more measurement pinned with a click, in the gap between `card-gap-24-left` and `card-gap-24-right`. |
-| 2 | Bounds | A rectangle dragged loosely around `card-on-gradient`, released so it shrinks to the card and stays pinned with its size. |
+| 2 | Bounds | A rectangle dragged loosely around `text-40`, "Measure 1200 px", released so it shrinks to the text and stays pinned with its size. Not `card-on-gradient`: a rectangle that starts on a gradient keeps its size, as the approved answers say (WPC-332). |
 | 3 | Inspect, color format HEX and RGB | The cursor on the edge of `shadow-blue`, so the magnified view shows the card, its glow and the white, with the color under the cursor. |
 | 4 | Snip | A rectangle being dragged around the text cases, `text-20` to `text-64`, before release. |
-| 5 | Settings | Settings, opened from the toolbar's gear, moved onto the stage, with the default options except Snip's folder: choose a folder whose path has no personal name in it, such as `C:\Snips`, because Settings shows the path and the default one has the Windows user name. The tools close when Settings opens, so the live test page is behind it. |
+| 5 | Settings | Settings, opened from the toolbar's gear, moved onto the stage, with the default options except Snip's folder: choose a folder whose path has no personal name in it, such as `D:\Snips` (a folder at the root of C: needs an administrator), because Settings shows the path and the default one has the Windows user name. The tools close when Settings opens, so the live test page is behind it. |
 
 ## Still to fill at launch
 
