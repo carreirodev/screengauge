@@ -15,7 +15,7 @@ use super::controls::{self, Control, Label, LabelKind, at_right, rounded, whole_
 use super::row_message::Text;
 use super::{layout, snip_card};
 
-use crate::graphics::{Color, color};
+use crate::graphics::Color;
 use crate::look;
 use crate::relief::palette::{self as relief_palette, Shadow, Surface, shadow};
 use crate::relief::{self, Canvas};
@@ -90,8 +90,24 @@ const BUTTON_GAP: u32 = layout::ROW_GAP;
 
 /// The recording field's ring: `look`'s `--accent` at 30%
 /// (`box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 30%, transparent)`).
-const DARK_RING: [Shadow; 1] = [shadow(0, 0, 3, color(0x28, 0xd6, 0xdf, 0.3))];
-const LIGHT_RING: [Shadow; 1] = [shadow(0, 0, 3, color(0x00, 0x7c, 0xbb, 0.3))];
+const DARK_RING: [Shadow; 1] = [shadow(
+    0,
+    0,
+    3,
+    Color {
+        alpha: 0.3,
+        ..look::DARK.accent
+    },
+)];
+const LIGHT_RING: [Shadow; 1] = [shadow(
+    0,
+    0,
+    3,
+    Color {
+        alpha: 0.3,
+        ..look::LIGHT.accent
+    },
+)];
 
 /// The blink (`animation: blink 1.1s infinite`, `@keyframes blink { 50% { opacity: .35; } }`).
 const BLINK: Duration = Duration::from_millis(1100);

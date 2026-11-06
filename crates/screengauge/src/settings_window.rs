@@ -159,11 +159,11 @@ pub fn open(mode: Mode) -> windows::core::Result<()> {
 /// Makes Settings' window, in `mode`'s palette, and shows it in front.
 fn create(mode: Mode) -> windows::core::Result<()> {
     let cursor = event::cursor_now()?;
-    let monitor = monitor::at(POINT {
+    let under = monitor::at(POINT {
         x: cursor.x,
         y: cursor.y,
     })?;
-    let (work, dpi) = (monitor.work, monitor.dpi()?);
+    let (work, dpi) = (under.work, under.dpi()?);
     recorder::opening();
     start_with_windows_row::opening();
     let size = window_size(dpi)?;

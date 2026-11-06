@@ -91,8 +91,8 @@ pub fn register_class(instance: HINSTANCE) -> windows::core::Result<()> {
 /// menu already open closes first. The item chosen goes to `resident`.
 pub fn open(resident: HWND, anchor: POINT, mode: Mode, checked: bool) -> windows::core::Result<()> {
     close();
-    let monitor = monitor::at(anchor)?;
-    let (work, dpi) = (monitor.work, monitor.dpi()?);
+    let under = monitor::at(anchor)?;
+    let (work, dpi) = (under.work, under.dpi()?);
     let size = layout::size_at(dpi);
     let corner = layout::placed(anchor, size, work);
     // SAFETY: no module name, so this is the handle of ScreenGauge.exe itself.

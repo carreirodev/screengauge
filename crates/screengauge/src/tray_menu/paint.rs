@@ -130,7 +130,7 @@ fn check_mark(
     Ok(())
 }
 
-/// The color Windows draws the window's 1-pixel border in: Settings' cards' edge over the menu's top.
+/// The color Windows draws the window's 1-pixel border in: the cards' edge (`look`) over the menu's top.
 pub fn border(mode: Mode) -> [u8; 3] {
     let colors = palette(mode);
     over(colors.edge, colors.top.rgb)
@@ -163,7 +163,7 @@ mod tests {
     const DPIS: [u32; 3] = [96, 120, 168];
 
     #[test]
-    fn the_background_is_settings_window_from_its_top_color_to_its_bottom_one() {
+    fn the_background_runs_from_the_shared_top_color_to_the_bottom_one() {
         for mode in [Mode::Dark, Mode::Light] {
             for dpi in DPIS {
                 let picture = menu(mode, dpi, None);
