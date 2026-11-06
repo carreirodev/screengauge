@@ -264,8 +264,8 @@ impl Overlay {
             number_format: text_format(fonts, tolerance::NUMBER_WEIGHT, tolerance::TEXT, dpi)?,
             magnification_indicator_format: text_format(
                 fonts,
-                magnified_view::INDICATOR_WEIGHT,
-                magnified_view::INDICATOR_TEXT,
+                magnified_view::MAGNIFICATION_INDICATOR_WEIGHT,
+                magnified_view::MAGNIFICATION_INDICATOR_TEXT,
                 dpi,
             )?,
             approximate_format: text_format(

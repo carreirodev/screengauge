@@ -70,13 +70,13 @@ const GRID_OPACITY: f32 = 0.2;
 /// The magnification indicator: `.magtag`, `left: 6px; top: 6px`, a padding of 4px above and below and 6px at the
 /// sides, corners of 6px, a background of black at .6, and its text in white, 700 weight and 11px with a line as tall
 /// as itself.
-const INDICATOR_INSET: u32 = 6;
-const INDICATOR_PAD_X: u32 = 6;
-const INDICATOR_PAD_Y: u32 = 4;
-const INDICATOR_RADIUS: u32 = 6;
-const INDICATOR_FILL_OPACITY: f32 = 0.6;
-pub const INDICATOR_TEXT: u32 = 11;
-pub const INDICATOR_WEIGHT: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT_BOLD;
+const MAGNIFICATION_INDICATOR_INSET: u32 = 6;
+const MAGNIFICATION_INDICATOR_PAD_X: u32 = 6;
+const MAGNIFICATION_INDICATOR_PAD_Y: u32 = 4;
+const MAGNIFICATION_INDICATOR_RADIUS: u32 = 6;
+const MAGNIFICATION_INDICATOR_FILL_OPACITY: f32 = 0.6;
+pub const MAGNIFICATION_INDICATOR_TEXT: u32 = 11;
+pub const MAGNIFICATION_INDICATOR_WEIGHT: DWRITE_FONT_WEIGHT = DWRITE_FONT_WEIGHT_BOLD;
 
 /// The readout's rows (`.info .row`): the key `X` or `Y` in a box at least this wide, then a gap, then the physical
 /// number. A logical part follows after a gap and a margin, the label's bar (`geometry::BAR_WIDTH` wide and
@@ -395,8 +395,8 @@ impl Overlay {
         }
     }
 
-    /// The magnification indicator for `factor`, laid out with its top left corner `INDICATOR_INSET` inside
-    /// `enlargement`'s.
+    /// The magnification indicator for `factor`, laid out with its top left corner `MAGNIFICATION_INDICATOR_INSET`
+    /// inside `enlargement`'s.
     fn magnification_indicator(
         &self,
         enlargement: &RECT,
@@ -407,13 +407,13 @@ impl Overlay {
             &self.magnification_indicator_format,
         )?;
         let (pad_x, pad_y) = (
-            scaled(INDICATOR_PAD_X, self.dpi),
-            scaled(INDICATOR_PAD_Y, self.dpi),
+            scaled(MAGNIFICATION_INDICATOR_PAD_X, self.dpi),
+            scaled(MAGNIFICATION_INDICATOR_PAD_Y, self.dpi),
         );
-        let line = scaled(INDICATOR_TEXT, self.dpi);
+        let line = scaled(MAGNIFICATION_INDICATOR_TEXT, self.dpi);
         let corner = RECT {
-            left: enlargement.left + scaled(INDICATOR_INSET, self.dpi),
-            top: enlargement.top + scaled(INDICATOR_INSET, self.dpi),
+            left: enlargement.left + scaled(MAGNIFICATION_INDICATOR_INSET, self.dpi),
+            top: enlargement.top + scaled(MAGNIFICATION_INDICATOR_INSET, self.dpi),
             right: 0,
             bottom: 0,
         };
@@ -431,7 +431,7 @@ impl Overlay {
             background: rounded_at(
                 self.window_origin(),
                 &area,
-                scaled(INDICATOR_RADIUS, self.dpi),
+                scaled(MAGNIFICATION_INDICATOR_RADIUS, self.dpi),
                 0,
                 0,
                 false,
@@ -455,7 +455,7 @@ impl Overlay {
         // Direct2D only fails the frame at EndDraw. Each brush's opacity is set before it is used.
         unsafe {
             target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            self.shade.SetOpacity(INDICATOR_FILL_OPACITY);
+            self.shade.SetOpacity(MAGNIFICATION_INDICATOR_FILL_OPACITY);
             target.FillRoundedRectangle(&magnification_indicator.background, &self.shade);
             // Grayscale, not ClearType: color fringes would show on the see-through black.
             target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);

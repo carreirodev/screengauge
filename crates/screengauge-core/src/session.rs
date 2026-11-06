@@ -43,8 +43,7 @@ const NOTICE_LASTS: Duration = Duration::from_millis(1300);
 /// How long the tolerance indicator stays after the mouse wheel's last notch (v1 spec WPC-296, Tolerance).
 const TOLERANCE_INDICATOR_LASTS: Duration = Duration::from_secs(1);
 
-/// How long the magnification indicator stays after the mouse wheel's last notch (v1 spec WPC-296,
-/// Inspect).
+/// How long the magnification indicator stays after the mouse wheel's last notch (v1 spec WPC-296, Inspect).
 const MAGNIFICATION_INDICATOR_LASTS: Duration = Duration::from_secs(1);
 
 /// How far the mouse wheel turns in a notch, in the units of [`Input::Wheel`]: Windows' WHEEL_DELTA.
