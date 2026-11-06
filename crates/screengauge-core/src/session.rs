@@ -504,16 +504,17 @@ impl Session {
         if drag.is_click() {
             return Vec::new();
         }
-        let nothing_found = match (self.remembered.last_tool, measured, snipped) {
-            (Tool::Snip, _, Some(area)) => return self.take_image(&area, time),
-            (Tool::Snip, _, None) => Message::NoContentFoundToSnip,
-            (_, Some(measurement), _) => return self.pin_and_copy(measurement, held.shift),
-            (_, None, _) => Message::NoContentFound,
-        };
-        let monitor = self.notice_monitor(drag.monitor);
-        self.show(nothing_found, monitor, uptime)
-            .into_iter()
-            .collect()
+        let tool = self.remembered.last_tool;
+        match (tool, measured, snipped) {
+            (Tool::Snip, _, Some(area)) => self.take_image(&area, time),
+            (Tool::Snip, _, None) | (_, None, _) => {
+                let monitor = self.notice_monitor(drag.monitor);
+                self.show(Message::NoContentFound(tool), monitor, uptime)
+                    .into_iter()
+                    .collect()
+            }
+            (_, Some(measurement), _) => self.pin_and_copy(measurement, held.shift),
+        }
     }
 
     /// Takes the image of `area`, from the frozen screen and never from the screen as it is now, at `time`, and sends it

@@ -349,9 +349,9 @@ fn an_area_of_nothing_but_background_takes_no_image_and_says_no_content_found() 
             .all(|effect| matches!(effect, Effect::WakeAt(_))),
         "{effects:?}"
     );
-    assert_eq!(notice(&session), Some(Message::NoContentFoundToSnip));
+    assert_eq!(notice(&session), Some(Message::NoContentFound(Tool::Snip)));
     assert_eq!(
-        Message::NoContentFoundToSnip.text(),
+        Message::NoContentFound(Tool::Snip).text(),
         "No content found · Hold Alt to snip the rectangle"
     );
 }

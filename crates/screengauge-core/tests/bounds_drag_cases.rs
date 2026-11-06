@@ -216,7 +216,7 @@ fn a_drag_over_nothing_but_the_reference_color_shows_no_content_found_and_pins_a
     assert_eq!(
         session.scene().notice.copied(),
         Some(Notice {
-            message: Message::NoContentFound,
+            message: Message::NoContentFound(Tool::Bounds),
             at: at(400, 300),
             monitor: 0,
             side: NoticeSide::Above,
@@ -226,8 +226,8 @@ fn a_drag_over_nothing_but_the_reference_color_shows_no_content_found_and_pins_a
     // which measures the drawn rectangle itself (the owner's choice in WPC-314).
     assert_eq!(
         (
-            Message::NoContentFound.text(),
-            Message::NoContentFound.sign()
+            Message::NoContentFound(Tool::Bounds).text(),
+            Message::NoContentFound(Tool::Bounds).sign()
         ),
         (
             "No content found · Hold Alt to measure the rectangle",
@@ -501,8 +501,8 @@ fn a_drag_counts_once_the_cursor_goes_more_than_4_pixels_from_the_press_along_ei
     for (to, shown_after) in [
         (at(1002, 601), "3 x 2"),
         (at(1001, 602), "2 x 3"),
-        (at(992, 597), "NoContentFound"),
-        (at(997, 592), "NoContentFound"),
+        (at(992, 597), "NoContentFound(Bounds)"),
+        (at(997, 592), "NoContentFound(Bounds)"),
     ] {
         let mut session = open(vec![button()], at(997, 597));
         let effects = drag_through(&mut session, at(997, 597), &[to], Held::default(), 1000);

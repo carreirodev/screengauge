@@ -240,13 +240,11 @@ pub enum NoticeSide {
 pub enum Message {
     /// A copy to the clipboard was made.
     Copied,
-    /// A drawn rectangle held nothing but the reference color, so nothing was pinned or copied (v1 spec WPC-296, Bounds).
-    /// It says how to measure the drawn rectangle itself, since nothing else on screen tells of Alt (the owner's choice
-    /// in WPC-314).
-    NoContentFound,
-    /// The same for Snip: a drawn rectangle held nothing but the reference color, so no image was taken and the
-    /// clipboard stays as it was (v1 spec WPC-296, Snip). It tells of Alt as Bounds' does, in Snip's words.
-    NoContentFoundToSnip,
+    /// A drawn rectangle held nothing but the reference color, with the tool that drew it: Bounds pinned and copied
+    /// nothing (v1 spec WPC-296, Bounds), and Snip took no image, so the clipboard stays as it was (v1 spec WPC-296,
+    /// Snip). It says how to take the drawn rectangle itself, in the tool's words, since nothing else on screen tells
+    /// of Alt (the owner's choice in WPC-314).
+    NoContentFound(Tool),
     /// The Snip's image was written to a file, with Destination at File.
     Saved,
     /// The Snip's image went to the clipboard and was written to a file, with Destination at Both.
@@ -269,8 +267,10 @@ impl Message {
     pub fn text(self) -> &'static str {
         match self {
             Message::Copied => "Copied",
-            Message::NoContentFound => "No content found · Hold Alt to measure the rectangle",
-            Message::NoContentFoundToSnip => "No content found · Hold Alt to snip the rectangle",
+            Message::NoContentFound(Tool::Snip) => {
+                "No content found · Hold Alt to snip the rectangle"
+            }
+            Message::NoContentFound(_) => "No content found · Hold Alt to measure the rectangle",
             Message::Saved => "Saved",
             Message::CopiedAndSaved => "Copied and saved",
             Message::CouldntSave => "Couldn't save.",
@@ -284,8 +284,7 @@ impl Message {
     pub fn sign(self) -> Sign {
         match self {
             Message::Copied | Message::Saved | Message::CopiedAndSaved => Sign::Ok,
-            Message::NoContentFound
-            | Message::NoContentFoundToSnip
+            Message::NoContentFound(_)
             | Message::CouldntSave
             | Message::CouldntSaveButCopied
             | Message::CouldntCopy
