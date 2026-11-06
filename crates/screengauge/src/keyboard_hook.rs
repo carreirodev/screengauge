@@ -1,5 +1,5 @@
-//! The keyboard hook of Settings' global shortcut recorder (WPC-323): while the field records, a low-level keyboard hook
-//! keeps every key from Windows and the other programs, so a combination with Win records without the Start menu
+//! The keyboard hook of Settings' global shortcut recorder (WPC-323): while the field records, a low-level keyboard
+//! hook keeps every key from Windows and the other programs, so a combination with Win records without the Start menu
 //! opening, and tells the Settings window which key went down or up. It is how PowerToys records shortcuts, and how
 //! WPC-281's hardware test recorded `Win + Alt + J` (`prototype/hardware-test-keys`, `keys/llhook.rs`).
 //!
@@ -17,8 +17,8 @@
 //! The hook runs on a thread of its own, at a raised priority, whose message loop nothing else can hold up: Windows
 //! removes a hook that takes longer than its timeout to answer, silently. Each recording installs the hook afresh, so a
 //! hook removed that way never lasts past one recording; the Settings window sees keys reach it while it records and
-//! stops recording should that happen. The hook procedure only decides, and posts what it saw to the Settings window; it
-//! never logs, paints or waits.
+//! stops recording should that happen. The hook procedure only decides, and posts what it saw to the Settings window;
+//! it never logs, paints or waits.
 
 use std::cell::Cell;
 use std::sync::mpsc;

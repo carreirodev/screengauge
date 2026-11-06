@@ -3,7 +3,8 @@
 //! What the file holds and how its text reads belongs to the core (`screengauge_core::settings`).
 //!
 //! What the file holds is kept here once, with the file to save it to: the tools read it at every call, Settings reads
-//! and changes it, and the remembered state is saved into it, so no part ever saves a copy that undoes another's change.
+//! and changes it, and the remembered state is saved into it, so no part ever saves a copy that undoes another's
+//! change.
 
 use std::cell::RefCell;
 use std::ffi::OsString;

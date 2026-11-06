@@ -284,8 +284,8 @@ pub fn remove(notification: Notification) -> windows::core::Result<()> {
     )
 }
 
-/// The notification's XML: `text` alone, with no title, and `launch`, which its click hands the activator. ToastGeneric,
-/// because the older templates never start the activator.
+/// The notification's XML: `text` alone, with no title, and `launch`, which its click hands the activator.
+/// ToastGeneric, because the older templates never start the activator.
 fn content(text: &str, launch: &str) -> String {
     format!(
         "<toast launch=\"{}\"><visual><binding template=\"ToastGeneric\"><text>{}</text></binding></visual></toast>",

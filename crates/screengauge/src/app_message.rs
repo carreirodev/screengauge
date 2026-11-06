@@ -4,8 +4,8 @@
 
 use windows::Win32::UI::WindowsAndMessaging::WM_APP;
 
-/// Declares each message as a `pub const` at WM_APP plus its offset, and lists them all in [`EVERY`], so no message
-/// is left out of the test.
+/// Declares each message as a `pub const` at WM_APP plus its offset, and lists them all in `EVERY`, the tests' list,
+/// so no message is left out of the test.
 macro_rules! app_messages {
     ($($(#[$doc:meta])* $name:ident = $offset:literal;)+) => {
         $(

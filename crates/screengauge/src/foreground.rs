@@ -6,9 +6,9 @@
 //! the front by Alt+Tab or its taskbar button it closes them as another program would, rather than taking the keyboard
 //! behind the frozen screen, where Esc would no longer reach the tools (WPC-319). The windows Settings owns, Windows'
 //! folder window (WPC-322), count as Settings: with Save As waiting, the frozen screen and Save As are already aside
-//! when the folder window opens, so it never brings them back over itself, and with the tools called over it, it
-//! closes them as Settings does, for the same reason. So does the tray icon's menu (WPC-325): opened while Save As
-//! waits aside, it would otherwise bring the frozen screen and Save As back over itself, and close as it lost the front.
+//! when the folder window opens, so it never brings them back over itself, and with the tools called over it, it closes
+//! them as Settings does, for the same reason. So does the tray icon's menu (WPC-325): opened while Save As waits
+//! aside, it would otherwise bring the frozen screen and Save As back over itself, and close as it lost the front.
 
 use std::cell::Cell;
 

@@ -61,9 +61,9 @@ thread_local! {
     static FROZEN_SCREEN: RefCell<Option<FrozenScreen>> = const { RefCell::new(None) };
 }
 
-/// Calls ScreenGauge right away when the user opened it, since opening it is a call, but not when Windows started it for
-/// a notification's click or at sign-in (`started_by`), then runs until the user exits from the tray icon, with what the
-/// settings file holds and the file to save it to.
+/// Calls ScreenGauge right away when the user opened it, since opening it is a call, but not when Windows started it
+/// for a notification's click or at sign-in (`started_by`), then runs until the user exits from the tray icon, with
+/// what the settings file holds and the file to save it to.
 pub fn run(
     file: Option<SettingsFile>,
     stored: Stored,

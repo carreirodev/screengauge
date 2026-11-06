@@ -1,6 +1,7 @@
 //! The COM activator: what Windows calls when a notification is clicked, in the corner of the screen or in the
 //! notification center, with ScreenGauge running or not. Windows starts the `.exe` with -Embedding for it when
-//! ScreenGauge is closed (WPC-347, scenario s7); the class is registered at every start, so that process takes the click.
+//! ScreenGauge is closed (WPC-347, scenario s7); the class is registered at every start, so that process takes the
+//! click.
 
 use std::cell::Cell;
 use std::ffi::c_void;

@@ -118,8 +118,8 @@ pub enum StartedBy {
     /// COM, to take a notification's click with ScreenGauge closed: COM adds -Embedding to the command line registered
     /// for the activator, which is the `.exe`'s path alone (WPC-347, scenario s7).
     Click,
-    /// Windows, at sign-in, from the `Run` value "Start with Windows" writes (WPC-326), or the Store copy's startup task
-    /// (WPC-336): ScreenGauge starts hidden.
+    /// Windows, at sign-in, from the `Run` value "Start with Windows" writes (WPC-326), or the Store copy's startup
+    /// task (WPC-336): ScreenGauge starts hidden.
     SignIn,
 }
 

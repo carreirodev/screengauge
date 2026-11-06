@@ -348,19 +348,21 @@ struct Shown<K> {
     handed: Handed,
     seen: Option<Seen>,
     /// What Windows needs kept to tell of it, held until the next of its kind replaces it, so its events still come
-    /// once Windows is done with it. Never read: holding it is the point.
+    /// once Windows is done with it, or until Windows tells it failed, after which nothing more comes. Never read:
+    /// holding it is the point.
     _kept: K,
 }
 
 /// The notifications of this process, `K` being what is kept of each one shown ([`System::Kept`]).
 #[derive(Debug)]
 struct State<K> {
-    /// This process, in each `launch`, so a click on a notification an earlier ScreenGauge showed is never taken for one
-    /// of this process's.
+    /// This process, in each `launch`, so a click on a notification an earlier ScreenGauge showed is never taken for
+    /// one of this process's.
     process: u32,
     /// How many notifications this process has shown.
     count: u64,
-    /// Waiting for the startup call's photo, for the tools to close or for Windows to take them, in the order they came.
+    /// Waiting for the startup call's photo, for the tools to close or for Windows to take them, in the order they
+    /// came.
     waiting: Vec<Notification>,
     /// The latest of each kind shown, the only place it is kept.
     shown: Vec<Shown<K>>,
@@ -624,7 +626,8 @@ mod tests {
 
     #[test]
     fn a_notification_waits_while_the_tools_are_open_and_shows_once_they_close() {
-        // The frozen screen counts as a full-screen program: shown now, it would go silently to the notification center.
+        // The frozen screen counts as a full-screen program: shown now, it would go silently to the notification
+        // center.
         let mut state = state();
         let mut windows = Recorded::default();
         state.tools_opened();
