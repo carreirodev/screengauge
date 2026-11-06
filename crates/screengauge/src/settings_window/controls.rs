@@ -65,28 +65,12 @@ const KNOB_ON: [Stop; 2] = [
     stop(1.0, rgb(0xe6, 0xe6, 0xe6)),
 ];
 
-/// The colors of the controls that aren't the toolbar's: `--well`, the sunken box under the choice, the number and an
-/// off switch; and `--panel-ink`, the number's.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Colors {
-    pub well: Color,
-    pub ink: Color,
-}
-
-pub const DARK: Colors = Colors {
-    well: color(0, 0, 0, 0.38),
-    ink: look::DARK.ink,
-};
-
-pub const LIGHT: Colors = Colors {
-    well: color(70, 60, 45, 0.11),
-    ink: look::LIGHT.ink,
-};
-
-pub fn colors(mode: Mode) -> &'static Colors {
+/// The one color of the controls that isn't the toolbar's or the page's: `--well`, the sunken box under the choice,
+/// the number and an off switch. The number's ink is the page's (`look`).
+pub fn well(mode: Mode) -> Color {
     match mode {
-        Mode::Light => &LIGHT,
-        Mode::Dark => &DARK,
+        Mode::Light => color(70, 60, 45, 0.11),
+        Mode::Dark => color(0, 0, 0, 0.38),
     }
 }
 
@@ -345,9 +329,8 @@ pub fn paint(
     pointer: Pointer,
 ) -> windows::core::Result<()> {
     let relief = relief_palette::palette(mode);
-    let colors = colors(mode);
     let well = |inset: &'static [Shadow]| Surface {
-        base: Some(colors.well),
+        base: Some(well(mode)),
         gradient: &[],
         border: None,
         outer: &[],
@@ -463,7 +446,6 @@ pub enum LabelKind {
 /// The words and signs `laid` shows, in `mode`, centered in their boxes.
 pub fn labels(laid: &Laid, mode: Mode, pointer: Pointer) -> Vec<Label> {
     let relief = relief_palette::palette(mode);
-    let colors = colors(mode);
     match laid {
         Laid::Switch { .. } | Laid::Path { .. } => Vec::new(),
         Laid::Button {
@@ -513,7 +495,7 @@ pub fn labels(laid: &Laid, mode: Mode, pointer: Pointer) -> Vec<Label> {
                 Label {
                     place: *number,
                     text: value.to_string(),
-                    ink: colors.ink,
+                    ink: look::palette(mode).ink,
                     kind: LabelKind::Number,
                     shrinks: false,
                 },

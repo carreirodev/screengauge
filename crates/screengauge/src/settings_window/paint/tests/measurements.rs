@@ -92,7 +92,7 @@ fn the_number_between_minus_and_plus_is_the_default_tolerance() {
         };
         let inked = (number.top..number.bottom)
             .flat_map(|y| (number.left..number.right).map(move |x| (x, y)))
-            .filter(|&(x, y)| near(page.at(x, y), controls::DARK.ink, 40))
+            .filter(|&(x, y)| near(page.at(x, y), crate::look::DARK.ink, 40))
             .count();
         assert!(inked > 20, "{value}: {inked} pixels of ink");
         let pixels: Vec<[u8; 3]> = (number.top..number.bottom)
@@ -120,7 +120,7 @@ fn the_three_digits_of_the_highest_tolerance_fit_inside_the_numbers_box() {
         let plus = page.place_of(Control::ToleranceUp);
         let inked: Vec<i32> = (minus.top..minus.bottom)
             .flat_map(|y| (minus.right..plus.left).map(move |x| (x, y)))
-            .filter(|&(x, y)| near(page.at(x, y), controls::DARK.ink, 40))
+            .filter(|&(x, y)| near(page.at(x, y), crate::look::DARK.ink, 40))
             .map(|(x, _)| x)
             .collect();
         let (first, last) = (

@@ -311,7 +311,7 @@ impl Laid {
 /// Paints the field's well and its keys in relief, with their shadows, in `mode`.
 pub fn paint(canvas: &Canvas, laid: &Laid, mode: Mode) -> windows::core::Result<()> {
     let relief = relief_palette::palette(mode);
-    let well = controls::colors(mode).well;
+    let well = controls::well(mode);
     let accent = look::palette(mode).accent;
     let ring = match mode {
         Mode::Dark => &DARK_RING,

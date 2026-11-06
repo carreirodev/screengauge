@@ -45,6 +45,9 @@ pub use layout::Item;
 
 const CLASS_NAME: PCWSTR = w!("ScreenGauge.TrayMenu");
 
+/// What a failure while drawing the menu is logged under.
+const DRAWING: &str = "tray menu: drawing it";
+
 thread_local! {
     /// The menu while it is open.
     static WINDOW: Cell<Option<HWND>> = const { Cell::new(None) };
@@ -91,8 +94,7 @@ pub fn register_class(instance: HINSTANCE) -> windows::core::Result<()> {
 /// menu already open closes first. The item chosen goes to `resident`.
 pub fn open(resident: HWND, anchor: POINT, mode: Mode, checked: bool) -> windows::core::Result<()> {
     close();
-    let under = monitor::at(anchor)?;
-    let (work, dpi) = (under.work, under.dpi()?);
+    let (work, dpi) = monitor::at(anchor)?.work_and_dpi()?;
     let size = layout::size_at(dpi);
     let corner = layout::placed(anchor, size, work);
     // SAFETY: no module name, so this is the handle of ScreenGauge.exe itself.
@@ -264,7 +266,7 @@ extern "system" fn window_proc(
         // Direct2D paints every pixel; erasing first would only flash.
         WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => {
-            drawn_window::paint(hwnd, "tray menu: drawing it", || draw(hwnd));
+            drawn_window::paint(hwnd, DRAWING, || draw(hwnd));
             LRESULT(0)
         }
         WM_MOUSEMOVE => {
@@ -424,7 +426,7 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
             },
         )
     };
-    drawn_window::frame(hwnd, &TARGET, made, "tray menu: drawing it", |target| {
+    drawn_window::frame(hwnd, &TARGET, made, DRAWING, |target| {
         paint::draw(target, &fonts, MODE.get(), dpi, LIT.get(), CHECKED.get())
     })?;
     Ok(())

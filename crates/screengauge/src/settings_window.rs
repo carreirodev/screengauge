@@ -77,6 +77,9 @@ const STYLE: WINDOW_STYLE =
 /// No extended style: a window with no owner and not a tool window is what shows on the taskbar and in Alt+Tab.
 const EX_STYLE: WINDOW_EX_STYLE = WINDOW_EX_STYLE(0);
 
+/// What a failure while drawing Settings is logged under.
+const DRAWING: &str = "Settings: drawing it";
+
 /// What "Project page" opens in the browser: the repository the workspace's manifest names.
 const PROJECT_PAGE: &str = env!("CARGO_PKG_REPOSITORY");
 
@@ -159,11 +162,11 @@ pub fn open(mode: Mode) -> windows::core::Result<()> {
 /// Makes Settings' window, in `mode`'s palette, and shows it in front.
 fn create(mode: Mode) -> windows::core::Result<()> {
     let cursor = event::cursor_now()?;
-    let under = monitor::at(POINT {
+    let (work, dpi) = monitor::at(POINT {
         x: cursor.x,
         y: cursor.y,
-    })?;
-    let (work, dpi) = (under.work, under.dpi()?);
+    })?
+    .work_and_dpi()?;
     recorder::opening();
     start_with_windows_row::opening();
     let size = window_size(dpi)?;
@@ -494,7 +497,7 @@ extern "system" fn window_proc(
         // Direct2D paints every pixel; erasing first would only flash.
         WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => {
-            drawn_window::paint(hwnd, "Settings: drawing it", || draw(hwnd));
+            drawn_window::paint(hwnd, DRAWING, || draw(hwnd));
             LRESULT(0)
         }
         WM_SETCURSOR
@@ -879,7 +882,7 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
         hwnd,
         &TARGET,
         || graphics::window_target(hwnd, size),
-        "Settings: drawing it",
+        DRAWING,
         |target| {
             let surface = paint::Surface {
                 target,

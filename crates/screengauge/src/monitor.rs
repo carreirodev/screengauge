@@ -49,8 +49,13 @@ fn described(handle: HMONITOR) -> windows::core::Result<Monitor> {
 }
 
 impl Monitor {
+    /// The monitor's work area and DPI, which a window opening on it is placed and sized by.
+    pub fn work_and_dpi(&self) -> windows::core::Result<(RECT, u32)> {
+        Ok((self.work, self.dpi()?))
+    }
+
     /// The monitor's DPI: 96 at 100%.
-    pub fn dpi(&self) -> windows::core::Result<u32> {
+    fn dpi(&self) -> windows::core::Result<u32> {
         let (mut dpi, mut unused) = (0, 0);
         // SAFETY: fills two locals.
         unsafe { GetDpiForMonitor(self.handle, MDT_EFFECTIVE_DPI, &mut dpi, &mut unused) }?;
