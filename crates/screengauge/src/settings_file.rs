@@ -13,8 +13,10 @@ use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
 
 use screengauge_core::settings::{self, Damaged, Reset, Stored};
+use windows::Win32::Foundation::E_FAIL;
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{FOLDERID_LocalAppData, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+use windows::core::Error;
 
 use crate::log;
 use crate::notification::{self, Notification};
@@ -38,12 +40,13 @@ pub fn keep(file: Option<SettingsFile>, stored: Stored) {
     KEPT.set(Some(Kept { file, stored }));
 }
 
-/// What the settings file holds now, Settings' changes and the remembered state included.
-pub fn current() -> io::Result<Stored> {
+/// What the settings file holds now, Settings' changes and the remembered state included. A Windows error, since the
+/// callers are Windows code: it fails only before the file was kept at startup.
+pub fn current() -> windows::core::Result<Stored> {
     KEPT.with_borrow(|kept| {
         kept.as_ref()
             .map(|kept| kept.stored.clone())
-            .ok_or_else(not_kept)
+            .ok_or_else(|| Error::new(E_FAIL, not_kept().to_string()))
     })
 }
 

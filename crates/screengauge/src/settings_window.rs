@@ -922,9 +922,7 @@ fn draw(hwnd: HWND) -> windows::core::Result<()> {
     let dpi = unsafe { GetDpiForWindow(hwnd) };
     let fonts = graphics::fonts()?;
     let factory = graphics::factory()?;
-    let options = settings_file::current()
-        .map_err(|e| Error::new(E_FAIL, e.to_string()))?
-        .options;
+    let options = settings_file::current()?.options;
     let shown = paint::Shown {
         recorder: recorder::view(options.global_shortcut),
         start_with_windows: start_with_windows_row::is_on(),

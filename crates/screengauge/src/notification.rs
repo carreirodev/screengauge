@@ -58,9 +58,7 @@ impl Notification {
                 "Your settings were damaged and have been reset. A copy was kept.".to_owned()
             }
             Notification::ShortcutBusy => {
-                let stored =
-                    settings_file::current().map_err(|e| Error::new(E_FAIL, e.to_string()))?;
-                shortcut_busy_text(stored.options.global_shortcut)
+                shortcut_busy_text(settings_file::current()?.options.global_shortcut)
             }
         })
     }

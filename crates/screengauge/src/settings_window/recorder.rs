@@ -15,7 +15,7 @@ use std::cell::{Cell, RefCell};
 use std::time::Instant;
 
 use screengauge_core::settings::{Change, Recorder, Shortcut, Step, Tried};
-use windows::Win32::Foundation::{E_FAIL, ERROR_HOTKEY_ALREADY_REGISTERED, HWND, LPARAM, WPARAM};
+use windows::Win32::Foundation::{ERROR_HOTKEY_ALREADY_REGISTERED, HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
 use windows::core::Error;
 
@@ -307,10 +307,7 @@ fn measure() -> bool {
 /// the row. The message showing already stays as it was measured: its room doesn't change with the keys held
 /// (`message_room`).
 fn measured() -> windows::core::Result<(Option<Message>, Option<Grown>)> {
-    let shortcut = settings_file::current()
-        .map_err(|e| Error::new(E_FAIL, e.to_string()))?
-        .options
-        .global_shortcut;
+    let shortcut = settings_file::current()?.options.global_shortcut;
     let recorder = RECORDER.get();
     let busy = global_shortcut::is_busy().then_some(shortcut);
     let Some((text, band)) =

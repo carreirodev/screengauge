@@ -336,7 +336,7 @@ fn open(
     let Stored {
         options,
         remembered,
-    } = settings_file::current().map_err(|e| Error::new(E_FAIL, e.to_string()))?;
+    } = settings_file::current()?;
     let mode = theme::mode(options.theme);
     let session = Session::open(Opening {
         frozen_screen,
@@ -465,11 +465,9 @@ fn open_tray_menu(resident: HWND, anchor: POINT) {
         },
         StartWithWindows::is_on,
     );
-    let opened = settings_file::current()
-        .map_err(|e| Error::new(E_FAIL, e.to_string()))
-        .and_then(|stored| {
-            tray_menu::open(resident, anchor, theme::mode(stored.options.theme), checked)
-        });
+    let opened = settings_file::current().and_then(|stored| {
+        tray_menu::open(resident, anchor, theme::mode(stored.options.theme), checked)
+    });
     if let Err(e) = opened {
         log::failure("tray menu: opening it", &e);
     }
@@ -485,10 +483,8 @@ fn click_start_with_windows() {
 
 /// Opens Settings, or brings it to the front, in the palette of the theme the settings file holds.
 fn open_settings() {
-    let theme = settings_file::current()
-        .map(|stored| stored.options.theme)
-        .map_err(|e| Error::new(E_FAIL, e.to_string()));
-    let opened = theme.and_then(|theme| settings_window::open(theme::mode(theme)));
+    let opened = settings_file::current()
+        .and_then(|stored| settings_window::open(theme::mode(stored.options.theme)));
     if let Err(e) = opened {
         log::failure("Settings: opening it", &e);
     }
