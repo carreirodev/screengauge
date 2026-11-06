@@ -128,6 +128,32 @@ impl Drawn {
         let logical = bar + self.sized(1) + self.sized(7) + self.sized(8);
         (physical, bar, logical)
     }
+
+    /// The ink of the one text `blanked` blanks: the readout's pixels that change when the view is drawn again as
+    /// `blanked`. Checks there is some, and that all of it is inside `line`, the text's own line; `what` names the text
+    /// in a failure.
+    fn blanked_ink(
+        &self,
+        canvas: &Canvas,
+        photo: &ID2D1Bitmap,
+        blanked: MagnifiedView,
+        line: RECT,
+        what: &str,
+        context: &str,
+    ) -> Vec<(i32, i32)> {
+        let without = draw_view(canvas, photo, self.mode, self.dpi, blanked);
+        let changed: Vec<(i32, i32)> = pixels(self.readout())
+            .filter(|&(x, y)| at(&self.picture, x, y) != at(&without.picture, x, y))
+            .collect();
+        assert!(changed.len() > 30, "{} pixels, {context}", changed.len());
+        for &(x, y) in &changed {
+            assert!(
+                inside(&line, x, y),
+                "{what} at ({x}, {y}) outside its line {line:?}, {context}"
+            );
+        }
+        changed
+    }
 }
 
 /// The widest realistic readout: a monitor 3840 by 2560 at 150% or 175%, the cursor in the far corner, on a light gray.
@@ -192,17 +218,8 @@ fn the_colors_texts_stay_inside_their_lines_for_the_widest_values_in_every_color
                     };
                     let line = ints(text.line);
                     text.text = " ".to_owned();
-                    let without = draw_view(&canvas, &photo, mode, dpi, blanked);
-                    let changed: Vec<(i32, i32)> = pixels(readout)
-                        .filter(|&(x, y)| at(&drawn.picture, x, y) != at(&without.picture, x, y))
-                        .collect();
-                    assert!(changed.len() > 30, "{} pixels, {context}", changed.len());
-                    for &(x, y) in &changed {
-                        assert!(
-                            inside(&line, x, y),
-                            "text at ({x}, {y}) outside its line {line:?}, {context}"
-                        );
-                    }
+                    let changed =
+                        drawn.blanked_ink(&canvas, &photo, blanked, line, "text", &context);
                     let left = changed.iter().map(|&(x, _)| x).min().expect("ink");
                     let right = changed.iter().map(|&(x, _)| x).max().expect("ink");
                     assert!(
@@ -305,18 +322,8 @@ fn the_readouts_texts_stay_inside_their_lines_and_the_panel_for_the_widest_numbe
                     physical: " ".to_owned(),
                     logical: None,
                 };
-                let without = draw_view(&canvas, &photo, mode, dpi, blanked);
-                let changed: Vec<(i32, i32)> = pixels(readout)
-                    .filter(|&(x, y)| at(&drawn.picture, x, y) != at(&without.picture, x, y))
-                    .collect();
-                assert!(changed.len() > 30, "{} pixels, {context}", changed.len());
-                for &(x, y) in &changed {
-                    assert!(
-                        inside(&line, x, y),
-                        "{} text at ({x}, {y}) outside its line {line:?}, {context}",
-                        if y_axis { "Y's" } else { "X's" }
-                    );
-                }
+                let what = if y_axis { "Y's text" } else { "X's text" };
+                let changed = drawn.blanked_ink(&canvas, &photo, blanked, line, what, &context);
                 // A logical part, when there is one, ends before the line does.
                 if drawn.view.x.label.logical.is_some() {
                     let right = changed.iter().map(|&(x, _)| x).max().expect("ink");
