@@ -1171,16 +1171,17 @@ impl Window {
 mod tests {
     use super::*;
 
-    use screengauge_core::session::{Label, Message, NoticeSide, ToolbarButton};
+    use screengauge_core::session::{Label, Measured, Message, NoticeSide, ToolbarButton};
     use screengauge_core::settings::{DimensionsMode, Tolerance, Tool};
 
     /// A measurement on `monitor` whose label reads `text`, so two of them on one monitor differ.
     fn on(monitor: usize, text: &str) -> Measurement {
         Measurement {
             monitor,
-            horizontal: None,
-            vertical: None,
-            content: None,
+            measured: Measured::Spans {
+                horizontal: None,
+                vertical: None,
+            },
             label: Label {
                 physical: text.to_owned(),
                 logical: None,

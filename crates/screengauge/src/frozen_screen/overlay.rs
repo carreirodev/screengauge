@@ -315,11 +315,11 @@ impl Overlay {
         let mut labels = Vec::new();
         let pinned = pinned.iter().map(|&m| (m, Look::Pinned));
         for (measurement, look) in pinned.chain(live.map(|m| (m, Look::Live))) {
-            parts.push(match measurement.content {
+            parts.push(match measurement.content() {
                 Some(content) => bounds::parts(content),
                 None => geometry::parts(measurement, self.dpi),
             });
-            fills.extend(measurement.content.map(|content| (content, look)));
+            fills.extend(measurement.content().map(|content| (content, look)));
             match self.label(measurement, look) {
                 Ok(Some(label)) => labels.push(label),
                 // No span and no content, so nothing to label.
@@ -432,7 +432,7 @@ impl Overlay {
                 geometry::border(self.dpi).strip,
             ),
         };
-        let placed = match measurement.content {
+        let placed = match measurement.content() {
             Some(content) => Some(bounds::place_label(content, size, self.monitor, self.dpi)),
             None => geometry::place_label(measurement, size, self.monitor, self.dpi),
         };
@@ -774,6 +774,7 @@ mod tests {
     use super::*;
     use crate::com::TestCom;
     use crate::graphics::font_family;
+    use screengauge_core::session::Measured;
 
     pub(super) const CYAN: [u8; 3] = [0x22, 0xd3, 0xee];
     pub(super) const BACKGROUND: [u8; 3] = [200, 120, 60];
@@ -937,9 +938,10 @@ mod tests {
     pub(super) fn horizontal(x0: i32, x1: i32, y: i32, label: &str) -> Measurement {
         Measurement {
             monitor: 0,
-            horizontal: Some(span((x0, y), (x1, y))),
-            vertical: None,
-            content: None,
+            measured: Measured::Spans {
+                horizontal: Some(span((x0, y), (x1, y))),
+                vertical: None,
+            },
             label: physical_only(label),
         }
     }
@@ -947,9 +949,10 @@ mod tests {
     pub(super) fn vertical(y0: i32, y1: i32, x: i32, label: &str) -> Measurement {
         Measurement {
             monitor: 0,
-            horizontal: None,
-            vertical: Some(span((x, y0), (x, y1))),
-            content: None,
+            measured: Measured::Spans {
+                horizontal: None,
+                vertical: Some(span((x, y0), (x, y1))),
+            },
             label: physical_only(label),
         }
     }
@@ -958,9 +961,10 @@ mod tests {
     pub(super) fn cross(h: (i32, i32), v: (i32, i32), x: i32, y: i32, label: &str) -> Measurement {
         Measurement {
             monitor: 0,
-            horizontal: Some(span((h.0, y), (h.1, y))),
-            vertical: Some(span((x, v.0), (x, v.1))),
-            content: None,
+            measured: Measured::Spans {
+                horizontal: Some(span((h.0, y), (h.1, y))),
+                vertical: Some(span((x, v.0), (x, v.1))),
+            },
             label: physical_only(label),
         }
     }
@@ -982,11 +986,11 @@ mod tests {
     pub(super) fn expected(m: &Measurement, k: i32, x: i32, y: i32) -> [u8; 3] {
         let mut cyan = false;
         let mut outline = false;
-        if let Some(h) = m.horizontal {
+        if let Some(h) = m.horizontal() {
             cyan |= on_line(h.first.x, h.last.x, h.first.y, k, x, y);
             outline |= beside_line(h.first.x, h.last.x, h.first.y, k, x, y);
         }
-        if let Some(v) = m.vertical {
+        if let Some(v) = m.vertical() {
             cyan |= on_line(v.first.y, v.last.y, v.first.x, k, y, x);
             outline |= beside_line(v.first.y, v.last.y, v.first.x, k, y, x);
         }

@@ -312,22 +312,29 @@ pub enum Cursor {
     Arrow,
 }
 
-/// What a tool measures, on one monitor: Dimensions' span around the cursor along its row, its column or both (Cross),
-/// or the content Bounds shrinks a drawn rectangle to. A Dimensions measurement has no content, and a Bounds one has no
-/// span.
+/// What a tool measures, on one monitor: Dimensions' spans or Bounds' content, which share the pinned measurements.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Measurement {
     /// The monitor it was measured on, as an index in the frozen screen's order.
     pub monitor: usize,
-    /// The span along the cursor's row, in Dimensions' horizontal and Cross modes.
-    pub horizontal: Option<Span>,
-    /// The span along the cursor's column, in Dimensions' vertical and Cross modes.
-    pub vertical: Option<Span>,
-    /// Bounds' measurement: the smallest rectangle that holds the content of a drawn rectangle, each side on a pixel of
-    /// it, in physical pixels of the virtual screen.
-    pub content: Option<Rect>,
+    pub measured: Measured,
     /// What its label says.
     pub label: Label,
+}
+
+/// What a measurement holds: spans or content, never both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Measured {
+    /// Dimensions' spans around the cursor along its row, its column or both (Cross).
+    Spans {
+        /// The span along the cursor's row, in Dimensions' horizontal and Cross modes.
+        horizontal: Option<Span>,
+        /// The span along the cursor's column, in Dimensions' vertical and Cross modes.
+        vertical: Option<Span>,
+    },
+    /// Bounds' content: the smallest rectangle that holds the content of a drawn rectangle, each side on a pixel of it,
+    /// in physical pixels of the virtual screen.
+    Content(Rect),
 }
 
 /// What a measurement's label says (v1 spec WPC-296, Como as medidas aparecem): the physical pixels, then, after a thin
@@ -352,17 +359,43 @@ pub struct Span {
 }
 
 impl Measurement {
+    /// The span along the cursor's row, in Dimensions' horizontal and Cross modes. `None` in Bounds.
+    pub fn horizontal(&self) -> Option<Span> {
+        match self.measured {
+            Measured::Spans { horizontal, .. } => horizontal,
+            Measured::Content(_) => None,
+        }
+    }
+
+    /// The span along the cursor's column, in Dimensions' vertical and Cross modes. `None` in Bounds.
+    pub fn vertical(&self) -> Option<Span> {
+        match self.measured {
+            Measured::Spans { vertical, .. } => vertical,
+            Measured::Content(_) => None,
+        }
+    }
+
+    /// Bounds' content. `None` in Dimensions.
+    pub fn content(&self) -> Option<Rect> {
+        match self.measured {
+            Measured::Content(content) => Some(content),
+            Measured::Spans { .. } => None,
+        }
+    }
+
     /// How many pixels each span has, or the content's width and height, width before height, as the label shows them.
     pub(crate) fn lengths(&self) -> Vec<u32> {
-        let spans = [self.horizontal, self.vertical]
-            .into_iter()
-            .flatten()
-            .map(Span::length);
-        let content = self
-            .content
-            .into_iter()
-            .flat_map(|content| [content.width, content.height]);
-        spans.chain(content).collect()
+        match self.measured {
+            Measured::Spans {
+                horizontal,
+                vertical,
+            } => [horizontal, vertical]
+                .into_iter()
+                .flatten()
+                .map(Span::length)
+                .collect(),
+            Measured::Content(content) => vec![content.width, content.height],
+        }
     }
 }
 

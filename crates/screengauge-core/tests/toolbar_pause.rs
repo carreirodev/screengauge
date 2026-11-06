@@ -231,7 +231,7 @@ fn a_mode_clicked_on_the_toolbar_measures_again_where_the_tool_paused() {
     );
     let measured = live(&session).expect("Dimensions measures");
     assert_eq!(
-        measured.horizontal.map(|span| span.first.y),
+        measured.horizontal().map(|span| span.first.y),
         Some(BETWEEN_CARDS.y)
     );
     assert_eq!(measured.label.physical, "24");
@@ -257,7 +257,7 @@ fn a_mode_clicked_on_the_toolbar_measures_again_where_the_tool_paused() {
     );
     let back = live(&session).expect("Dimensions measures");
     assert_eq!(
-        back.vertical.map(|span| span.first.x),
+        back.vertical().map(|span| span.first.x),
         Some(BETWEEN_CARDS.x)
     );
 }
@@ -329,7 +329,7 @@ fn an_arrow_key_that_steps_onto_the_toolbar_pauses_the_tool_too() {
     session.handle(event(below, 1000, Input::KeyDown(Key::Down)));
     assert_eq!(session.scene().cursor, Cursor::Cross);
     let row = live(&session)
-        .and_then(|measurement| measurement.horizontal)
+        .and_then(|measurement| measurement.horizontal())
         .map(|span| span.first.y);
     assert_eq!(row, Some(below.y + 1));
 }
@@ -362,7 +362,7 @@ fn a_line_that_runs_under_the_toolbar_stops_at_the_real_edge() {
     let span = session
         .scene()
         .live
-        .and_then(|measurement| measurement.vertical)
+        .and_then(|measurement| measurement.vertical())
         .expect("Dimensions measures the column");
     assert_eq!(
         span,
@@ -390,7 +390,7 @@ fn a_line_that_crosses_a_pinned_measurement_measures_as_if_it_werent_there() {
     };
     move_to(&mut session, above);
     let span = live(&session)
-        .and_then(|measurement| measurement.vertical)
+        .and_then(|measurement| measurement.vertical())
         .expect("Dimensions measures the column");
     assert!((span.first.y..=span.last.y).contains(&pinned_row));
     let unpinned = open(DimensionsMode::Vertical, above);
@@ -399,7 +399,7 @@ fn a_line_that_crosses_a_pinned_measurement_measures_as_if_it_werent_there() {
         unpinned
             .scene()
             .live
-            .and_then(|measurement| measurement.vertical)
+            .and_then(|measurement| measurement.vertical())
     );
     assert_eq!(span.length(), 2160);
 }
@@ -418,7 +418,7 @@ fn minimizing_leaves_the_small_button_and_the_tool_measures_where_the_toolbar_wa
     assert_eq!(scene.toolbar.hovered, None);
     let measured = scene.live.expect("the tool goes on measuring");
     assert_eq!(
-        measured.vertical,
+        measured.vertical(),
         Some(Span {
             first: Point {
                 x: minimize.x,

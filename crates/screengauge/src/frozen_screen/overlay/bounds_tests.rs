@@ -2,7 +2,7 @@
 //! the label goes. The sizes, colors and opacities are the approved prototype's (WPC-279, variant A: `dashedRect` and
 //! `drawResult`), worked out here from the rectangles alone, not read back from the code that is being tested.
 
-use screengauge_core::session::{DrawnRectangle, Label, Measurement, Rect};
+use screengauge_core::session::{DrawnRectangle, Label, Measured, Measurement, Rect};
 
 use super::panel_tests::over;
 use super::tests::{BACKGROUND, CYAN, Canvas, MONITOR, Picture, SCALES, near, text_width};
@@ -21,9 +21,7 @@ pub(super) fn rect(left: i32, top: i32, right: i32, bottom: i32) -> Rect {
 fn shrunk_to(content: Rect, text: &str) -> Measurement {
     Measurement {
         monitor: 0,
-        horizontal: None,
-        vertical: None,
-        content: Some(content),
+        measured: Measured::Content(content),
         label: Label {
             physical: text.to_owned(),
             logical: None,

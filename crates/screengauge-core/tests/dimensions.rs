@@ -5,8 +5,8 @@
 use std::time::Duration;
 
 use screengauge_core::session::{
-    Colors, Effect, Event, Held, Image, Input, Key, Label, LocalTime, Measurement, Opening, Photo,
-    Point, Rect, Scale, Session, Span,
+    Colors, Effect, Event, Held, Image, Input, Key, Label, LocalTime, Measured, Measurement,
+    Opening, Photo, Point, Rect, Scale, Session, Span,
 };
 use screengauge_core::settings::{DimensionsMode, Options, Remembered, Tool};
 
@@ -131,9 +131,10 @@ fn horizontal_measures_the_gap_between_two_cards_from_any_point_in_it() {
             live(&session),
             Some(Measurement {
                 monitor: 0,
-                horizontal: Some(row(600, 1000, 1023)),
-                vertical: None,
-                content: None,
+                measured: Measured::Spans {
+                    horizontal: Some(row(600, 1000, 1023)),
+                    vertical: None
+                },
                 label: label("24", "13.7"),
             }),
             "cursor at x = {x}"
@@ -149,9 +150,10 @@ fn vertical_measures_a_card_from_its_top_row_to_its_bottom_row() {
         live(&session),
         Some(Measurement {
             monitor: 0,
-            horizontal: None,
-            vertical: Some(column(900, 500, 700)),
-            content: None,
+            measured: Measured::Spans {
+                horizontal: None,
+                vertical: Some(column(900, 500, 700))
+            },
             label: label("201", "114.9"),
         })
     );
@@ -169,9 +171,10 @@ fn cross_measures_width_and_height_at_once_with_no_distance_to_each_edge() {
         live(&session),
         Some(Measurement {
             monitor: 0,
-            horizontal: Some(row(1250, 2000, 2239)),
-            vertical: Some(column(2010, 1200, 1379)),
-            content: None,
+            measured: Measured::Spans {
+                horizontal: Some(row(1250, 2000, 2239)),
+                vertical: Some(column(2010, 1200, 1379))
+            },
             label: label("240 × 180", "137.1 × 102.9"),
         })
     );
@@ -188,9 +191,10 @@ fn an_item_of_one_pixel_measures_one() {
         live(&session),
         Some(Measurement {
             monitor: 0,
-            horizontal: Some(row(900, 1500, 1500)),
-            vertical: Some(column(1500, 0, 2159)),
-            content: None,
+            measured: Measured::Spans {
+                horizontal: Some(row(900, 1500, 1500)),
+                vertical: Some(column(1500, 0, 2159))
+            },
             label: label("1 × 2160", "0.6 × 1234.3"),
         })
     );
@@ -208,9 +212,10 @@ fn with_no_edge_before_the_monitors_limit_the_span_runs_to_its_last_pixel_which_
         live(&session),
         Some(Measurement {
             monitor: 0,
-            horizontal: Some(row(2000, 3000, 3839)),
-            vertical: Some(column(3500, 1800, 2159)),
-            content: None,
+            measured: Measured::Spans {
+                horizontal: Some(row(2000, 3000, 3839)),
+                vertical: Some(column(3500, 1800, 2159))
+            },
             label: label("840 × 360", "480 × 205.7"),
         })
     );
@@ -248,9 +253,10 @@ fn in_a_gradient_the_edge_is_the_first_pixel_too_far_from_the_reference_color_no
         live(&session),
         Some(Measurement {
             monitor: 0,
-            horizontal: Some(row(1000, 144, 156)),
-            vertical: None,
-            content: None,
+            measured: Measured::Spans {
+                horizontal: Some(row(1000, 144, 156)),
+                vertical: None
+            },
             label: label("13", "7.4"),
         })
     );
@@ -273,7 +279,7 @@ fn a_tolerance_of_zero_stops_at_the_first_pixel_that_differs_at_all() {
     })
     .expect("a frozen screen the session takes");
     assert_eq!(
-        live(&session).and_then(|measurement| measurement.horizontal),
+        live(&session).and_then(|measurement| measurement.horizontal()),
         Some(row(1000, 150, 150))
     );
 }
@@ -317,9 +323,10 @@ fn moving_to_another_monitor_measures_there_on_that_monitor_alone() {
         live(&session),
         Some(Measurement {
             monitor: 0,
-            horizontal: Some(row(500, 0, 3839)),
-            vertical: Some(column(0, 0, 2159)),
-            content: None,
+            measured: Measured::Spans {
+                horizontal: Some(row(500, 0, 3839)),
+                vertical: Some(column(0, 0, 2159))
+            },
             label: label("3840 × 2160", "2194.3 × 1234.3"),
         }),
         "on the 4K monitor's first column"
@@ -329,9 +336,10 @@ fn moving_to_another_monitor_measures_there_on_that_monitor_alone() {
         live(&session),
         Some(Measurement {
             monitor: 1,
-            horizontal: Some(row(1079, -1920, -1)),
-            vertical: Some(column(-1, 0, 1079)),
-            content: None,
+            measured: Measured::Spans {
+                horizontal: Some(row(1079, -1920, -1)),
+                vertical: Some(column(-1, 0, 1079))
+            },
             label: label("1920 × 1080", "1536 × 864"),
         }),
         "on the Full HD monitor's last column and last row"
@@ -348,7 +356,7 @@ fn moving_the_mouse_measures_where_it_went() {
     );
     session.handle(event(at(1005, 600), Input::Move));
     assert_eq!(
-        live(&session).and_then(|measurement| measurement.horizontal),
+        live(&session).and_then(|measurement| measurement.horizontal()),
         Some(row(600, 1000, 1023)),
         "in the strip between the cards"
     );
@@ -357,7 +365,7 @@ fn moving_the_mouse_measures_where_it_went() {
 /// What the live measurement spans: (along the row, along the column).
 fn spans(session: &Session) -> (Option<Span>, Option<Span>) {
     live(session).map_or((None, None), |measurement| {
-        (measurement.horizontal, measurement.vertical)
+        (measurement.horizontal(), measurement.vertical())
     })
 }
 
@@ -488,7 +496,7 @@ fn an_arrow_moves_the_cursor_one_pixel_and_the_measurement_follows() {
         (Key::Left, at(999, 601)),
         (Key::Up, at(999, 600)),
     ] {
-        let place = live(&session).and_then(|measurement| measurement.horizontal);
+        let place = live(&session).and_then(|measurement| measurement.horizontal());
         assert_eq!(
             session.handle(event(at(999, 600), Input::KeyDown(key))),
             [Effect::MoveCursor(to)],
@@ -505,7 +513,7 @@ fn shift_and_an_arrow_move_the_cursor_ten_pixels() {
         [Effect::MoveCursor(at(1000, 600))]
     );
     assert_eq!(
-        live(&session).and_then(|measurement| measurement.horizontal),
+        live(&session).and_then(|measurement| measurement.horizontal()),
         Some(row(600, 1000, 1023))
     );
 }
@@ -535,7 +543,7 @@ fn an_arrow_takes_the_cursor_onto_the_next_monitor_and_dimensions_measures_there
         [Effect::MoveCursor(at(-1, 500))]
     );
     assert_eq!(
-        live(&session).map(|measurement| (measurement.monitor, measurement.horizontal)),
+        live(&session).map(|measurement| (measurement.monitor, measurement.horizontal())),
         Some((1, Some(row(500, -1920, -1))))
     );
 }

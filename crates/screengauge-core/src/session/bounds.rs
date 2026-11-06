@@ -2,7 +2,7 @@
 //! Bounds).
 
 use super::pixels::{self, Reference, color, rgb};
-use super::{Label, Measurement, Photo, Point, Rect, units};
+use super::{Label, Measured, Measurement, Photo, Point, Rect, units};
 use crate::settings::Tolerance;
 
 /// The drag distance: how many physical pixels the cursor may go from where the drag began, along each axis, with the
@@ -112,9 +112,7 @@ pub(super) fn measure(
     let content = area(photo, drag, cursor, tolerance)?;
     let mut measurement = Measurement {
         monitor: drag.monitor,
-        horizontal: None,
-        vertical: None,
-        content: Some(content),
+        measured: Measured::Content(content),
         label: Label::default(),
     };
     measurement.label = units::label(

@@ -108,7 +108,7 @@ fn row(first: i32, last: i32) -> Span {
 
 /// The span Dimensions measures now.
 fn live_span(session: &Session) -> Option<Span> {
-    session.scene().live.and_then(|live| live.horizontal)
+    session.scene().live.and_then(|live| live.horizontal())
 }
 
 // Spans from gray 150, by the rule the calibration kept (WPC-332): a pixel counts as the same area while none of its red,
@@ -368,7 +368,7 @@ fn a_pinned_measurement_keeps_what_it_measured_when_the_wheel_changes_the_tolera
         .scene()
         .pinned
         .iter()
-        .map(|measurement| measurement.horizontal)
+        .map(|measurement| measurement.horizontal())
         .collect();
     assert_eq!(pinned, [Some(at_six())]);
     assert_eq!(live_span(&session), Some(at_seven()));

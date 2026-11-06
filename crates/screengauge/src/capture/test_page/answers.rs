@@ -213,10 +213,10 @@ fn dimensions(page: &Photo, mode: DimensionsMode, cursor: Point) -> String {
         return "nothing measured".to_owned();
     };
     let row = live
-        .horizontal
+        .horizontal()
         .map(|span| format!("row {}..{}", span.first.x, span.last.x));
     let column = live
-        .vertical
+        .vertical()
         .map(|span| format!("column {}..{}", span.first.y, span.last.y));
     let places: Vec<String> = [row, column].into_iter().flatten().collect();
     format!("{}: {}", live.label.physical, places.join(", "))
@@ -242,7 +242,7 @@ fn bounds(page: &Photo, from: Point, to: Point) -> (String, Option<Rect>) {
         .scene()
         .pinned
         .last()
-        .and_then(|measurement| measurement.content);
+        .and_then(|measurement| measurement.content());
     let answer = match (copied, pinned) {
         (Some(text), Some(content)) => format!("{text} at {},{}", content.left, content.top),
         (None, None) => session

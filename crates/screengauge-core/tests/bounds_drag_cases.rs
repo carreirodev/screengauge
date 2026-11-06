@@ -8,8 +8,8 @@ use std::time::Duration;
 use screengauge_core::session::toolbar;
 use screengauge_core::session::{
     Colors, Cursor, DrawnRectangle, Effect, Event, Held, Image, Input, Key, Label, LocalTime,
-    Measurement, Message, Notice, NoticeSide, Opening, Photo, Point, Rect, Scale, Session, Sign,
-    ToolbarButton,
+    Measured, Measurement, Message, Notice, NoticeSide, Opening, Photo, Point, Rect, Scale,
+    Session, Sign, ToolbarButton,
 };
 use screengauge_core::settings::{DimensionsMode, Options, Remembered, Tool, ToolbarPlace};
 
@@ -125,9 +125,7 @@ fn pinned(session: &Session) -> Vec<Measurement> {
 fn the_button() -> Measurement {
     Measurement {
         monitor: 0,
-        horizontal: None,
-        vertical: None,
-        content: Some(Rect {
+        measured: Measured::Content(Rect {
             left: 1000,
             top: 600,
             width: 100,
@@ -156,7 +154,7 @@ fn drawn(session: &Session) -> Option<DrawnRectangle> {
 
 /// The content the live preview shows.
 fn live_content(session: &Session) -> Option<Rect> {
-    session.scene().live.and_then(|live| live.content)
+    session.scene().live.and_then(|live| live.content())
 }
 
 const ICON_GRAY: [u8; 3] = [90, 90, 90];
@@ -287,9 +285,7 @@ fn drag_holding_alt(
 fn the_drawn_rectangle() -> Measurement {
     Measurement {
         monitor: 0,
-        horizontal: None,
-        vertical: None,
-        content: Some(rect(900, 500, 1200, 700)),
+        measured: Measured::Content(rect(900, 500, 1200, 700)),
         label: Label {
             physical: "301 × 201".to_owned(),
             logical: Some("172 × 114.9".to_owned()),
@@ -331,7 +327,7 @@ fn with_alt_an_area_of_nothing_but_the_reference_color_is_measured_like_any_othe
     assert_eq!(
         pinned(&session)
             .iter()
-            .map(|pin| pin.content)
+            .map(|pin| pin.content())
             .collect::<Vec<_>>(),
         [Some(rect(100, 100, 400, 300))]
     );

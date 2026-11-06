@@ -21,8 +21,8 @@ pub use event::{Event, Held, Input, Key, LocalTime, ToolbarButton};
 pub use frozen_screen::{Colors, Image, Photo, Point, Rect, Scale};
 pub use output::{
     ApproximateColor, ColorText, Coordinate, Cursor, DrawnRectangle, Effect, Label, MagnifiedView,
-    Measurement, Message, Notice, NoticeLine, NoticeSide, PixelColor, SaveTo, Scene, Sign,
-    SnipArea, Span, ToleranceIndicator, Toolbar,
+    Measured, Measurement, Message, Notice, NoticeLine, NoticeSide, PixelColor, SaveTo, Scene,
+    Sign, SnipArea, Span, ToleranceIndicator, Toolbar,
 };
 pub use snip_file::{FileNames, png_path};
 

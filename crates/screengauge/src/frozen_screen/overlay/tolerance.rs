@@ -269,7 +269,7 @@ impl Overlay {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use screengauge_core::session::{Label, Span};
+    use screengauge_core::session::{Label, Measured, Span};
 
     fn point(x: i32, y: i32) -> Point {
         Point { x, y }
@@ -355,12 +355,13 @@ mod tests {
     fn along_row(x0: i32, x1: i32, y: i32) -> Measurement {
         Measurement {
             monitor: 0,
-            horizontal: Some(Span {
-                first: point(x0, y),
-                last: point(x1, y),
-            }),
-            vertical: None,
-            content: None,
+            measured: Measured::Spans {
+                horizontal: Some(Span {
+                    first: point(x0, y),
+                    last: point(x1, y),
+                }),
+                vertical: None,
+            },
             label: Label::default(),
         }
     }
@@ -369,13 +370,25 @@ mod tests {
     fn along_column(y0: i32, y1: i32, x: i32) -> Measurement {
         Measurement {
             monitor: 0,
-            horizontal: None,
-            vertical: Some(Span {
-                first: point(x, y0),
-                last: point(x, y1),
-            }),
-            content: None,
+            measured: Measured::Spans {
+                horizontal: None,
+                vertical: Some(Span {
+                    first: point(x, y0),
+                    last: point(x, y1),
+                }),
+            },
             label: Label::default(),
+        }
+    }
+
+    /// What Dimensions measures in the Cross mode: `row`'s span and `column`'s.
+    fn cross(row: Measurement, column: Measurement) -> Measurement {
+        Measurement {
+            measured: Measured::Spans {
+                horizontal: row.horizontal(),
+                vertical: column.vertical(),
+            },
+            ..row
         }
     }
 
@@ -422,8 +435,7 @@ mod tests {
         // In the Cross mode's bottom right corner the label mirrors above and to the left of the crossing, and there is
         // no room below; 10 under the monitor's top the horizontal mode's label goes below the line, where the panel
         // below would cover it too. Both keep the prototype's place.
-        let mut corner = along_row(3700, 3839, 1170);
-        corner.vertical = along_column(1100, 1179, 3830).vertical;
+        let corner = cross(along_row(3700, 3839, 1170), along_column(1100, 1179, 3830));
         let top = along_row(2476, 2524, MONITOR.top + 10);
         for (at, live) in [
             (point(3830, 1170), corner),
@@ -457,8 +469,7 @@ mod tests {
         let at = point(2500, 600);
         let above = place(at, PANEL, MONITOR, 96);
         let column = along_column(576, 624, 2500);
-        let mut cross = along_row(2476, 2524, 600);
-        cross.vertical = column.vertical;
+        let cross = cross(along_row(2476, 2524, 600), column.clone());
         for live in [None, Some(&column), Some(&cross)] {
             let label = live.and_then(|live| label_of(live, 96));
             assert_eq!(

@@ -69,7 +69,7 @@ pub fn parts(measurement: &Measurement, dpi: u32) -> Parts {
     let reach = scaled(TICK, dpi);
     let mut line = Vec::new();
     let mut outline = Vec::new();
-    if let Some(Span { first, last }) = measurement.horizontal {
+    if let Some(Span { first, last }) = measurement.horizontal() {
         add_span(
             first.x,
             last.x,
@@ -80,7 +80,7 @@ pub fn parts(measurement: &Measurement, dpi: u32) -> Parts {
             &mut outline,
         );
     }
-    if let Some(Span { first, last }) = measurement.vertical {
+    if let Some(Span { first, last }) = measurement.vertical() {
         add_span(
             first.y,
             last.y,
@@ -291,7 +291,7 @@ pub fn place_label(
         scaled(SIDE_GAP, dpi),
         scaled(CROSS_OFFSET, dpi),
     );
-    let (left, top) = match (measurement.horizontal, measurement.vertical) {
+    let (left, top) = match (measurement.horizontal(), measurement.vertical()) {
         (Some(horizontal), Some(vertical)) => {
             let (x, y) = (vertical.first.x, horizontal.first.y);
             (
@@ -351,7 +351,7 @@ fn fits_above(y: i32, height: i32, monitor: RECT, dpi: u32) -> bool {
 /// Whether `live`, the measurement Dimensions makes now, runs along the cursor's row alone, with its label above the
 /// line, as [`place_label`] puts it: the horizontal mode away from the monitor's top.
 pub fn label_above_row(live: &Measurement, monitor: RECT, dpi: u32) -> bool {
-    match (live.horizontal, live.vertical) {
+    match (live.horizontal(), live.vertical()) {
         // A live label is as tall as its pill, whatever its text.
         (Some(horizontal), None) => {
             fits_above(horizontal.first.y, pill_size(0, dpi).height, monitor, dpi)
@@ -374,7 +374,7 @@ pub fn inside(start: i32, length: i32, low: i32, high: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use screengauge_core::session::Point;
+    use screengauge_core::session::{Measured, Point};
 
     use super::*;
 
@@ -392,9 +392,10 @@ mod tests {
     fn measurement(horizontal: Option<Span>, vertical: Option<Span>) -> Measurement {
         Measurement {
             monitor: 0,
-            horizontal,
-            vertical,
-            content: None,
+            measured: Measured::Spans {
+                horizontal,
+                vertical,
+            },
             label: screengauge_core::session::Label::default(),
         }
     }

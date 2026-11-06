@@ -2,7 +2,7 @@
 //! cursor's row, its column or both (v1 spec WPC-296, Dimensions).
 
 use super::pixels::{Reference, color};
-use super::{Label, Measurement, Photo, Point, Span, units};
+use super::{Label, Measured, Measurement, Photo, Point, Span, units};
 use crate::settings::{DimensionsMode, Tolerance};
 
 /// What Dimensions measures with the cursor at `cursor`, on the monitor under it. The label shows the logical pixels
@@ -24,9 +24,10 @@ pub(super) fn measure(
     };
     let mut measurement = Measurement {
         monitor,
-        horizontal,
-        vertical,
-        content: None,
+        measured: Measured::Spans {
+            horizontal,
+            vertical,
+        },
         label: Label::default(),
     };
     measurement.label = units::label(

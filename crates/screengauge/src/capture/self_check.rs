@@ -325,14 +325,14 @@ fn measure_check(
     );
     let label = &measured.label;
     let passed = measured.monitor == card.monitor
-        && (measured.horizontal, measured.vertical) == expected
+        && (measured.horizontal(), measured.vertical()) == expected
         && label.physical == format!("{} × {}", rect.width, rect.height)
         && logical_label_fits(label.logical.as_deref(), shape, card.dpi);
     let shown = match &label.logical {
         Some(logical) => format!("{} | {logical}", label.physical),
         None => label.physical.clone(),
     };
-    let found = match (measured.horizontal, measured.vertical) {
+    let found = match (measured.horizontal(), measured.vertical()) {
         (Some(horizontal), Some(vertical)) => format!(
             "{} × {} from ({}, {}), label \"{shown}\"; expected {} × {} from ({}, {}) at {} DPI",
             horizontal.length(),
