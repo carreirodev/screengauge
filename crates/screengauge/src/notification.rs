@@ -20,10 +20,12 @@ use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use screengauge_core::settings::Shortcut;
+use windows::UI::Notifications::ToastNotification;
 use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 use windows::core::Error;
 
+use self::toast::Clicks;
 use crate::app_message::{NOTIFICATION_EVENTS_READY, SHOW_WAITING_NOTIFICATIONS};
 use crate::{com, log, package, settings_file};
 
@@ -63,19 +65,13 @@ impl Notification {
         })
     }
 
-    /// What names it to Windows, as its tag, and in its click's arguments.
+    /// What names it to Windows, as its tag, and in its click's arguments ([`Launch`]).
     fn key(self) -> &'static str {
         match self {
             Notification::CaptureFailed => "capture-failed",
             Notification::SettingsReset => "settings-reset",
             Notification::ShortcutBusy => "shortcut-busy",
         }
-    }
-
-    /// The notification a click's arguments name, whichever process showed it.
-    fn of_launch(launch: &str) -> Option<Notification> {
-        let key = launch.split_once(':').map_or(launch, |(key, _)| key);
-        EVERY_NOTIFICATION.into_iter().find(|n| n.key() == key)
     }
 
     /// Whether it means something only right away: "Try again" is about the call just made, and shown later, once
@@ -108,17 +104,48 @@ pub enum Seen {
     CenterOnly,
 }
 
-/// A notification as handed to Windows: `launch` is what its click gives back, unique to this showing.
+/// What a notification's click gives back, unique to one showing: `key:process.count`, the notification's key, the
+/// process that showed it and how many it had shown. The notifications already in the notification center carry this
+/// text, and their click may start a later ScreenGauge, so the format never changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Toast {
+struct Launch(String);
+
+impl Launch {
+    /// The launch of `notification`, the `count`th notification `process` shows.
+    fn new(notification: Notification, process: u32, count: u64) -> Launch {
+        Launch(format!("{}:{process}.{count}", notification.key()))
+    }
+
+    /// The text as it goes in the notification's XML.
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The notification it names, whichever process showed it: only the key counts.
+    fn notification(&self) -> Option<Notification> {
+        let key = self.0.split_once(':').map_or(self.as_str(), |(key, _)| key);
+        EVERY_NOTIFICATION.into_iter().find(|n| n.key() == key)
+    }
+}
+
+/// A launch as Windows hands it back on a click, from this process or another.
+impl From<String> for Launch {
+    fn from(text: String) -> Launch {
+        Launch(text)
+    }
+}
+
+/// A notification as handed to Windows: `launch` is what its click gives back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Handed {
     notification: Notification,
-    launch: String,
+    launch: Launch,
 }
 
 /// What Windows told about the notification shown with `launch`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Event {
-    launch: String,
+    launch: Launch,
     what: What,
 }
 
@@ -144,8 +171,10 @@ enum Dismissal {
 }
 
 /// What [`State`] asks of Windows.
-trait Toasts {
-    fn show(&mut self, toast: &Toast) -> windows::core::Result<()>;
+trait System {
+    /// What must be kept of a notification shown for Windows to keep telling of it.
+    type Kept;
+    fn show(&mut self, handed: &Handed) -> windows::core::Result<Self::Kept>;
     /// Takes `notification` out of the notification center.
     fn remove(&mut self, notification: Notification) -> windows::core::Result<()>;
 }
@@ -153,9 +182,12 @@ trait Toasts {
 /// Windows' own notifications, for the running ScreenGauge.
 struct Windows;
 
-impl Toasts for Windows {
-    fn show(&mut self, toast: &Toast) -> windows::core::Result<()> {
-        toast::show(toast)
+impl System for Windows {
+    /// The notification as Windows took it: its events come only while it is kept.
+    type Kept = ToastNotification;
+
+    fn show(&mut self, handed: &Handed) -> windows::core::Result<ToastNotification> {
+        toast::show(handed)
     }
 
     fn remove(&mut self, notification: Notification) -> windows::core::Result<()> {
@@ -166,7 +198,7 @@ impl Toasts for Windows {
 thread_local! {
     /// Only the resident window's thread shows notifications and handles their events. It is the main thread, which
     /// also opens the settings file before the resident window exists, so what that queues is here for the window.
-    static STATE: RefCell<State> = RefCell::new(State::new(std::process::id()));
+    static STATE: RefCell<State<ToastNotification>> = RefCell::new(State::new(std::process::id()));
 }
 
 /// The resident window, which the events Windows tells on threads of its own are posted to.
@@ -193,7 +225,12 @@ pub fn start(window: HWND) {
     if let Err(e) = &activator {
         log::failure("notification: registering the activator", e);
     }
-    if let Err(e) = toast::register(copy, activator.is_ok()) {
+    let clicks = if activator.is_ok() {
+        Clicks::ToActivator
+    } else {
+        Clicks::CloseOnly
+    };
+    if let Err(e) = toast::register(copy, clicks) {
         log::failure("notification: registering ScreenGauge with Windows", &e);
     }
 }
@@ -307,13 +344,17 @@ fn report(event: Event) -> windows::core::Result<()> {
 
 /// The latest notification of a kind shown by this process, and what Windows told of it.
 #[derive(Debug)]
-struct Shown {
-    toast: Toast,
+struct Shown<K> {
+    handed: Handed,
     seen: Option<Seen>,
+    /// What Windows needs kept to tell of it, held until the next of its kind replaces it, so its events still come
+    /// once Windows is done with it. Never read: holding it is the point.
+    _kept: K,
 }
 
+/// The notifications of this process, `K` being what is kept of each one shown ([`System::Kept`]).
 #[derive(Debug)]
-struct State {
+struct State<K> {
     /// This process, in each `launch`, so a click on a notification an earlier ScreenGauge showed is never taken for one
     /// of this process's.
     process: u32,
@@ -321,8 +362,8 @@ struct State {
     count: u64,
     /// Waiting for the startup call's photo, for the tools to close or for Windows to take them, in the order they came.
     waiting: Vec<Notification>,
-    /// The latest of each kind shown.
-    shown: Vec<Shown>,
+    /// The latest of each kind shown, the only place it is kept.
+    shown: Vec<Shown<K>>,
     /// The frozen screen covers the monitors. Windows takes a full-screen window in front for a reason to keep
     /// notifications out of the corner (`QUNS_BUSY`), so none shows until the tools close.
     tools_open: bool,
@@ -331,8 +372,8 @@ struct State {
     capture_failed_in_center: bool,
 }
 
-impl State {
-    fn new(process: u32) -> State {
+impl<K> State<K> {
+    fn new(process: u32) -> State<K> {
         State {
             process,
             count: 0,
@@ -347,29 +388,33 @@ impl State {
         self.tools_open = true;
     }
 
-    fn tools_closed(&mut self, toasts: &mut impl Toasts) {
+    fn tools_closed(&mut self, system: &mut impl System<Kept = K>) {
         self.tools_open = false;
-        self.show_waiting(toasts);
+        self.show_waiting(system);
     }
 
-    fn show(&mut self, notification: Notification, toasts: &mut impl Toasts) {
+    fn show(&mut self, notification: Notification, system: &mut impl System<Kept = K>) {
         if self.tools_open {
             self.waiting.push(notification);
             return;
         }
         self.count += 1;
-        let toast = Toast {
+        let handed = Handed {
             notification,
-            launch: format!("{}:{}.{}", notification.key(), self.process, self.count),
+            launch: Launch::new(notification, self.process, self.count),
         };
-        match toasts.show(&toast) {
-            Ok(()) => {
+        match system.show(&handed) {
+            Ok(kept) => {
                 if notification == Notification::CaptureFailed {
                     self.capture_failed_in_center = true;
                 }
                 self.shown
-                    .retain(|shown| shown.toast.notification != notification);
-                self.shown.push(Shown { toast, seen: None });
+                    .retain(|shown| shown.handed.notification != notification);
+                self.shown.push(Shown {
+                    handed,
+                    seen: None,
+                    _kept: kept,
+                });
             }
             Err(e) => self.refused(notification, &e),
         }
@@ -385,28 +430,28 @@ impl State {
         }
     }
 
-    fn show_waiting(&mut self, toasts: &mut impl Toasts) {
+    fn show_waiting(&mut self, system: &mut impl System<Kept = K>) {
         if self.tools_open {
             return;
         }
         for notification in std::mem::take(&mut self.waiting) {
-            self.show(notification, toasts);
+            self.show(notification, system);
         }
     }
 
-    fn capture_succeeded(&mut self, toasts: &mut impl Toasts) {
+    fn capture_succeeded(&mut self, system: &mut impl System<Kept = K>) {
         if !std::mem::take(&mut self.capture_failed_in_center) {
             return;
         }
-        if let Err(e) = toasts.remove(Notification::CaptureFailed) {
+        if let Err(e) = system.remove(Notification::CaptureFailed) {
             log::failure("notification: taking the capture failure out", &e);
         }
     }
 
-    fn shortcut_free(&mut self, toasts: &mut impl Toasts) {
+    fn shortcut_free(&mut self, system: &mut impl System<Kept = K>) {
         self.waiting
             .retain(|waiting| *waiting != Notification::ShortcutBusy);
-        if let Err(e) = toasts.remove(Notification::ShortcutBusy) {
+        if let Err(e) = system.remove(Notification::ShortcutBusy) {
             log::failure("notification: taking the busy shortcut out", &e);
         }
     }
@@ -414,7 +459,7 @@ impl State {
     fn seen(&self, notification: Notification) -> Option<Seen> {
         self.shown
             .iter()
-            .find(|shown| shown.toast.notification == notification)?
+            .find(|shown| shown.handed.notification == notification)?
             .seen
     }
 
@@ -424,14 +469,14 @@ impl State {
         let shown = self
             .shown
             .iter_mut()
-            .find(|shown| shown.toast.launch == event.launch);
+            .find(|shown| shown.handed.launch == event.launch);
         match event.what {
             What::Clicked => {
                 if let Some(shown) = shown {
                     // Clicked before anything else was told: it was in the corner.
                     decide(shown, Seen::InCorner);
                 }
-                let clicked = Notification::of_launch(&event.launch);
+                let clicked = event.launch.notification();
                 // Settings, which the click opens, says the shortcut is busy: one waiting, as when Windows started
                 // ScreenGauge for the click and the startup found it busy again, would say it twice.
                 if clicked == Some(Notification::ShortcutBusy) {
@@ -463,9 +508,9 @@ impl State {
             }
             What::Failed(error) => {
                 if let Some(shown) = shown {
-                    let notification = shown.toast.notification;
+                    let notification = shown.handed.notification;
                     self.shown
-                        .retain(|shown| shown.toast.launch != event.launch);
+                        .retain(|shown| shown.handed.launch != event.launch);
                     if notification == Notification::CaptureFailed {
                         self.capture_failed_in_center = false;
                     }
@@ -479,12 +524,12 @@ impl State {
 
 /// Keeps `seen` for `shown`, unless Windows already told something of it: the first thing it tells decides, as a
 /// notification gone to the notification center at once may still be clicked there later.
-fn decide(shown: &mut Shown, seen: Seen) {
+fn decide<K>(shown: &mut Shown<K>, seen: Seen) {
     if shown.seen.is_some() {
         return;
     }
     shown.seen = Some(seen);
-    let notification = shown.toast.notification;
+    let notification = shown.handed.notification;
     log::note(&match seen {
         Seen::InCorner => format!("notification: {notification:?} appeared in the corner"),
         Seen::CenterOnly => {
@@ -504,7 +549,7 @@ mod tests {
     /// Windows' notifications, recorded.
     #[derive(Default)]
     struct Recorded {
-        shown: Vec<Toast>,
+        shown: Vec<Handed>,
         removed: Vec<Notification>,
         /// Windows refuses every notification, as it might before the taskbar exists.
         refusing: bool,
@@ -519,10 +564,13 @@ mod tests {
         }
 
         fn notifications(&self) -> Vec<Notification> {
-            self.shown.iter().map(|toast| toast.notification).collect()
+            self.shown
+                .iter()
+                .map(|handed| handed.notification)
+                .collect()
         }
 
-        fn launch_of_last(&self) -> String {
+        fn launch_of_last(&self) -> Launch {
             self.shown
                 .last()
                 .expect("a notification shown")
@@ -531,12 +579,14 @@ mod tests {
         }
     }
 
-    impl Toasts for Recorded {
-        fn show(&mut self, toast: &Toast) -> windows::core::Result<()> {
+    impl System for Recorded {
+        type Kept = ();
+
+        fn show(&mut self, handed: &Handed) -> windows::core::Result<()> {
             if self.refusing {
                 return Err(Error::new(E_FAIL, "ToastNotifier.Show failed"));
             }
-            self.shown.push(toast.clone());
+            self.shown.push(handed.clone());
             Ok(())
         }
 
@@ -546,7 +596,7 @@ mod tests {
         }
     }
 
-    fn state() -> State {
+    fn state() -> State<()> {
         State::new(4321)
     }
 
@@ -621,7 +671,7 @@ mod tests {
     }
 
     /// The state once the first capture since startup has taken out what an earlier ScreenGauge may have left.
-    fn state_after_first_capture() -> State {
+    fn state_after_first_capture() -> State<()> {
         let mut state = state();
         state.capture_succeeded(&mut Recorded::default());
         state
@@ -813,7 +863,7 @@ mod tests {
         // ScreenGauge was closed, and Windows started it for the click.
         let mut state = state();
         let clicked = state.on_event(Event {
-            launch: "settings-reset:999.3".to_string(),
+            launch: Launch::from("settings-reset:999.3".to_string()),
             what: What::Clicked,
         });
         assert_eq!(clicked, Some(Notification::SettingsReset));
@@ -887,7 +937,7 @@ mod tests {
         // ScreenGauge was closed, and Windows started it for the click: it opens Settings all the same.
         let mut state = state();
         let clicked = state.on_event(Event {
-            launch: "shortcut-busy:999.1".to_string(),
+            launch: Launch::from("shortcut-busy:999.1".to_string()),
             what: What::Clicked,
         });
         assert_eq!(clicked, Some(Notification::ShortcutBusy));
@@ -900,10 +950,49 @@ mod tests {
         let mut state = state();
         state.waiting = vec![Notification::ShortcutBusy, Notification::SettingsReset];
         state.on_event(Event {
-            launch: "shortcut-busy:999.1".to_string(),
+            launch: Launch::from("shortcut-busy:999.1".to_string()),
             what: What::Clicked,
         });
         assert_eq!(state.waiting, [Notification::SettingsReset]);
+    }
+
+    #[test]
+    fn a_launch_names_its_notification_its_process_and_its_count() {
+        // The text the notifications already in the notification center carry: it never changes.
+        let launch = Launch::new(Notification::ShortcutBusy, 4321, 7);
+        assert_eq!(launch.as_str(), "shortcut-busy:4321.7");
+        assert_eq!(launch.notification(), Some(Notification::ShortcutBusy));
+    }
+
+    #[test]
+    fn every_notification_comes_back_from_its_launch() {
+        for notification in EVERY_NOTIFICATION {
+            assert_eq!(
+                Launch::new(notification, 1, 1).notification(),
+                Some(notification)
+            );
+        }
+    }
+
+    #[test]
+    fn a_launch_an_earlier_screengauge_gave_still_names_its_notification() {
+        assert_eq!(
+            Launch::from("settings-reset:999.3".to_string()).notification(),
+            Some(Notification::SettingsReset)
+        );
+        // Only the key counts, so a launch without the process and count names it too.
+        assert_eq!(
+            Launch::from("settings-reset".to_string()).notification(),
+            Some(Notification::SettingsReset)
+        );
+    }
+
+    #[test]
+    fn a_launch_of_no_notification_names_none() {
+        assert_eq!(
+            Launch::from("color-copied:999.3".to_string()).notification(),
+            None
+        );
     }
 
     #[test]

@@ -16,7 +16,7 @@ use windows::Win32::UI::Notifications::{
 };
 use windows::core::{BOOL, Error, GUID, IUnknown, Interface, PCWSTR, Ref, implement};
 
-use super::{Event, What, report};
+use super::{Event, Launch, What, report};
 
 thread_local! {
     /// The registration of the class, on the resident window's thread, from startup until exit.
@@ -66,7 +66,7 @@ impl INotificationActivationCallback_Impl for Callback_Impl {
         let launch =
             unsafe { launch.to_string() }.map_err(|e| Error::new(E_INVALIDARG, e.to_string()))?;
         report(Event {
-            launch,
+            launch: Launch::from(launch),
             what: What::Clicked,
         })
     }

@@ -3,7 +3,6 @@
 //! package declares them in its manifest (`packaging/msix/AppxManifest.xml`, WPC-334), so it writes nothing in the
 //! registry, and goes by the package's AppUserModelID.
 
-use std::cell::RefCell;
 use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -22,7 +21,7 @@ use windows::Win32::System::Registry::{
 };
 use windows::core::{Error, GUID, HSTRING, Ref};
 
-use super::{Dismissal, Event, Notification, Toast, What, report};
+use super::{Dismissal, Event, Handed, Notification, What, report};
 use crate::package::{self, AppCopy};
 use crate::{settings_file, tray};
 
@@ -95,18 +94,20 @@ const ICONS: [(i32, &[u8]); 8] = [
     ),
 ];
 
-thread_local! {
-    /// The latest notification of each kind shown, kept until the next of its kind replaces it, so its events still
-    /// come once Windows is done with it.
-    static SHOWN: RefCell<Vec<(Notification, ToastNotification)>> = const { RefCell::new(Vec::new()) };
+/// Where the click of a notification goes, for the installer copy's registration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Clicks {
+    /// To the activator, which Windows starts the running `.exe` for when ScreenGauge is closed.
+    ToActivator,
+    /// Nowhere, as the activator couldn't be registered: a click in the notification center only closes the
+    /// notification (WPC-347, scenario s6).
+    CloseOnly,
 }
 
-/// Registers the installer copy's AppUserModelID, with ScreenGauge's name and the app icon, for the signed-in user.
-/// With `activator`, the click of a notification goes to the activator, which Windows starts the running `.exe` for
-/// when ScreenGauge is closed. Without it, a click in the notification center would only close the notification
-/// (WPC-347, scenario s6). The Store copy registers nothing here: its package declares all of it, and the header shows
-/// the package's name and icon.
-pub fn register(copy: AppCopy, activator: bool) -> windows::core::Result<()> {
+/// Registers the installer copy's AppUserModelID, with ScreenGauge's name and the app icon, for the signed-in user, and
+/// where `clicks` go. The Store copy registers nothing here: its package declares all of it, and the header shows the
+/// package's name and icon.
+pub fn register(copy: AppCopy, clicks: Clicks) -> windows::core::Result<()> {
     if copy == AppCopy::Store {
         return Ok(());
     }
@@ -117,7 +118,7 @@ pub fn register(copy: AppCopy, activator: bool) -> windows::core::Result<()> {
         // Windows then shows a generic icon; the notification still shows.
         Err(e) => crate::log::failure("notification: writing the icon", &e),
     }
-    if !activator {
+    if clicks == Clicks::CloseOnly {
         // An earlier start's activator would take the clicks with no process to answer them.
         return delete_value(&key, "CustomActivator");
     }
@@ -220,21 +221,22 @@ fn fnv1a(bytes: &[u8]) -> u32 {
     })
 }
 
-/// Hands `toast` to Windows, which shows it in the corner of the screen, or only in the notification center when
-/// "Do not disturb" is on or a full-screen program is in front. What becomes of it is reported to the resident window.
-pub fn show(toast: &Toast) -> windows::core::Result<()> {
+/// Hands `handed` to Windows, which shows it in the corner of the screen, or only in the notification center when
+/// "Do not disturb" is on or a full-screen program is in front. What becomes of it is reported to the resident window,
+/// for as long as the notification returned is kept.
+pub fn show(handed: &Handed) -> windows::core::Result<ToastNotification> {
     let xml = XmlDocument::new()?;
     xml.LoadXml(&HSTRING::from(content(
-        &toast.notification.text()?,
-        &toast.launch,
+        &handed.notification.text()?,
+        handed.launch.as_str(),
     )))?;
     let shown = ToastNotification::CreateToastNotification(&xml)?;
-    shown.SetTag(&HSTRING::from(toast.notification.key()))?;
+    shown.SetTag(&HSTRING::from(handed.notification.key()))?;
     shown.SetGroup(&HSTRING::from(GROUP))?;
 
     // The events come on a thread of Windows', so they carry only what they need, and the time is read there: the
     // resident window's thread may be busy (a photo, Save As).
-    let launch = toast.launch.clone();
+    let launch = handed.launch.clone();
     let showing = Instant::now();
     shown.Dismissed(&TypedEventHandler::new(
         move |_, args: Ref<ToastDismissedEventArgs>| {
@@ -257,7 +259,7 @@ pub fn show(toast: &Toast) -> windows::core::Result<()> {
             })
         },
     ))?;
-    let launch = toast.launch.clone();
+    let launch = handed.launch.clone();
     shown.Failed(&TypedEventHandler::new(
         move |_, args: Ref<ToastFailedEventArgs>| {
             let error = args.ok()?.ErrorCode()?;
@@ -270,11 +272,7 @@ pub fn show(toast: &Toast) -> windows::core::Result<()> {
 
     let aumid = aumid(package::this_copy()?)?;
     ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(aumid))?.Show(&shown)?;
-    SHOWN.with_borrow_mut(|kept| {
-        kept.retain(|(kind, _)| *kind != toast.notification);
-        kept.push((toast.notification, shown));
-    });
-    Ok(())
+    Ok(shown)
 }
 
 /// Takes `notification` out of the notification center, if it is there.
@@ -408,7 +406,7 @@ mod tests {
         // On the owner's computer the installer copy's values are there, and must stay as they were; on CI they are
         // missing, and must stay missing.
         let before = registrations();
-        register(AppCopy::Store, true).expect("nothing to fail");
+        register(AppCopy::Store, Clicks::ToActivator).expect("nothing to fail");
         assert_eq!(registrations(), before);
     }
 }
