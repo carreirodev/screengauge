@@ -52,7 +52,7 @@ Pelo terminal, o winget instala este mesmo instalador, e não o app da Microsoft
 winget install WPCSolutions.ScreenGauge
 ```
 
-Depois, `winget upgrade WPCSolutions.ScreenGauge` instala cada versão nova. O Windows pode mostrar o mesmo alerta de instalador não assinado: escolha **Mais informações** e depois **Executar assim mesmo**. O winget roda o instalador sem as janelas dele, então não para para avisar de uma cópia da Microsoft Store; acrescente `-i` para ver o instalador, com esse aviso.
+Depois, `winget upgrade WPCSolutions.ScreenGauge` instala cada versão nova quando ela chega ao winget, o que pode levar alguns dias depois de ela sair no GitHub. O Windows pode mostrar o mesmo alerta de instalador não assinado: escolha **Mais informações** e depois **Executar assim mesmo**. O winget roda o instalador sem as janelas dele, então não para para avisar de uma cópia da Microsoft Store; acrescente `-i` para ver o instalador, com esse aviso.
 
 ## Como usar
 

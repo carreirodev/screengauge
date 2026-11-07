@@ -52,7 +52,7 @@ From a terminal, winget installs this same installer, not the Microsoft Store ap
 winget install WPCSolutions.ScreenGauge
 ```
 
-`winget upgrade WPCSolutions.ScreenGauge` then installs each new version. Windows may show the same warning about an unsigned installer: choose **More info**, then **Run anyway**. winget runs the installer without its windows, so it doesn't stop to tell you about a copy from the Microsoft Store; add `-i` to see the installer, that warning included.
+`winget upgrade WPCSolutions.ScreenGauge` then installs each new version, once it reaches winget, which can take some days after it's on GitHub. Windows may show the same warning about an unsigned installer: choose **More info**, then **Run anyway**. winget runs the installer without its windows, so it doesn't stop to tell you about a copy from the Microsoft Store; add `-i` to see the installer, that warning included.
 
 ## Using ScreenGauge
 
