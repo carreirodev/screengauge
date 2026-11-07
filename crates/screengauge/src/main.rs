@@ -49,6 +49,8 @@ mod tray_menu;
 mod typeset;
 mod update_check;
 mod win32;
+#[cfg(test)]
+mod winget;
 
 use std::process::ExitCode;
 

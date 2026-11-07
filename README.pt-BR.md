@@ -46,6 +46,14 @@ Cada versão na [página de Releases](https://github.com/carreirodev/screengauge
 
 Esta cópia não se atualiza sozinha: **Check for updates**, no rodapé de Settings, avisa quando sai uma versão nova. Se o ScreenGauge já estiver instalado pela Microsoft Store, o instalador avisa e recomenda cancelar, para você não ficar com duas cópias.
 
+Pelo terminal, o winget instala este mesmo instalador, e não o app da Microsoft Store:
+
+```
+winget install WPCSolutions.ScreenGauge
+```
+
+Depois, `winget upgrade WPCSolutions.ScreenGauge` instala cada versão nova. O winget roda o instalador sem as janelas dele, então não para para avisar de uma cópia da Microsoft Store; acrescente `-i` para ver o instalador, com esse aviso.
+
 ## Como usar
 
 - **Abra as ferramentas** com Win + Shift + X, com um clique no ícone do ScreenGauge perto do relógio ou pelo ScreenGauge no menu Iniciar. O atalho pode ser trocado em Settings.

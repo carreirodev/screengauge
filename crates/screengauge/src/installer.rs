@@ -15,13 +15,13 @@ use crate::notification::{self, INSTALLER_COPY_AUMID, INSTALLER_COPY_CLSID, STOR
 use crate::package::manifest;
 use crate::{StartedBy, resident, settings_file, start_with_windows, started_by};
 
-const SCRIPT: &str = include_str!("../../../packaging/inno/ScreenGauge.iss");
+pub(crate) const SCRIPT: &str = include_str!("../../../packaging/inno/ScreenGauge.iss");
 
 /// The installer copy's `AppId`, which names its uninstall entry,
 /// `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\{1DF55A92-C67C-41D9-B304-B2442423D407}_is1`. Never
 /// changed: a new one would install a second ScreenGauge next to the first, and the Store copy looks for this entry
 /// to tell whether the installer copy is installed too (WPC-339).
-const APP_ID: &str = "{1DF55A92-C67C-41D9-B304-B2442423D407}";
+pub(crate) const APP_ID: &str = "{1DF55A92-C67C-41D9-B304-B2442423D407}";
 
 /// The lines of `[name]`, without blank lines and comments.
 fn section(name: &str) -> Vec<&'static str> {
@@ -37,7 +37,7 @@ fn section(name: &str) -> Vec<&'static str> {
 }
 
 /// The value of `[Setup]`'s `directive`, which must be set once.
-fn setup(directive: &str) -> String {
+pub(crate) fn setup(directive: &str) -> String {
     let found: Vec<_> = section("Setup")
         .into_iter()
         .filter_map(|line| line.split_once('='))

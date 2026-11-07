@@ -46,6 +46,14 @@ Each version on the [Releases page](https://github.com/carreirodev/screengauge/r
 
 This copy doesn't update itself: **Check for updates**, at the bottom of Settings, tells you when a new version is out. If ScreenGauge is already installed from the Microsoft Store, the installer tells you and recommends canceling, so you don't end up with two copies.
 
+From a terminal, winget installs this same installer, not the Microsoft Store app:
+
+```
+winget install WPCSolutions.ScreenGauge
+```
+
+`winget upgrade WPCSolutions.ScreenGauge` then installs each new version. winget runs the installer without its windows, so it doesn't stop to tell you about a copy from the Microsoft Store; add `-i` to see the installer, that warning included.
+
 ## Using ScreenGauge
 
 - **Open the tools** with Win + Shift + X, a click on ScreenGauge's icon next to the clock, or ScreenGauge in the Start menu. You can change the shortcut in Settings.
