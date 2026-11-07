@@ -16,8 +16,9 @@ the Store.
 | `WPCSolutions.ScreenGauge.installer.yaml` | The installer: Inno Setup, for the user alone, x64, Windows 11 (`10.0.22000.0`) and later, its URL and SHA-256, and the entry it writes in Installed apps |
 | `WPCSolutions.ScreenGauge.locale.en-US.yaml` | The package's page: name, publisher, license, descriptions, links, moniker `screengauge` and tags |
 
-The tests in `crates/screengauge/src/winget.rs` hold every version's files to the installer they describe: the package
-identifier is the Store copy manifest's name, the product code is the Inno Setup script's `AppId` followed by `_is1`,
+The tests in `crates/screengauge/src/winget.rs` check that every version's files name the package, the Store copy
+manifest's name, and their own version. They hold the newest version's files to the installer they describe, since an
+older version's are what was submitted then: the product code is the Inno Setup script's `AppId` followed by `_is1`,
 the scope, architecture and minimum Windows are the script's, the URL is the version's release with the name the
 script gives the installer, the version in Installed apps is the version with a fourth part of 0, and the short
 description and privacy policy are the Store page's and the README's. The SHA-256 is the published installer's: builds
@@ -71,6 +72,7 @@ Read on 2026-11-07, at microsoft/winget-pkgs commit 6922bc0 and microsoft/winget
 - The validation's steps: URL, scans, install as a standard user, and `inno` rather than `exe`:
   https://github.com/microsoft/winget-pkgs/blob/master/doc/Validation.md
 - Moderation, with no stated review time: https://github.com/microsoft/winget-pkgs/blob/master/doc/Moderation.md
+- A merged package reaching winget within about an hour: https://github.com/microsoft/winget-pkgs/blob/master/doc/FAQ.md
 - Policies: only MSIX installers must be signed; 1.5.1 and 1.5.2 on personal information:
   https://github.com/microsoft/winget-pkgs/blob/master/doc/Policies.md and
   https://learn.microsoft.com/en-us/windows/package-manager/package/windows-package-manager-policies
