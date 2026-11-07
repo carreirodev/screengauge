@@ -34,8 +34,16 @@ winget passes Inno Setup's own switches (winget-cli's `ManifestCommon.cpp`):
 | `winget install WPCSolutions.ScreenGauge --silent` | `/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART` | Not shown, as above |
 | `winget install WPCSolutions.ScreenGauge -i` | none: the installer's windows | Shown, with Cancel the default |
 
-Setup closes a ScreenGauge that runs from the installed folder before installing over it, so `winget upgrade` needs
-nothing more. Canceling the box ends Setup with exit code 1, which winget reports as a failed install: it reads only 2
+winget marks the installer it downloads as coming from the internet (zone 3), so Windows' SmartScreen warns about the
+unsigned installer before it starts, in every mode: the install waits for More info, then Run anyway. Setup closes a
+ScreenGauge that runs from the installed folder before installing over it, so `winget upgrade` needs nothing more.
+
+Checked on 2026-11-07 with winget 1.29.380, installing these manifests from the folder (`LocalManifestFiles` on, as
+administrator, then off again): after SmartScreen, winget passed `/SP- /SILENT /SUPPRESSMSGBOXES /NORESTART`, Setup
+installed with no window and didn't open ScreenGauge, Installed apps showed ScreenGauge, 1.0.0.0, WPC Solutions, and
+`winget uninstall --manifest` found the installer copy by its product code. Before the package is in winget,
+`winget list --name ScreenGauge` matched the installer copy to the Store's `9PGNSRZ2BPJ2` by its name, and
+`winget upgrade` offered nothing. Canceling the box ends Setup with exit code 1, which winget reports as a failed install: it reads only 2
 and 5 as canceled by the user.
 
 ## Check a version's manifests
